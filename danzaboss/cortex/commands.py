@@ -1,0 +1,201 @@
+"""`danza cortex` command group — the CLI surface agents and hooks call (C1).
+
+Design rules:
+  * hook subcommands FAIL OPEN (stderr + exit 0) — a CORTEX bug never bricks
+    a session; same discipline as cli.py's guard hook.
+  * non-hook subcommands are normal CLI: JSON out, nonzero exit on user error.
+  * the store is repo-scoped: <cwd>/.danza/cortex/cortex.db
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from typing import Optional, TextIO
+
+from .events import CaptureLog
+from .extract import draft_observations
+from .inject import build_context
+from .observation import Observation
+from .sqlite_backend import SqliteBackend
+from .store import ObservationStore
+from ..hooks.gates import distillation_gate
+
+
+def db_path(root: str) -> str:
+    return os.path.join(root, ".danza", "cortex", "cortex.db")
+
+
+def _project(root: str) -> str:
+    return os.path.basename(os.path.abspath(root))
+
+
+def _read_json(stdin: TextIO) -> dict:
+    raw = stdin.read()
+    return json.loads(raw) if raw.strip() else {}
+
+
+# ---- hook handlers (fail open) -----------------------------------------------
+
+def _hook_session_start(root: str, payload: dict) -> int:
+    sid = payload.get("session_id", "unknown")
+    log = CaptureLog(db_path(root))
+    log.open_session(sid, _project(root), environment="claude-code")
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    block = build_context(store, _project(root), stats=log.stats(_project(root)))
+    if block:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "SessionStart", "additionalContext": block}}))
+    return 0
+
+
+def _hook_post_tool_use(root: str, payload: dict) -> int:
+    sid = payload.get("session_id", "unknown")
+    ti = payload.get("tool_input", {}) or {}
+    resp = payload.get("tool_response", {}) or {}
+    outcome = ""
+    if isinstance(resp, dict):
+        outcome = str(resp.get("success", ""))[:200]
+    log = CaptureLog(db_path(root))
+    log.open_session(sid, _project(root))  # idempotent safety net
+    log.record_event(sid, payload.get("tool_name", ""),
+                     file_path=ti.get("file_path") or ti.get("path") or "",
+                     command=ti.get("command", ""), outcome=outcome)
+    return 0
+
+
+def _hook_stop(root: str, payload: dict) -> int:
+    sid = payload.get("session_id", "unknown")
+    log = CaptureLog(db_path(root))
+    sess = log.session(sid)
+    if sess is None:
+        return 0  # nothing captured -> nothing to gate
+    pending = log.pending(sid)
+    decision = distillation_gate(len(pending), sess["observations_written"],
+                                 bool(sess["gate_blocked"]))
+    if not decision.allow:
+        log.mark_gate_blocked(sid)
+        print(json.dumps({"decision": "block", "reason": decision.reason}))
+        return 0
+    if pending and sess["observations_written"] == 0:
+        # tier-2 floor: gate already blocked once (or never applied) -> draft
+        store = ObservationStore(SqliteBackend(db_path(root)))
+        for d in draft_observations(pending, _project(root)):
+            store.upsert(d)
+    log.mark_processed(sid)
+    log.end_session(sid)
+    return 0
+
+
+_HOOKS = {"session-start": _hook_session_start,
+          "post-tool-use": _hook_post_tool_use,
+          "stop": _hook_stop}
+
+
+def _cmd_hook(argv: list[str], root: str, stdin: TextIO) -> int:
+    event = argv[0] if argv else ""
+    handler = _HOOKS.get(event)
+    if handler is None:
+        print(f"unknown cortex hook event: {event!r}", file=sys.stderr)
+        return 0  # fail open even on bad wiring
+    try:
+        return handler(root, _read_json(stdin))
+    except Exception as e:  # noqa: BLE001 — fail open by design
+        print(f"cortex hook internal error (failing open): {e}", file=sys.stderr)
+        return 0
+
+
+# ---- agent-facing commands -----------------------------------------------------
+
+def _cmd_observe(argv: list[str], root: str, stdin: TextIO) -> int:
+    session_id = None
+    if "--session" in argv:
+        session_id = argv[argv.index("--session") + 1]
+    log = CaptureLog(db_path(root))
+    if "--nothing-meaningful" in argv:
+        if session_id:
+            log.mark_processed(session_id)
+            log.mark_gate_blocked(session_id)  # gate passes on next stop
+        print(json.dumps({"status": "marked", "session": session_id}))
+        return 0
+    try:
+        payload = _read_json(stdin)
+    except json.JSONDecodeError as e:
+        print(f"observe: invalid JSON on stdin: {e}", file=sys.stderr)
+        return 2
+    items = payload if isinstance(payload, list) else [payload]
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    stored = []
+    for item in items:
+        item.setdefault("project", _project(root))
+        try:
+            obs = Observation(**item)
+        except TypeError as e:
+            print(f"observe: bad observation fields: {e}", file=sys.stderr)
+            return 2
+        stored.append(store.upsert(obs).id)
+    if session_id:
+        log.note_observations(session_id, len(stored))
+        log.mark_processed(session_id)
+    print(json.dumps({"stored": stored}))
+    return 0
+
+
+def _cmd_get(argv: list[str], root: str, stdin: TextIO) -> int:
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    out = []
+    for oid in argv:
+        o = store.get(oid)
+        if o:
+            store.record_use(oid)
+            out.append(o.to_row())
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def _cmd_search(argv: list[str], root: str, stdin: TextIO) -> int:
+    text = " ".join(argv)
+    be = SqliteBackend(db_path(root))
+    results = be.search(text, project=_project(root))
+    print(json.dumps([{"id": o.id, "type": o.type, "title": o.title,
+                       "importance": o.importance, "confidence": o.confidence}
+                      for o in results], indent=2))
+    return 0
+
+
+def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    log = CaptureLog(db_path(root))
+    print(build_context(store, _project(root), stats=log.stats(_project(root))))
+    return 0
+
+
+def _cmd_age(argv: list[str], root: str, stdin: TextIO) -> int:
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    print(json.dumps(store.age()))
+    return 0
+
+
+def _cmd_stats(argv: list[str], root: str, stdin: TextIO) -> int:
+    log = CaptureLog(db_path(root))
+    s = log.stats(_project(root))
+    s["observations_stored"] = len(
+        ObservationStore(SqliteBackend(db_path(root))).backend.all(_project(root)))
+    print(json.dumps(s, indent=2))
+    return 0
+
+
+_COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
+             "search": _cmd_search, "context": _cmd_context,
+             "age": _cmd_age, "stats": _cmd_stats}
+
+
+def main(argv: list[str], *, root: Optional[str] = None,
+         stdin: Optional[TextIO] = None) -> int:
+    root = root or os.getcwd()
+    stdin = stdin if stdin is not None else sys.stdin
+    if not argv or argv[0] not in _COMMANDS:
+        print("danza cortex <hook|observe|get|search|context|age|stats> ...",
+              file=sys.stderr)
+        return 2
+    return _COMMANDS[argv[0]](argv[1:], root, stdin)

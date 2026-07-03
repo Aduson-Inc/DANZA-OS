@@ -6,6 +6,8 @@ Commands:
   danzaboss.cli selftest                        run the cold-start harness
   danzaboss.cli hook pretooluse                 Claude Code PreToolUse guard (reads CC JSON on stdin)
   danzaboss.cli hook stop                       Claude Code Stop hook
+  danzaboss.cli cortex <hook|observe|get|search|context|age|stats>
+                                                CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
 """
@@ -14,6 +16,7 @@ from __future__ import annotations
 import json
 import sys
 
+from .cortex import commands as cortex_commands
 from .runtime.scan import profile_repo
 from .runtime.verify import run_verification
 from .selftest.harness import run_cold_start
@@ -103,8 +106,13 @@ def _cmd_hook(argv: list[str]) -> int:
         return _emit("allow")
 
 
+def _cmd_cortex(argv: list[str]) -> int:
+    return cortex_commands.main(argv)
+
+
 _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
-             "selftest": _cmd_selftest, "hook": _cmd_hook}
+             "selftest": _cmd_selftest, "hook": _cmd_hook,
+             "cortex": _cmd_cortex}
 
 
 def main(argv: list[str] | None = None) -> int:

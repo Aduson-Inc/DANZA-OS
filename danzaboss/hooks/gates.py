@@ -49,3 +49,22 @@ def regression_gate(rec: TurnRecord) -> Decision:
 def run_all_gates(rec: TurnRecord) -> list[Decision]:
     """Run every end-of-turn gate; caller blocks handoff if any denied."""
     return [anti_theatre_gate(rec), verify_before_done_gate(rec), regression_gate(rec)]
+
+
+# -- CORTEX distillation gate (spec 2026-07-03, section 4.2) ------------------
+def distillation_gate(pending_events: int, observations_written: int,
+                      already_blocked: bool) -> Decision:
+    """Turn knowledge must be distilled before the session may stop. Blocks at
+    most once per session: after one block (or any distillation) it passes, and
+    the caller runs the deterministic floor extractor instead (Tier 2). Fed
+    from CaptureLog counts by the cortex CLI, not from TurnRecord."""
+    hook = "distillation_gate"
+    if pending_events == 0 or observations_written > 0 or already_blocked:
+        return Decision.ok(hook)
+    return Decision.deny(
+        hook,
+        f"{pending_events} captured events not distilled. Write what this session "
+        "learned via `danza cortex observe` (JSON on stdin: title, summary, type, "
+        "reasoning, when_relevant/when_not_relevant), or run "
+        "`danza cortex observe --nothing-meaningful` if nothing durable happened. "
+        "Then stop again.")
