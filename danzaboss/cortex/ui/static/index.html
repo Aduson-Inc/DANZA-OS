@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CORTEX — DANZA OS memory</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpolygon points='24,4 30,16 19,38 10,38' fill='%23c8102e'/%3E%3Cpolygon points='27,18 38,38 30,38 23,26' fill='%23c8102e'/%3E%3Cpolygon points='33,6 44,26 37,26 29,12' fill='%23e8354f'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<aside class="rail">
+  <div class="mark" id="mark" title="CORTEX">
+    <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+      <polygon points="24,4 30,16 19,38 10,38" fill="var(--crimson)"/>
+      <polygon points="27,18 38,38 30,38 23,26" fill="var(--crimson)"/>
+      <polygon points="33,6 44,26 37,26 29,12" fill="var(--ember)"/>
+    </svg>
+  </div>
+  <nav>
+    <button class="nav-btn active" data-view="feed">Feed</button>
+    <button class="nav-btn" data-view="sessions">Sessions</button>
+    <button class="nav-btn" data-view="stats">Stats</button>
+    <button class="nav-btn" data-view="settings">Settings</button>
+  </nav>
+  <div class="rail-foot mono">:33000</div>
+</aside>
+
+<main class="stage">
+  <header class="topbar">
+    <h1 class="wordmark">CORTEX</h1>
+    <span class="project mono" id="project-name"></span>
+    <div class="live" id="live-dot" title="live — updates as observations land">
+      <span class="live-tri"></span><span class="live-label">live</span>
+    </div>
+    <input id="search" class="search" type="search"
+           placeholder="Search memory — try a file, concept, or decision"
+           autocomplete="off">
+  </header>
+
+  <!-- FEED -->
+  <section class="view" id="view-feed">
+    <div class="filters" id="filters">
+      <button class="chip active" data-type="">all</button>
+      <button class="chip" data-type="decision">decision</button>
+      <button class="chip" data-type="bug_fix">bug fix</button>
+      <button class="chip" data-type="lesson">lesson</button>
+      <button class="chip" data-type="convention">convention</button>
+      <button class="chip" data-type="impl_detail">detail</button>
+      <button class="chip" data-type="security">security</button>
+      <button class="chip" data-type="milestone">milestone</button>
+      <button class="chip" data-type="limitation">limitation</button>
+    </div>
+    <div class="feed" id="feed"></div>
+    <div class="empty" id="feed-empty" hidden>
+      <p>No memories yet.</p>
+      <p class="dim">Work a session and stop — CORTEX distills what mattered.
+      Or write one now: <code>danza cortex observe</code></p>
+    </div>
+  </section>
+
+  <!-- SESSIONS -->
+  <section class="view" id="view-sessions" hidden>
+    <table class="sessions-table">
+      <thead><tr><th>session</th><th>status</th><th>started</th>
+        <th class="num">events</th><th class="num">distilled</th><th>gate</th></tr></thead>
+      <tbody id="sessions-body"></tbody>
+    </table>
+  </section>
+
+  <!-- STATS -->
+  <section class="view" id="view-stats" hidden>
+    <div class="stat-grid" id="stat-grid"></div>
+    <h2 class="section-label">Memory by type</h2>
+    <div class="bars" id="type-bars"></div>
+    <h2 class="section-label">Memory by importance</h2>
+    <div class="bars" id="importance-bars"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="view" id="view-settings" hidden>
+    <form class="settings-form" id="settings-form">
+      <h2 class="section-label">Session-start injection</h2>
+      <label>Full observations injected
+        <input type="number" name="max_full" min="0" max="50"></label>
+      <label>Token ceiling for injected bodies
+        <input type="number" name="token_ceiling" min="100" max="20000" step="100"></label>
+      <h2 class="section-label">Display</h2>
+      <label class="row">Show token economics
+        <input type="checkbox" name="show_economics"></label>
+      <h2 class="section-label">Server</h2>
+      <label>Port (takes effect on restart)
+        <input type="number" name="port" min="1024" max="65535"></label>
+      <button type="submit" class="save-btn">Save settings</button>
+      <span class="save-note mono" id="save-note"></span>
+    </form>
+    <p class="dim settings-foot">Memory itself is agent-governed — this page never
+    edits observations. To re-lock <span class="mono">.claude/</span> writes, delete
+    <span class="mono">.danza/runtime/claude-approval</span>.</p>
+  </section>
+
+  <!-- DETAIL DRAWER -->
+  <aside class="drawer" id="drawer" hidden>
+    <button class="drawer-close" id="drawer-close" aria-label="Close detail">×</button>
+    <div id="drawer-body"></div>
+  </aside>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

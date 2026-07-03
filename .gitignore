@@ -3,3 +3,5 @@ __pycache__/
 .danza/cortex/*.db*
 .pytest_cache/
 .danza/runtime/claude-approval
+.playwright-mcp/
+nohup.out

@@ -185,9 +185,16 @@ def _cmd_stats(argv: list[str], root: str, stdin: TextIO) -> int:
     return 0
 
 
+def _cmd_ui(argv: list[str], root: str, stdin: TextIO) -> int:
+    from .ui.server import serve  # local import: UI is optional at runtime
+    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else None
+    serve(root, port=port)
+    return 0
+
+
 _COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
              "search": _cmd_search, "context": _cmd_context,
-             "age": _cmd_age, "stats": _cmd_stats}
+             "age": _cmd_age, "stats": _cmd_stats, "ui": _cmd_ui}
 
 
 def main(argv: list[str], *, root: Optional[str] = None,
@@ -195,7 +202,7 @@ def main(argv: list[str], *, root: Optional[str] = None,
     root = root or os.getcwd()
     stdin = stdin if stdin is not None else sys.stdin
     if not argv or argv[0] not in _COMMANDS:
-        print("danza cortex <hook|observe|get|search|context|age|stats> ...",
+        print("danza cortex <hook|observe|get|search|context|age|stats|ui> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:], root, stdin)
