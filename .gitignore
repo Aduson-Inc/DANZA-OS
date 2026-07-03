@@ -6,3 +6,5 @@ __pycache__/
 .playwright-mcp/
 nohup.out
 .danza/cortex/ui-settings.json
+.claude/settings.local.json
+.claude/**/.danza/
