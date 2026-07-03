@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DANZABOSS team-state",
+  "description": "Machine-checkable source of truth for turn ownership and execution mode (Constitution Rule 45).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mode", "current_boss", "turn_number",
+               "features_completed_this_turn", "max_features_per_turn",
+               "handoff_required", "status"],
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "mode": {"enum": ["continuous", "relay"]},
+    "current_boss": {"type": "string", "minLength": 1},
+    "previous_boss": {"type": ["string", "null"]},
+    "turn_number": {"type": "integer", "minimum": 0},
+    "features_completed_this_turn": {"type": "integer", "minimum": 0},
+    "max_features_per_turn": {"type": ["integer", "null"], "minimum": 1},
+    "handoff_required": {"type": "boolean"},
+    "status": {"enum": ["ready", "in_progress", "blocked", "awaiting_handoff", "done"]},
+    "goal": {"type": ["string", "null"]},
+    "updated_at": {"type": ["string", "null"]}
+  }
+}

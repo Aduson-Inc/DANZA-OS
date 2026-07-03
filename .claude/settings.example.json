@@ -1,0 +1,12 @@
+{
+  "_comment": "EXAMPLE hook wiring for DANZA governance. Rename to settings.json to activate. VERIFY event names + stdin/return contract against the current Claude Code hooks docs first. The guard/gate logic lives in the tested danza/ package; this only routes events to it.",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Write|Edit|MultiEdit|Bash|Task|Agent",
+       "hooks": [{"type": "command", "command": "python3 -m danzaboss.cli hook pre_tool_use"}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 -m danzaboss.cli hook stop"}]}
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+"""Put the REPO ROOT on sys.path so `import danzaboss.<module>` resolves, and the
+tests dir so `import _bootstrap` works, regardless of where tests are launched."""
+import os
+import sys
+
+_TESTS = os.path.dirname(os.path.abspath(__file__))          # .../danza/tests
+_PKG = os.path.dirname(_TESTS)                                # .../danza
+_ROOT = os.path.dirname(_PKG)                                 # repo root (parent of danza)
+for p in (_ROOT, _TESTS):
+    if p not in sys.path:
+        sys.path.insert(0, p)

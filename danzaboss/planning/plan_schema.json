@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DANZABOSS plan",
+  "description": "Derived from spec.md. A tree of tasks; every leaf must carry a verification method (Upgrade #4).",
+  "type": "object",
+  "required": ["spec_ref", "tasks"],
+  "properties": {
+    "spec_ref": {"type": "string", "description": "path/hash of the spec this plan derives from"},
+    "tasks": {"type": "array", "items": {"$ref": "#/definitions/task"}}
+  },
+  "definitions": {
+    "task": {
+      "type": "object",
+      "required": ["id", "description"],
+      "properties": {
+        "id": {"type": "string"},
+        "description": {"type": "string"},
+        "verification": {
+          "type": ["object", "null"],
+          "required": ["kind", "detail"],
+          "properties": {
+            "kind": {"enum": ["automated_test", "command_output", "http_check", "schema_check", "manual_gate"]},
+            "detail": {"type": "string", "minLength": 1}
+          }
+        },
+        "subtasks": {"type": "array", "items": {"$ref": "#/definitions/task"}}
+      }
+    }
+  }
+}

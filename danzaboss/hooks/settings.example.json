@@ -1,0 +1,15 @@
+{
+  "_comment": "EXAMPLE Claude Code hooks wiring. VERIFY event names + return contract against the current Claude Code hooks docs before use; this is the integration surface, the guard/gate logic is in the tested Python modules.",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Write|Edit|Bash|Task",
+       "hooks": [{"type": "command", "command": "python3 -m danzaboss.hooks.cli pre_tool_use"}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 -m danzaboss.hooks.cli stop"}]}
+    ],
+    "SubagentStop": [
+      {"hooks": [{"type": "command", "command": "python3 -m danzaboss.hooks.cli record_subagent"}]}
+    ]
+  }
+}
