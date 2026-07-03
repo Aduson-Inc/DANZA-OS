@@ -125,5 +125,52 @@ class TestCortexCommands(unittest.TestCase):
         self.assertEqual(code, 0)  # never brick the session
 
 
+class TestGraphCommands(unittest.TestCase):
+    """danza cortex index rebuilds the graph; danza cortex graph queries it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        os.makedirs(os.path.join(self.root, "pkg"))
+        open(os.path.join(self.root, "pkg", "__init__.py"), "w").close()
+        with open(os.path.join(self.root, "pkg", "core.py"), "w") as fh:
+            fh.write("VALUE = 1\n")
+        with open(os.path.join(self.root, "pkg", "api.py"), "w") as fh:
+            fh.write("from pkg.core import VALUE\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_index_builds_graph_and_prints_stats(self):
+        code, out = run(["index"], self.root)
+        self.assertEqual(code, 0)
+        stats = json.loads(out)
+        self.assertGreaterEqual(stats["files"], 3)
+        self.assertEqual(stats["imports_resolved"], 1)
+        self.assertIn("observations", stats)   # link stage ran (no git is fine)
+
+    def test_graph_impact_after_index(self):
+        run(["index"], self.root)
+        code, out = run(["graph", "pkg/core.py", "--impact"], self.root)
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertEqual(data["mode"], "impact")
+        self.assertEqual(data["node"], "file:pkg/core.py")
+        self.assertIn({"id": "file:pkg/api.py", "depth": 1}, data["closure"])
+
+    def test_graph_neighbors_default_and_name_lookup(self):
+        run(["index"], self.root)
+        code, out = run(["graph", "file:pkg/api.py"], self.root)
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertIn(["file:pkg/core.py", "imports"], data["neighbors"]["out"])
+
+    def test_graph_unknown_node_exits_1(self):
+        run(["index"], self.root)
+        code, out = run(["graph", "no_such_thing_xyz"], self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("error", json.loads(out))
+
+
 if __name__ == "__main__":
     unittest.main()

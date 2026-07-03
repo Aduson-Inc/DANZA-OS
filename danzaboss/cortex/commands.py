@@ -263,6 +263,69 @@ def _cmd_stats(argv: list[str], root: str, stdin: TextIO) -> int:
     return 0
 
 
+def _cmd_index(argv: list[str], root: str, stdin: TextIO) -> int:
+    """danza cortex index [--commits N] — rebuild the knowledge graph for this
+    repo: scan files, ingest git history, link observations. Deterministic
+    rebuild (clear + rescan) so the graph never drifts from reality."""
+    from .git_intel import ingest_git, link_observations
+    from .graph import GraphStore
+    from .repo_intel import scan_repo
+    limit = 200
+    if "--commits" in argv:
+        limit = int(argv[argv.index("--commits") + 1])
+    graph = GraphStore(db_path(root))
+    project = _project(root)
+    graph.clear(project)
+    stats = scan_repo(root, project, graph)
+    stats.update(ingest_git(root, project, graph, limit=limit))
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    stats.update(link_observations(store, project, graph))
+    print(json.dumps(stats, indent=2))
+    return 0
+
+
+def _cmd_graph(argv: list[str], root: str, stdin: TextIO) -> int:
+    """danza cortex graph <node-id-or-name> [--impact] [--deps] [--depth N]
+    Default prints neighbors; --impact prints "what breaks if this changes"."""
+    from .graph import GraphStore
+
+    def take_opt(flag: str) -> Optional[str]:
+        if flag in argv:
+            i = argv.index(flag)
+            val = argv[i + 1]
+            del argv[i:i + 2]
+            return val
+        return None
+
+    depth = int(take_opt("--depth") or 4)
+    impact = "--impact" in argv
+    deps = "--deps" in argv
+    query = " ".join(a for a in argv if not a.startswith("--"))
+    if not query.strip():
+        print("graph: a node id or name is required", file=sys.stderr)
+        return 2
+    graph = GraphStore(db_path(root))
+    node = graph.node(query)
+    if node is None:
+        hits = graph.find(query)
+        if not hits:
+            print(json.dumps({"error": f"no node matches {query!r}"}))
+            return 1
+        node = hits[0]
+    if impact or deps:
+        closure = (graph.impact if impact else graph.dependencies)(
+            node.id, max_depth=depth)
+        print(json.dumps({"node": node.id,
+                          "mode": "impact" if impact else "dependencies",
+                          "count": len(closure),
+                          "closure": [{"id": i, "depth": d}
+                                      for i, d in closure]}, indent=2))
+    else:
+        print(json.dumps({"node": node.id,
+                          "neighbors": graph.neighbors(node.id)}, indent=2))
+    return 0
+
+
 def _cmd_ui(argv: list[str], root: str, stdin: TextIO) -> int:
     from .ui.server import serve  # local import: UI is optional at runtime
     port = int(argv[argv.index("--port") + 1]) if "--port" in argv else None
@@ -273,7 +336,7 @@ def _cmd_ui(argv: list[str], root: str, stdin: TextIO) -> int:
 _COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
              "search": _cmd_search, "retrieve": _cmd_retrieve,
              "context": _cmd_context, "age": _cmd_age, "stats": _cmd_stats,
-             "ui": _cmd_ui}
+             "ui": _cmd_ui, "index": _cmd_index, "graph": _cmd_graph}
 
 
 def main(argv: list[str], *, root: Optional[str] = None,
@@ -281,7 +344,7 @@ def main(argv: list[str], *, root: Optional[str] = None,
     root = root or os.getcwd()
     stdin = stdin if stdin is not None else sys.stdin
     if not argv or argv[0] not in _COMMANDS:
-        print("danza cortex <hook|observe|get|search|retrieve|context|age|stats|ui> ...",
-              file=sys.stderr)
+        print("danza cortex <hook|observe|get|search|retrieve|context|age|stats"
+              "|ui|index|graph> ...", file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:], root, stdin)
