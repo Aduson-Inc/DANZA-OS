@@ -5,3 +5,4 @@ __pycache__/
 .danza/runtime/claude-approval
 .playwright-mcp/
 nohup.out
+.danza/cortex/ui-settings.json
