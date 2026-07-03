@@ -82,3 +82,13 @@ Based on app type, select and apply:
 3. **Images don't block development.** Code around placeholders. User fills them in when ready.
 4. **Professional output.** Every app should look like a designer was involved.
 5. **Coordinate with Jonathan.** Design tokens feed directly into the code Jonathan writes.
+
+## CORTEX memory protocol
+
+Before starting work: run `danza cortex search "<your task keywords>"` and fetch
+relevant hits with `danza cortex get <id>`. Cite observation IDs as evidence in
+your report (Rule 43). Before reporting done: if you learned something durable
+(a decision, bug root-cause, convention, limitation), emit it as JSON to
+`danza cortex observe` — include `reasoning` (the why) and
+`when_relevant`/`when_not_relevant` triggers. Commands run with
+`PYTHONPATH=<repo-root> python3 -m danzaboss.cli cortex ...`.

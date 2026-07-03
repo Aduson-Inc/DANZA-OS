@@ -41,7 +41,7 @@ assume an online version is newer. Local files are authoritative.
   runtime/team-state.json    Machine-checkable turn state (Upgrade #2; created by kernel)
 danzaboss/                  THE BRAIN (promoted, authoritative) — Python, stdlib only, 124 tests
   kernel/ planning/ memory/ context/ security/ observability/ orchestration/ selftest/
-  cortex/                    CORTEX cognitive memory (observations, app-profile, store)
+  cortex/                    CORTEX cognitive memory (capture, store, FTS5, inject, extract, CLI)
   hooks/                     Governance guards + gates (capability, anti-theatre, verify, regression)
   research/                  Research squad: multisource collector, throttle, proposals, messaging
   runtime/                   scan (learn any repo) · verify (real tests) · runner
@@ -110,7 +110,10 @@ Each maps to one approved upgrade; all are unit-tested (`danzaboss/tests/`). Pat
 - **Start / take a turn:** trigger phrase **"Who's the Boss?"** → `SKILL.md` spawns
   `tony-d-orchestrator`, which runs the mandatory startup (mode detection, run log,
   turn lock, load constitution).
-- **Run the test suite:** `./danzaboss/run_tests.sh` (124 tests)
+- **Run the test suite:** `./danzaboss/run_tests.sh` (163 tests)
+- **CORTEX memory:** `PYTHONPATH=. python3 -m danzaboss.cli cortex <search|get|observe|context|stats>` —
+  repo-scoped cognitive memory at `.danza/cortex/cortex.db` (design:
+  `docs/superpowers/specs/2026-07-03-cortex-design.md`)
 - **Health-check:** `PYTHONPATH=. python3 -m danzaboss.cli selftest`
 - **Learn a target app:** `PYTHONPATH=. python3 -m danzaboss.cli scan <dir> --domain "..."`
 - **Verify a change:** `PYTHONPATH=. python3 -m danzaboss.cli verify "<test cmd>" <dir>`

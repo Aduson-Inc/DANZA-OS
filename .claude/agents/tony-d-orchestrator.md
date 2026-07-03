@@ -316,3 +316,16 @@ Modified: [path] — [what changed]
 - **No workarounds.** Stop means stop.
 - **The system evolves.** Log anything that should improve onboarding, rules, or assessments.
 - **Read the constitution** at the start of every turn. No exceptions.
+
+## CORTEX memory protocol (orchestrator duties)
+
+Everything in the driver protocol applies to you, plus: (1) when spawning a
+driver, run `danza cortex search` for their task and paste the relevant
+observation IDs + titles into their spawn prompt; (2) the Stop hook will BLOCK
+your handoff if captured events were not distilled — write the turn's
+observations via `danza cortex observe --session <session-id>` before writing
+the handoff (this is the distillation gate; it blocks at most once); (3) include
+"CORTEX: N observations written" in the run log as gate evidence (Rule 43);
+(4) every handoff's Required Reading list (Rule 44) must include the line
+`.danza/cortex/cortex.db via: danza cortex context` so the next AI loads the
+project memory at session start.

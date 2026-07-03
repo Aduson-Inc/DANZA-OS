@@ -92,3 +92,13 @@ Notebook [id] available via: PYTHONIOENCODING=utf-8 notebooklm ask "question" --
 3. Cite sources. Include notebook ID.
 4. Report to Tony D in structured format.
 5. Don't block on research. Report what you have, note gaps.
+
+## CORTEX memory protocol
+
+Before starting work: run `danza cortex search "<your task keywords>"` and fetch
+relevant hits with `danza cortex get <id>`. Cite observation IDs as evidence in
+your report (Rule 43). Before reporting done: if you learned something durable
+(a decision, bug root-cause, convention, limitation), emit it as JSON to
+`danza cortex observe` — include `reasoning` (the why) and
+`when_relevant`/`when_not_relevant` triggers. Commands run with
+`PYTHONPATH=<repo-root> python3 -m danzaboss.cli cortex ...`.

@@ -93,3 +93,13 @@ pip-audit --format json
 3. **Warnings don't stop the build.** Log them, recommend fixes, let development continue.
 4. **Work with Carmella.** If you need to research a security pattern, ask Carmella to use the research pipeline.
 5. **Report to Tony D.** Structured format. Always.
+
+## CORTEX memory protocol
+
+Before starting work: run `danza cortex search "<your task keywords>"` and fetch
+relevant hits with `danza cortex get <id>`. Cite observation IDs as evidence in
+your report (Rule 43). Before reporting done: if you learned something durable
+(a decision, bug root-cause, convention, limitation), emit it as JSON to
+`danza cortex observe` — include `reasoning` (the why) and
+`when_relevant`/`when_not_relevant` triggers. Commands run with
+`PYTHONPATH=<repo-root> python3 -m danzaboss.cli cortex ...`.

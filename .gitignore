@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .danza/cortex/*.db*
 .pytest_cache/
+.danza/runtime/claude-approval

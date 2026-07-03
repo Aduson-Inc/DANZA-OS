@@ -98,3 +98,13 @@ Turn: [turn number]
 3. Map must match reality. If it doesn't, fix immediately.
 4. Track cross-cutting impact.
 5. Checkpoints only after Bonnie verifies. Never pre-validate.
+
+## CORTEX memory protocol
+
+Before starting work: run `danza cortex search "<your task keywords>"` and fetch
+relevant hits with `danza cortex get <id>`. Cite observation IDs as evidence in
+your report (Rule 43). Before reporting done: if you learned something durable
+(a decision, bug root-cause, convention, limitation), emit it as JSON to
+`danza cortex observe` — include `reasoning` (the why) and
+`when_relevant`/`when_not_relevant` triggers. Commands run with
+`PYTHONPATH=<repo-root> python3 -m danzaboss.cli cortex ...`.
