@@ -16,6 +16,7 @@ from typing import Optional, TextIO
 from .events import CaptureLog
 from .extract import draft_observations
 from .inject import build_context
+from .intent import WorkspaceState
 from .observation import Observation
 from .sqlite_backend import SqliteBackend
 from .store import ObservationStore
@@ -163,6 +164,81 @@ def _cmd_search(argv: list[str], root: str, stdin: TextIO) -> int:
     return 0
 
 
+def workspace_snapshot(root: str) -> WorkspaceState:
+    """Cheap L0 snapshot for intent detection: branch from .git/HEAD (no
+    subprocess) + recent tool mix from the capture log's latest events."""
+    branch = ""
+    try:
+        with open(os.path.join(root, ".git", "HEAD"), encoding="utf-8") as fh:
+            head = fh.read().strip()
+        if head.startswith("ref:"):
+            branch = head.split("/", 2)[-1]
+    except OSError:
+        pass
+    tools: list[str] = []
+    commands: list[str] = []
+    changed: list[str] = []
+    try:
+        log = CaptureLog(db_path(root))
+        rows = log.conn.execute(
+            "SELECT tool, command, file_path FROM events "
+            "ORDER BY id DESC LIMIT 50").fetchall()
+        for r in rows:
+            tools.append(r["tool"])
+            if r["command"]:
+                commands.append(r["command"])
+            if r["file_path"] and r["file_path"] not in changed:
+                changed.append(r["file_path"])
+    except Exception:  # noqa: BLE001 — snapshot is best-effort by design
+        pass
+    return WorkspaceState(branch=branch, recent_tools=tools,
+                          recent_commands=commands, changed_files=changed)
+
+
+def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
+    """danza cortex retrieve "<prompt>" [--budget N] [--intent NAME]
+    [--types a,b] [--json | --explain]
+
+    Default output is the assembled context package (what an agent injects);
+    --explain prints the readable trace, --json the full machine trace.
+    """
+    from .explain import render, trace  # local: keep hook path imports lean
+    from .quality import build_package
+
+    def take_opt(flag: str) -> Optional[str]:
+        if flag in argv:
+            i = argv.index(flag)
+            val = argv[i + 1]
+            del argv[i:i + 2]
+            return val
+        return None
+
+    budget = int(take_opt("--budget") or 1500)
+    intent_override = take_opt("--intent")
+    types_arg = take_opt("--types")
+    types = [t.strip() for t in types_arg.split(",")] if types_arg else None
+    as_json = "--json" in argv
+    as_explain = "--explain" in argv
+    prompt = " ".join(a for a in argv if not a.startswith("--"))
+    if not prompt.strip():
+        print("retrieve: a prompt is required", file=sys.stderr)
+        return 2
+
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    bundle = build_package(store, prompt, _project(root), budget=budget,
+                           types=types, workspace=workspace_snapshot(root),
+                           intent_override=intent_override)
+    for item in bundle.package.items:
+        store.record_use(item.observation.id)
+    if as_json:
+        print(json.dumps(trace(bundle), indent=2))
+    elif as_explain:
+        print(render(bundle))
+    else:
+        print(bundle.package.render() or "(no relevant observations)")
+    return 0
+
+
 def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
     store = ObservationStore(SqliteBackend(db_path(root)))
     log = CaptureLog(db_path(root))
@@ -193,8 +269,9 @@ def _cmd_ui(argv: list[str], root: str, stdin: TextIO) -> int:
 
 
 _COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
-             "search": _cmd_search, "context": _cmd_context,
-             "age": _cmd_age, "stats": _cmd_stats, "ui": _cmd_ui}
+             "search": _cmd_search, "retrieve": _cmd_retrieve,
+             "context": _cmd_context, "age": _cmd_age, "stats": _cmd_stats,
+             "ui": _cmd_ui}
 
 
 def main(argv: list[str], *, root: Optional[str] = None,
@@ -202,7 +279,7 @@ def main(argv: list[str], *, root: Optional[str] = None,
     root = root or os.getcwd()
     stdin = stdin if stdin is not None else sys.stdin
     if not argv or argv[0] not in _COMMANDS:
-        print("danza cortex <hook|observe|get|search|context|age|stats|ui> ...",
+        print("danza cortex <hook|observe|get|search|retrieve|context|age|stats|ui> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:], root, stdin)

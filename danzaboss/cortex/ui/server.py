@@ -132,6 +132,8 @@ class CortexUIHandler(BaseHTTPRequestHandler):
                 self._api_stats()
             elif route == "/api/settings":
                 self._json(load_settings(self.root))
+            elif route == "/api/explain":
+                self._api_explain(q)
             elif route == "/api/events":
                 self._api_events()
             else:
@@ -204,6 +206,19 @@ class CortexUIHandler(BaseHTTPRequestHandler):
                   "observations_stored": sum(by_type.values()),
                   "read_tokens": read_tokens, "project": self.project})
         self._json(s)
+
+    def _api_explain(self, q: dict) -> None:
+        """Run the REAL C3 pipeline on a hypothetical prompt and return the
+        full trace — the explain playground is a window, not a simulation."""
+        from ..explain import trace as explain_trace
+        from ..quality import build_package
+        prompt = (q.get("prompt") or [""])[0]
+        if not prompt.strip():
+            self._json({"error": "prompt required"}, 400)
+            return
+        budget = int((q.get("budget") or ["1500"])[0])
+        bundle = build_package(self._store(), prompt, self.project, budget=budget)
+        self._json(explain_trace(bundle))
 
     def _api_events(self) -> None:
         """SSE: emit a refresh event whenever the store's change token moves."""

@@ -21,6 +21,7 @@
   </div>
   <nav>
     <button class="nav-btn active" data-view="feed">Feed</button>
+    <button class="nav-btn" data-view="explain">Explain</button>
     <button class="nav-btn" data-view="sessions">Sessions</button>
     <button class="nav-btn" data-view="stats">Stats</button>
     <button class="nav-btn" data-view="settings">Settings</button>
@@ -58,6 +59,24 @@
       <p>No memories yet.</p>
       <p class="dim">Work a session and stop — CORTEX distills what mattered.
       Or write one now: <code>danza cortex observe</code></p>
+    </div>
+  </section>
+
+  <!-- EXPLAIN PLAYGROUND -->
+  <section class="view" id="view-explain" hidden>
+    <form class="explain-form" id="explain-form">
+      <input id="explain-prompt" class="explain-input" type="text"
+             placeholder="Type a hypothetical prompt — watch the real retrieval pipeline run"
+             autocomplete="off">
+      <label class="explain-budget mono">budget
+        <input id="explain-budget" type="number" value="1500" min="100"
+               max="20000" step="100"></label>
+      <button type="submit" class="save-btn">Run</button>
+    </form>
+    <div class="explain-out" id="explain-out">
+      <p class="dim">The playground runs the actual C3 pipeline: intent detection,
+      per-signal rankings, RRF fusion, anti-relevance kills, budget assembly and
+      the quality gate — nothing is simulated.</p>
     </div>
   </section>
 

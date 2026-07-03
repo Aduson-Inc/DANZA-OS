@@ -67,6 +67,28 @@ def isolate(records: list[MemoryRecord], budget: int) -> list[MemoryRecord]:
 
 # Per-driver relevance profiles: which scopes and default queries matter to each
 # specialist. Keeps each driver's context tight and on-topic.
+# Per-driver CORTEX retrieval profiles (C3): each specialist gets a purpose-built,
+# budget-capped observation slice — Jonathan sees conventions/decisions scoped to
+# his task, Bonnie sees failure history, Billy sees the security trail. The intent
+# is forced (the driver's job IS the intent); types narrow the candidate pool.
+DRIVER_CORTEX: dict[str, dict] = {
+    "jonathan-builder":    {"intent": "write_code",
+                            "types": ["convention", "decision", "impl_detail", "api_behavior"]},
+    "samantha-mapper":     {"intent": "architecture",
+                            "types": ["decision", "impl_detail", "milestone", "convention"]},
+    "angela-auditor":      {"intent": "planning",
+                            "types": ["decision", "milestone", "lesson"]},
+    "bonnie-qa":           {"intent": "testing",
+                            "types": ["bug_fix", "root_cause", "limitation"]},
+    "carmella-researcher": {"intent": "learning",
+                            "types": ["lesson", "api_behavior", "dependency"]},
+    "hank-designer":       {"intent": "write_code",
+                            "types": ["convention", "decision"]},
+    "billy-security":      {"intent": "security",
+                            "types": ["security", "dependency", "decision"]},
+    "tony-d-orchestrator": {"intent": "planning", "types": None},
+}
+
 DRIVER_PROFILES: dict[str, dict] = {
     "jonathan-builder":     {"scopes": ("semantic", "procedural"), "hint": "code style patterns build order"},
     "samantha-mapper":      {"scopes": ("semantic", "episodic"),   "hint": "structure dependencies routes schema"},
@@ -80,13 +102,18 @@ DRIVER_PROFILES: dict[str, dict] = {
 
 
 class ContextPipeline:
-    def __init__(self, store: MemoryStore, processors: Optional[list[Processor]] = None):
+    def __init__(self, store: MemoryStore, processors: Optional[list[Processor]] = None,
+                 cortex_store=None, project: str = ""):
         self.store = store
         # default pipeline: compress then isolate (selection is the store query)
         self.processors: list[Processor] = processors or [compress, isolate]
+        # optional CORTEX source (C3): an ObservationStore bound to this repo.
+        # Kept duck-typed so context/ has no hard import edge onto cortex/.
+        self.cortex_store = cortex_store
+        self.project = project
 
     def compile(self, driver: str, task_id: str, task_desc: str,
-                token_budget: int = 1200) -> CompiledContext:
+                token_budget: int = 1200, cortex_budget: int = 600) -> CompiledContext:
         profile = DRIVER_PROFILES.get(driver, {"scopes": None, "hint": ""})
         query = f"{task_desc} {profile['hint']}".strip()
         scopes = profile["scopes"]
@@ -100,4 +127,20 @@ class ContextPipeline:
         ctx.sections["Relevant memory"] = body
         ctx.sections["Task"] = task_desc
         ctx.est_tokens = sum(r.est_tokens() for r in records) + max(1, len(task_desc) // 4)
+        if self.cortex_store is not None:
+            self._add_cortex_section(ctx, driver, task_desc, cortex_budget)
         return ctx
+
+    def _add_cortex_section(self, ctx: CompiledContext, driver: str,
+                            task_desc: str, cortex_budget: int) -> None:
+        """Retrieve a per-driver CORTEX package through the real C3 pipeline."""
+        from danzaboss.cortex.quality import build_package  # lazy: optional source
+        cprofile = DRIVER_CORTEX.get(driver, {"intent": None, "types": None})
+        bundle = build_package(self.cortex_store, task_desc, self.project,
+                               budget=cortex_budget,
+                               types=cprofile["types"],
+                               intent_override=cprofile["intent"])
+        rendered = bundle.package.render()
+        if rendered:
+            ctx.sections["CORTEX observations"] = rendered
+            ctx.est_tokens += bundle.package.used

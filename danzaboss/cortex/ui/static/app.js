@@ -180,6 +180,78 @@ async function openDrawer(id) {
 $("#drawer-close").addEventListener("click", () => ($("#drawer").hidden = true));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#drawer").hidden = true; });
 
+/* ---------- explain playground ---------- */
+function sigRowHTML(name, ids, titles) {
+  const chips = ids.slice(0, 4).map((id) =>
+    `<span class="sig-chip" title="${esc(id)}">${esc((titles[id] || id).slice(0, 34))}</span>`).join("");
+  const more = ids.length > 4 ? `<span class="dim mono">+${ids.length - 4}</span>` : "";
+  return `<div class="sig-row"><span class="sig-name mono">${esc(name)}</span>
+    ${ids.length ? chips + more : '<span class="dim">—</span>'}</div>`;
+}
+
+function explainHTML(t) {
+  const titles = t.titles || {};
+  const maxFinal = Math.max(1e-9, ...t.fusion.map((r) => r.final));
+  const fusion = t.fusion.slice(0, 12).map((r, i) => `<div class="fuse-row">
+      <span class="fuse-rank mono">${i + 1}</span>
+      <span class="fuse-title">${esc(r.title)}</span>
+      <div class="bar-track"><div class="bar-fill" style="transform:scaleX(${r.final / maxFinal})"></div></div>
+      <span class="mono dim">${r.final.toFixed(4)}</span>
+      <span class="fuse-sigs mono dim">${Object.entries(r.signal_ranks)
+        .map(([s, k]) => `${s}#${k}`).join(" ")}</span>
+    </div>`).join("");
+  const kills = t.killed.map((k) => `<div class="kill-row">
+      <span class="kill-title">${esc(k.title)}</span>
+      <span class="kill-trigger mono">killed by "${esc(k.trigger)}"</span>
+    </div>`).join("");
+  const items = t.package.items.map((it) => `<div class="pkg-row">
+      <span class="type-chip">${esc(it.category)}</span>
+      <span class="pkg-title">${esc(it.title)}</span>
+      <span class="mono dim">${it.tokens}t${it.compressed ? " · compressed" : ""}</span>
+      <div class="pkg-reasons dim">${it.reasons.map(esc).join(" · ")}</div>
+    </div>`).join("");
+  const dropped = t.package.dropped.map((d) =>
+    `<div class="kill-row"><span class="kill-title">${esc(d.title)}</span>
+     <span class="kill-trigger mono">${esc(d.reason)}</span></div>`).join("");
+  const q = t.quality;
+  const qBlade = (label, v) => `<div class="blade-row">
+      <div class="blade"><div class="blade-fill" style="transform:scaleX(${v})"></div></div>
+      <span class="blade-meta">${label} <b>${(v * 100).toFixed(0)}</b></span></div>`;
+  return `
+    <div class="explain-intent">
+      <span class="type-chip t-decision">intent: ${esc(t.intent.name)}</span>
+      <span class="dim">${t.intent.matched.map(esc).join(" · ")}</span>
+    </div>
+    <h2 class="section-label">Signal rankings</h2>
+    ${Object.entries(t.signals).map(([n, ids]) => sigRowHTML(n, ids, titles)).join("")}
+    ${kills ? `<h2 class="section-label">Anti-relevance kills</h2>${kills}` : ""}
+    <h2 class="section-label">RRF fusion — final ranking</h2>
+    ${fusion || '<p class="dim">nothing retrieved</p>'}
+    <h2 class="section-label">Package — ${t.package.used}t of ${t.package.budget}t
+      ${t.replanned ? " · re-planned once" : ""}</h2>
+    ${items || '<p class="dim">empty package</p>'}
+    ${dropped}
+    <h2 class="section-label">Quality — overall ${(q.overall * 100).toFixed(0)}
+      ${q.passed ? "PASS" : "BELOW THRESHOLD"}</h2>
+    ${qBlade("relevance", q.relevance)}${qBlade("coverage", q.coverage)}
+    ${qBlade("redundancy", q.redundancy)}${qBlade("efficiency", q.efficiency)}
+    ${t.notes.length ? `<p class="dim">${t.notes.map(esc).join(" · ")}</p>` : ""}`;
+}
+
+$("#explain-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const prompt = $("#explain-prompt").value.trim();
+  if (!prompt) return;
+  const budget = +$("#explain-budget").value || 1500;
+  $("#explain-out").innerHTML = '<p class="dim">running the pipeline…</p>';
+  try {
+    const t = await api(`/api/explain?${new URLSearchParams({ prompt, budget })}`);
+    $("#explain-out").innerHTML = explainHTML(t);
+  } catch (e) {
+    $("#explain-out").innerHTML = `<p class="dim">explain failed: ${esc(e.message)}</p>`;
+  }
+});
+
 /* ---------- sessions ---------- */
 async function loadSessions() {
   const data = await api("/api/sessions");
@@ -267,7 +339,7 @@ function connectLive() {
 /* ---------- boot ---------- */
 function refresh() {
   ({ feed: loadFeed, sessions: loadSessions, stats: loadStats,
-     settings: loadSettings }[state.view] || loadFeed)();
+     settings: loadSettings, explain: () => {} }[state.view] || loadFeed)();
 }
 
 (async function boot() {

@@ -6,7 +6,7 @@ Commands:
   danzaboss.cli selftest                        run the cold-start harness
   danzaboss.cli hook pretooluse                 Claude Code PreToolUse guard (reads CC JSON on stdin)
   danzaboss.cli hook stop                       Claude Code Stop hook
-  danzaboss.cli cortex <hook|observe|get|search|context|age|stats>
+  danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|stats|ui>
                                                 CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
