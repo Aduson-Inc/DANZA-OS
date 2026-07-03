@@ -210,14 +210,18 @@ class CortexUIHandler(BaseHTTPRequestHandler):
     def _api_explain(self, q: dict) -> None:
         """Run the REAL C3 pipeline on a hypothetical prompt and return the
         full trace — the explain playground is a window, not a simulation."""
+        from ..commands import workspace_snapshot
         from ..explain import trace as explain_trace
+        from ..graph import GraphStore
         from ..quality import build_package
         prompt = (q.get("prompt") or [""])[0]
         if not prompt.strip():
             self._json({"error": "prompt required"}, 400)
             return
         budget = int((q.get("budget") or ["1500"])[0])
-        bundle = build_package(self._store(), prompt, self.project, budget=budget)
+        bundle = build_package(self._store(), prompt, self.project, budget=budget,
+                               workspace=workspace_snapshot(self.root),
+                               graph=GraphStore(self.db_path))
         self._json(explain_trace(bundle))
 
     def _api_events(self) -> None:

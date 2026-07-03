@@ -118,7 +118,8 @@ def build_package(store: ObservationStore, prompt: str, project: str, *,
                   types: Optional[list[str]] = None,
                   workspace: Optional[WorkspaceState] = None,
                   intent_override: Optional[str] = None,
-                  threshold: float = DEFAULT_THRESHOLD) -> PackageBundle:
+                  threshold: float = DEFAULT_THRESHOLD,
+                  graph=None) -> PackageBundle:
     """intent -> hybrid retrieve -> assemble -> quality gate -> one re-plan."""
     intent = detect(prompt, workspace)
     if intent_override:
@@ -127,7 +128,8 @@ def build_package(store: ObservationStore, prompt: str, project: str, *,
                         terms=intent.terms)
 
     retrieval = hybrid_retrieve(store, prompt, intent, project,
-                                limit=limit, types=types, workspace=workspace)
+                                limit=limit, types=types, workspace=workspace,
+                                graph=graph)
     package = assemble(retrieval.items, intent.name, budget)
     report = score_package(package, intent, threshold)
     bundle = PackageBundle(prompt=prompt, intent=intent, retrieval=retrieval,
@@ -140,7 +142,7 @@ def build_package(store: ObservationStore, prompt: str, project: str, *,
     drops = frozenset({weakest}) if weakest else frozenset()
     retrieval2 = hybrid_retrieve(store, prompt, intent, project,
                                  limit=limit * 2, types=types,
-                                 workspace=workspace)
+                                 workspace=workspace, graph=graph)
     package2 = assemble(retrieval2.items, intent.name, budget,
                         drop_categories=drops)
     report2 = score_package(package2, intent, threshold)

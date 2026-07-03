@@ -10,8 +10,9 @@ demoted — precision beats recall in injected context.
 Reason strings accumulate on items as they flow through the pipeline —
 explainability lives in the data path (explain.py only formats).
 
-The graph signal is a stub that returns empty until C4 binds the knowledge
-graph; RRF is indifferent to absent signals, so no rewrite will be needed.
+The graph signal (C4) rides the knowledge graph's impact closure: observations
+attached to files that depend on what the workspace just changed. Callers that
+pass no graph get the pre-C4 behavior — RRF is indifferent to absent signals.
 
 Stdlib only.
 """
@@ -19,7 +20,10 @@ from __future__ import annotations
 
 import datetime as _dt
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:  # import only for annotations: the hook path stays lean
+    from .graph import GraphStore
 
 from .intent import Intent, WorkspaceState, tokens
 from .observation import Observation, Importance
@@ -147,9 +151,27 @@ def _sig_links(fts_ids: list[str], cands: list[Observation],
     return out[:SIGNAL_CAP]
 
 
-def _sig_graph(cands: list[Observation]) -> list[str]:
-    """Graph-traversal slot — empty until C4 binds the knowledge graph."""
-    return []
+def _sig_graph(graph: Optional["GraphStore"], cands: list[Observation],
+               workspace: Optional[WorkspaceState]) -> list[str]:
+    """Impact-closure signal (C4): observations attached to files that depend
+    on what the workspace just changed. This is reach no lexical signal has —
+    the observation may share zero words with the prompt."""
+    if graph is None or workspace is None or not workspace.changed_files:
+        return []
+    allowed = {o.id for o in cands}
+    best: dict[str, tuple[int, int]] = {}   # obs id -> (min depth, -hits)
+    for path in workspace.changed_files[:10]:
+        fid = graph.resolve_file(path)
+        if not fid:
+            continue
+        for node, depth in [(fid, 0)] + graph.impact(fid, max_depth=3):
+            for oid in graph.attached_observations(node):
+                if oid not in allowed:
+                    continue
+                d, h = best.get(oid, (99, 0))
+                best[oid] = (min(d, depth), h - 1)
+    ranked = sorted(best.items(), key=lambda kv: (kv[1][0], kv[1][1], kv[0]))
+    return [oid for oid, _ in ranked[:SIGNAL_CAP]]
 
 
 # ---- fusion --------------------------------------------------------------------
@@ -167,7 +189,8 @@ def _anti_relevance_trigger(o: Observation, intent: Intent) -> Optional[str]:
 def hybrid_retrieve(store: ObservationStore, prompt: str, intent: Intent,
                     project: str, *, limit: int = 20,
                     types: Optional[list[str]] = None,
-                    workspace: Optional[WorkspaceState] = None) -> RetrievalResult:
+                    workspace: Optional[WorkspaceState] = None,
+                    graph: Optional["GraphStore"] = None) -> RetrievalResult:
     cands = _candidates(store, project, types)
     by_id = {o.id: o for o in cands}
     prompt_terms = intent.terms
@@ -182,7 +205,7 @@ def hybrid_retrieve(store: ObservationStore, prompt: str, intent: Intent,
         "importance": _sig_importance(cands),
         "usage": _sig_usage(cands),
         "links": _sig_links(fts_ids, cands, workspace),
-        "graph": _sig_graph(cands),
+        "graph": _sig_graph(graph, cands, workspace),
     }
 
     weights = intent.weights

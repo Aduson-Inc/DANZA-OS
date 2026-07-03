@@ -203,6 +203,7 @@ def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
     --explain prints the readable trace, --json the full machine trace.
     """
     from .explain import render, trace  # local: keep hook path imports lean
+    from .graph import GraphStore
     from .quality import build_package
 
     def take_opt(flag: str) -> Optional[str]:
@@ -227,7 +228,8 @@ def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
     store = ObservationStore(SqliteBackend(db_path(root)))
     bundle = build_package(store, prompt, _project(root), budget=budget,
                            types=types, workspace=workspace_snapshot(root),
-                           intent_override=intent_override)
+                           intent_override=intent_override,
+                           graph=GraphStore(db_path(root)))
     for item in bundle.package.items:
         store.record_use(item.observation.id)
     if as_json:
