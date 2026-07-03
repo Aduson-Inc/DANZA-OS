@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+import urllib.error
 import urllib.request
 
 import _bootstrap  # noqa
@@ -101,6 +102,68 @@ class TestCortexUI(unittest.TestCase):
                         type=ObsType.LESSON.value, project="p",
                         concepts=["completely", "different"]))
         self.assertNotEqual(v1, snapshot_version(commands.db_path(self.root)))
+
+
+class TestGraphEndpoint(unittest.TestCase):
+    """C4: /api/graph serves search, subgraphs, impact closures — read-only."""
+
+    @classmethod
+    def setUpClass(cls):
+        from danzaboss.cortex.graph import GraphStore
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = cls.tmp.name
+        g = GraphStore(commands.db_path(cls.root))
+        for name in ("app.py", "lib_a.py", "lib_b.py", "core.py"):
+            g.add_node("file", name, project="p")
+        g.add_edge("file:app.py", "file:lib_a.py", "imports")
+        g.add_edge("file:app.py", "file:lib_b.py", "imports")
+        g.add_edge("file:lib_a.py", "file:core.py", "imports")
+        g.add_edge("file:lib_b.py", "file:core.py", "imports")
+        cls.server, cls.port = serve_in_thread(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.tmp.cleanup()
+
+    def test_bare_call_returns_overview(self):
+        status, _, body = get(self.port, "/api/graph")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data["stats"]["nodes"], 4)
+        self.assertTrue(data["top"])
+        self.assertIn("degree", data["top"][0])
+
+    def test_search_returns_matches(self):
+        _, _, body = get(self.port, "/api/graph?q=lib")
+        names = {m["name"] for m in json.loads(body)["matches"]}
+        self.assertEqual(names, {"lib_a.py", "lib_b.py"})
+
+    def test_impact_subgraph(self):
+        _, _, body = get(self.port,
+                         "/api/graph?node=file:core.py&mode=impact&depth=3")
+        data = json.loads(body)
+        ids = {n["id"] for n in data["nodes"]}
+        self.assertIn("file:app.py", ids)
+        self.assertEqual(data["mode"], "impact")
+        self.assertTrue(data["edges"])
+
+    def test_unknown_node_404(self):
+        try:
+            get(self.port, "/api/graph?node=file:nope.py")
+            self.fail("expected 404")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+    def test_post_is_rejected_read_only(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/graph", data=b"{}",
+            method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            self.fail("expected 405")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 405)
 
 
 if __name__ == "__main__":

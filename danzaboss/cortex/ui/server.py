@@ -134,6 +134,8 @@ class CortexUIHandler(BaseHTTPRequestHandler):
                 self._json(load_settings(self.root))
             elif route == "/api/explain":
                 self._api_explain(q)
+            elif route == "/api/graph":
+                self._api_graph(q)
             elif route == "/api/events":
                 self._api_events()
             else:
@@ -223,6 +225,37 @@ class CortexUIHandler(BaseHTTPRequestHandler):
                                workspace=workspace_snapshot(self.root),
                                graph=GraphStore(self.db_path))
         self._json(explain_trace(bundle))
+
+    def _api_graph(self, q: dict) -> None:
+        """Knowledge-graph window (C4): node search, neighborhood/impact
+        subgraphs, or a degree-ranked overview when called bare."""
+        from ..graph import GraphStore
+        graph = GraphStore(self.db_path)
+        text = (q.get("q") or [""])[0]
+        node = (q.get("node") or [""])[0]
+        if text.strip() and not node:
+            self._json({"matches": [{"id": n.id, "kind": n.kind, "name": n.name}
+                                    for n in graph.find(text)]})
+            return
+        if not node:
+            top = graph.conn.execute(
+                "SELECT n.id, n.kind, n.name, COUNT(*) AS degree "
+                "FROM graph_nodes n JOIN graph_edges e "
+                "ON e.src = n.id OR e.dst = n.id "
+                "GROUP BY n.id ORDER BY degree DESC, n.id LIMIT 12").fetchall()
+            self._json({"stats": graph.stats(),
+                        "top": [dict(r) for r in top]})
+            return
+        if graph.node(node) is None:
+            self._json({"error": f"unknown node: {node}"}, 404)
+            return
+        depth = int((q.get("depth") or ["2"])[0])
+        mode = (q.get("mode") or ["neighborhood"])[0]
+        nodes, edges = graph.subgraph(node, depth=depth, mode=mode)
+        self._json({"center": node, "mode": mode, "depth": depth,
+                    "nodes": [{"id": n.id, "kind": n.kind, "name": n.name,
+                               "attrs": n.attrs} for n in nodes],
+                    "edges": edges})
 
     def _api_events(self) -> None:
         """SSE: emit a refresh event whenever the store's change token moves."""
