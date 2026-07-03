@@ -317,6 +317,114 @@ $("#settings-form").addEventListener("submit", async (ev) => {
   setTimeout(() => ($("#save-note").textContent = ""), 2500);
 });
 
+/* ---------- graph explorer (C4) ---------- */
+const gstate = { mode: "neighborhood", center: null };
+
+$$("#graph-form .mode-btn").forEach((b) => b.addEventListener("click", () => {
+  $$("#graph-form .mode-btn").forEach((x) => x.classList.toggle("active", x === b));
+  gstate.mode = b.dataset.gmode;
+  if (gstate.center) exploreNode(gstate.center);
+}));
+
+$("#graph-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("#graph-node").value.trim();
+  if (!text) return;
+  const data = await api(`/api/graph?${new URLSearchParams({ q: text })}`);
+  $("#graph-matches").innerHTML = (data.matches || []).map((m) =>
+    `<button type="button" class="tag graph-match" data-id="${esc(m.id)}">
+       ${esc(m.kind)}: ${esc(m.name)}</button>`).join(" ") ||
+    '<span class="dim">no matching nodes — run <code>danza cortex index</code></span>';
+});
+
+$("#graph-matches").addEventListener("click", (ev) => {
+  const b = ev.target.closest(".graph-match");
+  if (b) exploreNode(b.dataset.id);
+});
+
+async function exploreNode(id) {
+  gstate.center = id;
+  const depth = +$("#graph-depth").value || 2;
+  const data = await api(`/api/graph?${new URLSearchParams(
+    { node: id, depth, mode: gstate.mode })}`);
+  $("#graph-meta").textContent = gstate.mode === "impact"
+    ? `${data.nodes.length - 1} nodes break if ${id} changes (depth ${depth})`
+    : `${data.nodes.length} nodes · ${data.edges.length} edges (depth ${depth})`;
+  renderGraph(data);
+}
+
+function layoutGraph(nodes, edges, w, h) {
+  // deterministic: seeded on a circle, relaxed with repulsion + springs
+  nodes.forEach((n, i) => {
+    const a = (2 * Math.PI * i) / nodes.length;
+    n.x = w / 2 + Math.cos(a) * h / 3;
+    n.y = h / 2 + Math.sin(a) * h / 3;
+  });
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  for (let it = 0; it < 200; it++) {
+    for (const a of nodes) {                       // pairwise repulsion
+      for (const b of nodes) {
+        if (a === b) continue;
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const d2 = Math.max(64, dx * dx + dy * dy);
+        a.x += (dx / d2) * 900; a.y += (dy / d2) * 900;
+      }
+    }
+    for (const e of edges) {                       // spring along edges
+      const s = byId.get(e.src), t = byId.get(e.dst);
+      if (!s || !t) continue;
+      const dx = t.x - s.x, dy = t.y - s.y;
+      const d = Math.max(1, Math.hypot(dx, dy));
+      const f = (d - 110) / d * 0.02;
+      s.x += dx * f; s.y += dy * f; t.x -= dx * f; t.y -= dy * f;
+    }
+    for (const n of nodes) {                       // gravity + bounds
+      n.x += (w / 2 - n.x) * 0.005; n.y += (h / 2 - n.y) * 0.005;
+      n.x = Math.min(w - 30, Math.max(30, n.x));
+      n.y = Math.min(h - 20, Math.max(20, n.y));
+    }
+  }
+}
+
+function renderGraph(data) {
+  const svg = $("#graph-svg");
+  const w = svg.clientWidth || 900, h = 640;
+  const nodes = data.nodes.map((n) => ({ ...n }));
+  layoutGraph(nodes, data.edges, w, h);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const lines = data.edges.map((e) => {
+    const s = byId.get(e.src), t = byId.get(e.dst);
+    if (!s || !t) return "";
+    return `<line class="gedge r-${esc(e.relation)}" x1="${s.x}" y1="${s.y}"
+      x2="${t.x}" y2="${t.y}"><title>${esc(e.src)} —${esc(e.relation)}→ ${esc(e.dst)}</title></line>`;
+  }).join("");
+  const dots = nodes.map((n) => {
+    const center = n.id === data.center ? " center" : "";
+    const label = n.name.length > 28 ? "…" + n.name.slice(-27) : n.name;
+    return `<g class="gnode k-${esc(n.kind)}${center}" data-id="${esc(n.id)}"
+        transform="translate(${n.x},${n.y})">
+      <circle r="${n.id === data.center ? 9 : 6}"><title>${esc(n.id)}</title></circle>
+      <text x="10" y="4">${esc(label)}</text></g>`;
+  }).join("");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = lines + dots;
+}
+
+$("#graph-svg").addEventListener("click", (ev) => {
+  const g = ev.target.closest(".gnode");
+  if (g) exploreNode(g.dataset.id);
+});
+
+async function loadGraph() {
+  if (gstate.center) return;                       // keep the current view
+  const data = await api("/api/graph");
+  $("#graph-meta").textContent =
+    `${data.stats.nodes} nodes · ${data.stats.edges} edges — search above, or click a hub`;
+  $("#graph-matches").innerHTML = (data.top || []).map((m) =>
+    `<button type="button" class="tag graph-match" data-id="${esc(m.id)}">
+       ${esc(m.kind)}: ${esc(m.name)} (${m.degree})</button>`).join(" ");
+}
+
 /* ---------- live (SSE) ---------- */
 function pulse() {
   const mark = $("#mark");
@@ -339,7 +447,8 @@ function connectLive() {
 /* ---------- boot ---------- */
 function refresh() {
   ({ feed: loadFeed, sessions: loadSessions, stats: loadStats,
-     settings: loadSettings, explain: () => {} }[state.view] || loadFeed)();
+     settings: loadSettings, explain: () => {},
+     graph: loadGraph }[state.view] || loadFeed)();
 }
 
 (async function boot() {

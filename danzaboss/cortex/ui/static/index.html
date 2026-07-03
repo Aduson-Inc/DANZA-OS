@@ -22,6 +22,7 @@
   <nav>
     <button class="nav-btn active" data-view="feed">Feed</button>
     <button class="nav-btn" data-view="explain">Explain</button>
+    <button class="nav-btn" data-view="graph">Graph</button>
     <button class="nav-btn" data-view="sessions">Sessions</button>
     <button class="nav-btn" data-view="stats">Stats</button>
     <button class="nav-btn" data-view="settings">Settings</button>
@@ -78,6 +79,26 @@
       per-signal rankings, RRF fusion, anti-relevance kills, budget assembly and
       the quality gate — nothing is simulated.</p>
     </div>
+  </section>
+
+  <!-- GRAPH EXPLORER -->
+  <section class="view" id="view-graph" hidden>
+    <form class="explain-form" id="graph-form">
+      <input id="graph-node" class="explain-input" type="text"
+             placeholder="Find a node — file, module, symbol, commit…"
+             autocomplete="off">
+      <label class="explain-budget mono">depth
+        <input id="graph-depth" type="number" value="2" min="1" max="6"></label>
+      <div class="mode-toggle" role="group" aria-label="Graph mode">
+        <button type="button" class="mode-btn active" data-gmode="neighborhood">neighbors</button>
+        <button type="button" class="mode-btn" data-gmode="impact">impact</button>
+      </div>
+      <button type="submit" class="save-btn">Explore</button>
+    </form>
+    <div class="graph-matches" id="graph-matches"></div>
+    <div class="graph-meta mono dim" id="graph-meta"></div>
+    <svg id="graph-svg" width="100%" height="640"
+         preserveAspectRatio="xMidYMid meet"></svg>
   </section>
 
   <!-- SESSIONS -->

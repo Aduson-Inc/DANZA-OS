@@ -378,3 +378,21 @@ code { font-family: var(--font-mono); color: var(--silver); }
 .pkg-row { padding: 7px 0; border-bottom: 1px solid var(--graphite); }
 .pkg-row .pkg-title { margin: 0 10px; color: var(--glow); }
 .pkg-reasons { font-size: 11.5px; margin-top: 3px; }
+
+/* ---------- graph explorer (C4) ---------- */
+#graph-svg { background: var(--carbon); border: 1px solid var(--graphite); }
+.graph-matches { margin: 10px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.graph-match { cursor: pointer; }
+.graph-meta { margin: 4px 0 8px; }
+.gedge { stroke: var(--gunmetal); stroke-width: 1; }
+.gedge.r-imports { stroke: var(--silver); opacity: .55; }
+.gedge.r-about { stroke: var(--ember); opacity: .6; stroke-dasharray: 3 3; }
+.gedge.r-modifies { stroke: var(--gunmetal); opacity: .5; }
+.gnode circle { fill: var(--gunmetal); stroke: var(--void); cursor: pointer; }
+.gnode.k-file circle { fill: var(--silver); }
+.gnode.k-module circle { fill: var(--gunmetal); }
+.gnode.k-symbol circle { fill: var(--dim); }
+.gnode.k-commit circle { fill: var(--ember); }
+.gnode.k-observation circle { fill: var(--crimson); }
+.gnode.center circle { stroke: var(--crimson); stroke-width: 2.5; }
+.gnode text { fill: var(--text); font: 10px var(--font-mono); pointer-events: none; }
