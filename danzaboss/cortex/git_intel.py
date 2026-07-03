@@ -67,7 +67,7 @@ def read_log(root: str, limit: int = 200) -> list[Commit]:
         if result.returncode != 0:
             return []
         return parse_log(result.stdout)
-    except FileNotFoundError:
+    except (OSError, UnicodeDecodeError):
         return []
 
 
