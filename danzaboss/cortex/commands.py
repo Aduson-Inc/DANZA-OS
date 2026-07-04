@@ -15,19 +15,14 @@ from typing import Optional, TextIO
 
 from .events import CaptureLog
 from .extract import configured_extractor, draft_observations
+from .factory import db_path, open_store
 from .identity import resolve_project
 from .learn import learn
 from .inject import build_context
 from .intent import WorkspaceState
 from .observation import Observation
-from .sqlite_backend import SqliteBackend
-from .store import ObservationStore
 from ..hooks.gates import distillation_gate
 from ..kernel.profile import active_profile, capture_event
-
-
-def db_path(root: str) -> str:
-    return os.path.join(root, ".danza", "cortex", "cortex.db")
 
 
 def _project(root: str) -> str:
@@ -45,7 +40,7 @@ def _hook_session_start(root: str, payload: dict) -> int:
     sid = payload.get("session_id", "unknown")
     log = CaptureLog(db_path(root))
     log.open_session(sid, _project(root), environment="claude-code")
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     # C5 scheduler: every session start is the tick — archive what expired
     # and apply usage learning BEFORE context is assembled, so the injected
     # block already reflects the store's learned state.
@@ -99,7 +94,7 @@ def _hook_stop(root: str, payload: dict) -> int:
         # tier-2 floor: gate already blocked once (or never applied) -> draft.
         # Below the profile's noise floor nothing is drafted: tiny sessions
         # must not become observation spam (C4.5 memory diet).
-        store = ObservationStore(SqliteBackend(db_path(root)))
+        store = open_store(root)
         # Tier 3 first when configured (off by default); its failure or
         # empty answer always falls back to the deterministic Tier-2 floor.
         tier3 = configured_extractor(root)
@@ -148,7 +143,7 @@ def _cmd_observe(argv: list[str], root: str, stdin: TextIO) -> int:
         print(f"observe: invalid JSON on stdin: {e}", file=sys.stderr)
         return 2
     items = payload if isinstance(payload, list) else [payload]
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     stored = []
     for item in items:
         item.setdefault("project", _project(root))
@@ -166,7 +161,7 @@ def _cmd_observe(argv: list[str], root: str, stdin: TextIO) -> int:
 
 
 def _cmd_get(argv: list[str], root: str, stdin: TextIO) -> int:
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     out = []
     for oid in argv:
         o = store.get(oid)
@@ -179,8 +174,7 @@ def _cmd_get(argv: list[str], root: str, stdin: TextIO) -> int:
 
 def _cmd_search(argv: list[str], root: str, stdin: TextIO) -> int:
     text = " ".join(argv)
-    be = SqliteBackend(db_path(root))
-    results = be.search(text, project=_project(root))
+    results = open_store(root).backend.search(text, project=_project(root))
     print(json.dumps([{"id": o.id, "type": o.type, "title": o.title,
                        "importance": o.importance, "confidence": o.confidence}
                       for o in results], indent=2))
@@ -248,7 +242,7 @@ def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
         print("retrieve: a prompt is required", file=sys.stderr)
         return 2
 
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     bundle = build_package(store, prompt, _project(root), budget=budget,
                            types=types, workspace=workspace_snapshot(root),
                            intent_override=intent_override,
@@ -265,21 +259,21 @@ def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
 
 
 def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     log = CaptureLog(db_path(root))
     print(build_context(store, _project(root), stats=log.stats(_project(root))))
     return 0
 
 
 def _cmd_age(argv: list[str], root: str, stdin: TextIO) -> int:
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     print(json.dumps(store.age()))
     return 0
 
 
 def _cmd_learn(argv: list[str], root: str, stdin: TextIO) -> int:
     """danza cortex learn — one usage-learning pass; prints what shifted."""
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     print(json.dumps(learn(store), indent=2))
     return 0
 
@@ -288,7 +282,7 @@ def _cmd_stats(argv: list[str], root: str, stdin: TextIO) -> int:
     log = CaptureLog(db_path(root))
     s = log.stats(_project(root))
     s["observations_stored"] = len(
-        ObservationStore(SqliteBackend(db_path(root))).backend.all(_project(root)))
+        open_store(root).backend.all(_project(root)))
     print(json.dumps(s, indent=2))
     return 0
 
@@ -308,7 +302,7 @@ def _cmd_index(argv: list[str], root: str, stdin: TextIO) -> int:
     graph.clear(project)
     stats = scan_repo(root, project, graph)
     stats.update(ingest_git(root, project, graph, limit=limit))
-    store = ObservationStore(SqliteBackend(db_path(root)))
+    store = open_store(root)
     stats.update(link_observations(store, project, graph))
     print(json.dumps(stats, indent=2))
     return 0
