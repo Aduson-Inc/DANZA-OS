@@ -10,6 +10,7 @@ from danzaboss.cortex import commands
 from danzaboss.cortex.events import CaptureLog
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
+from danzaboss.kernel.profile import PROFILE_ENV_VAR
 
 
 def run(argv, root, payload=None):
@@ -24,8 +25,16 @@ class TestCortexCommands(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = self.tmp.name
+        # these tests exercise the RUNTIME hook contract (capture everything,
+        # gate every session); OS_DEV's lighter policy is tested in test_profile
+        self._saved_profile = os.environ.get(PROFILE_ENV_VAR)
+        os.environ[PROFILE_ENV_VAR] = "APP_BUILD"
 
     def tearDown(self):
+        if self._saved_profile is None:
+            os.environ.pop(PROFILE_ENV_VAR, None)
+        else:
+            os.environ[PROFILE_ENV_VAR] = self._saved_profile
         self.tmp.cleanup()
 
     def _store(self):

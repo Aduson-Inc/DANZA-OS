@@ -7,7 +7,8 @@ from danzaboss.research.summarizer import StubSummarizer, ResearchResult
 from danzaboss.research.proposal import Proposal, ProposalStatus
 from danzaboss.research.throttle import ProposalThrottle, ThrottleConfig
 from danzaboss.research.messaging import ConsoleChannel, parse_reply
-from danzaboss.research.squad import ResearchSquad, SquadConfig
+from danzaboss.research.squad import (ResearchApprovalRequired, ResearchSquad,
+                                      SquadConfig)
 
 
 class TestCollector(unittest.TestCase):
@@ -91,7 +92,8 @@ class TestSquadEndToEnd(unittest.TestCase):
             throttle=ProposalThrottle(ThrottleConfig(max_per_day=2, allowed_hours=(9,), min_impact=60)),
             channel=ConsoleChannel(),
             cfg=SquadConfig(deep_only_big=True))
-        sent = squad.run_cycle(profile, now=dt.datetime(2026, 7, 1, 9, 0))
+        sent = squad.run_cycle(profile, now=dt.datetime(2026, 7, 1, 9, 0),
+                               user_approved=True)
         # only the big feature (mixer) researched; proposal sent via channel
         self.assertTrue(all(p.feature == "mixer" for p in sent))
         self.assertLessEqual(len(sent), 2)
@@ -105,8 +107,21 @@ class TestSquadEndToEnd(unittest.TestCase):
             StubSummarizer(),
             ProposalThrottle(ThrottleConfig(allowed_hours=(9,))),
             ConsoleChannel())
-        sent = squad.run_cycle(profile, now=dt.datetime(2026, 7, 1, 15, 0))  # 3pm
+        sent = squad.run_cycle(profile, now=dt.datetime(2026, 7, 1, 15, 0),
+                               user_approved=True)  # 3pm
         self.assertEqual(sent, [])
+
+    def test_research_fails_closed_without_user_approval(self):
+        profile = learn_profile("x", ScanFacts(detected_features=[{"name": "f"}]),
+                                big_feature_names={"f"})
+        squad = ResearchSquad(
+            MultiSourceCollector([StubLane("web", [Source("u", published="2026-06-30")])]),
+            StubSummarizer(),
+            ProposalThrottle(ThrottleConfig(allowed_hours=(9,))),
+            ConsoleChannel())
+        with self.assertRaises(ResearchApprovalRequired):
+            squad.run_cycle(profile, now=dt.datetime(2026, 7, 1, 9, 0))
+        self.assertEqual(squad.channel.outbox, [])  # nothing collected or sent
 
 
 if __name__ == "__main__":

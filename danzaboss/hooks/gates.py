@@ -53,13 +53,15 @@ def run_all_gates(rec: TurnRecord) -> list[Decision]:
 
 # -- CORTEX distillation gate (spec 2026-07-03, section 4.2) ------------------
 def distillation_gate(pending_events: int, observations_written: int,
-                      already_blocked: bool) -> Decision:
+                      already_blocked: bool, *, min_events: int = 1) -> Decision:
     """Turn knowledge must be distilled before the session may stop. Blocks at
     most once per session: after one block (or any distillation) it passes, and
     the caller runs the deterministic floor extractor instead (Tier 2). Fed
-    from CaptureLog counts by the cortex CLI, not from TurnRecord."""
+    from CaptureLog counts by the cortex CLI, not from TurnRecord.
+    min_events is the profile's noise floor (C4.5): sessions with fewer pending
+    events than this are too small to be worth a distillation demand."""
     hook = "distillation_gate"
-    if pending_events == 0 or observations_written > 0 or already_blocked:
+    if pending_events < max(1, min_events) or observations_written > 0 or already_blocked:
         return Decision.ok(hook)
     return Decision.deny(
         hook,

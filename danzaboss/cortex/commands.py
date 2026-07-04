@@ -21,6 +21,7 @@ from .observation import Observation
 from .sqlite_backend import SqliteBackend
 from .store import ObservationStore
 from ..hooks.gates import distillation_gate
+from ..kernel.profile import active_profile, capture_event
 
 
 def db_path(root: str) -> str:
@@ -53,15 +54,21 @@ def _hook_session_start(root: str, payload: dict) -> int:
 def _hook_post_tool_use(root: str, payload: dict) -> int:
     sid = payload.get("session_id", "unknown")
     ti = payload.get("tool_input", {}) or {}
+    tool = payload.get("tool_name", "")
+    command = ti.get("command", "")
+    # C4.5 memory diet: the profile decides what becomes memory pressure.
+    # OS_DEV (lightweight) captures only mutations + state-changing commands.
+    if not capture_event(active_profile(root), tool, command):
+        return 0
     resp = payload.get("tool_response", {}) or {}
     outcome = ""
     if isinstance(resp, dict):
         outcome = str(resp.get("success", ""))[:200]
     log = CaptureLog(db_path(root))
     log.open_session(sid, _project(root))  # idempotent safety net
-    log.record_event(sid, payload.get("tool_name", ""),
+    log.record_event(sid, tool,
                      file_path=ti.get("file_path") or ti.get("path") or "",
-                     command=ti.get("command", ""), outcome=outcome)
+                     command=command, outcome=outcome)
     return 0
 
 
@@ -71,15 +78,20 @@ def _hook_stop(root: str, payload: dict) -> int:
     sess = log.session(sid)
     if sess is None:
         return 0  # nothing captured -> nothing to gate
+    prof = active_profile(root)
     pending = log.pending(sid)
     decision = distillation_gate(len(pending), sess["observations_written"],
-                                 bool(sess["gate_blocked"]))
+                                 bool(sess["gate_blocked"]),
+                                 min_events=prof.distill_min_events)
     if not decision.allow:
         log.mark_gate_blocked(sid)
         print(json.dumps({"decision": "block", "reason": decision.reason}))
         return 0
-    if pending and sess["observations_written"] == 0:
-        # tier-2 floor: gate already blocked once (or never applied) -> draft
+    if (len(pending) >= prof.distill_min_events
+            and sess["observations_written"] == 0):
+        # tier-2 floor: gate already blocked once (or never applied) -> draft.
+        # Below the profile's noise floor nothing is drafted: tiny sessions
+        # must not become observation spam (C4.5 memory diet).
         store = ObservationStore(SqliteBackend(db_path(root)))
         for d in draft_observations(pending, _project(root)):
             store.upsert(d)

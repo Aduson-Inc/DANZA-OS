@@ -2,12 +2,14 @@
 un-distilled stop exactly once, and injects context into the NEXT session."""
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
+from danzaboss.kernel.profile import PROFILE_ENV_VAR
 
 
 def run(argv, root, payload=None):
@@ -19,6 +21,18 @@ def run(argv, root, payload=None):
 
 
 class TestC1Acceptance(unittest.TestCase):
+    def setUp(self):
+        # this is the RUNTIME lifecycle contract; OS_DEV's noise floor (C4.5)
+        # is exercised in test_profile
+        self._saved_profile = os.environ.get(PROFILE_ENV_VAR)
+        os.environ[PROFILE_ENV_VAR] = "APP_BUILD"
+
+    def tearDown(self):
+        if self._saved_profile is None:
+            os.environ.pop(PROFILE_ENV_VAR, None)
+        else:
+            os.environ[PROFILE_ENV_VAR] = self._saved_profile
+
     def test_full_lifecycle_capture_gate_distill_inject(self):
         with tempfile.TemporaryDirectory() as root:
             # -- session 1: work happens, agent distills under gate pressure --

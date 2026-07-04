@@ -8,6 +8,8 @@ Commands:
   danzaboss.cli hook stop                       Claude Code Stop hook
   danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|stats|ui|index|graph>
                                                 CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
+  danzaboss.cli profile                         print the active execution profile (OS_DEV|OS_BOOT_TEST|APP_BUILD)
+  danzaboss.cli tier <paths...> [--commit]      cheapest safe verification tier for a change set
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
 """
@@ -18,6 +20,8 @@ import os
 import sys
 
 from .cortex import commands as cortex_commands
+from .kernel.profile import active_profile
+from .kernel.tiers import recommend_tier
 from .runtime.scan import profile_repo
 from .runtime.verify import run_verification
 from .selftest.harness import run_cold_start
@@ -90,11 +94,14 @@ def _cmd_hook(argv: list[str]) -> int:
             command=ti.get("command", ""),
         )
         cfg = GuardConfig()
+        prof = active_profile(os.getcwd())
 
-        # Rule 37 elevation: the user grants .claude/ write approval by creating
-        # .danza/runtime/claude-approval (or exporting DANZA_CLAUDE_APPROVAL=1).
-        # The grant is local-only (gitignored) and removable at any time.
-        approval = (os.path.exists(os.path.join(".danza", "runtime", "claude-approval"))
+        # Rule 37 elevation: OS_DEV pre-grants .claude/ writes (Layer 0 edits the
+        # OS source, which includes .claude/). Runtime profiles need the explicit
+        # user grant: the .danza/runtime/claude-approval sentinel (gitignored)
+        # or DANZA_CLAUDE_APPROVAL=1, removable at any time.
+        approval = (prof.claude_write_approval
+                    or os.path.exists(os.path.join(".danza", "runtime", "claude-approval"))
                     or os.environ.get("DANZA_CLAUDE_APPROVAL") == "1")
 
         fp = file_protection_guard(ev, cfg, approval=approval)  # templates / .claude / logs
@@ -103,11 +110,12 @@ def _cmd_hook(argv: list[str]) -> int:
 
         hs = hard_stop_guard(ev, cfg)                # auth/payment/schema/destructive
         if not hs.allow:
-            # destructive -> hard deny, approval or not; sensitive domain -> escalate
-            # to the user (Rules 13-16) unless the approval grant is active.
+            # destructive -> hard deny in EVERY profile, approval or not; sensitive
+            # domain -> escalate to the user (Rules 13-16) only where runtime law
+            # binds (the patterns exist to protect a user app, not OS source).
             if "destructive" in hs.reason:
                 return _emit("deny", hs.reason)
-            if not approval:
+            if prof.domain_ask_active and not approval:
                 return _emit("ask", hs.reason)
 
         return _emit("allow")
@@ -120,15 +128,35 @@ def _cmd_cortex(argv: list[str]) -> int:
     return cortex_commands.main(argv)
 
 
+def _cmd_profile(_: list[str]) -> int:
+    """Print the active execution profile so agents/hooks can consult policy."""
+    print(json.dumps(active_profile(os.getcwd()).to_dict(), indent=2))
+    return 0
+
+
+def _cmd_tier(argv: list[str]) -> int:
+    """Recommend the cheapest safe verification tier for a set of touched paths."""
+    commit = "--commit" in argv
+    paths = [a for a in argv if a != "--commit"]
+    if not paths and not commit:
+        print("usage: danzaboss.cli tier <path> [<path>...] [--commit]", file=sys.stderr)
+        return 2
+    t = recommend_tier(paths, commit_boundary=commit)
+    print(json.dumps({"tier": t.level, "name": t.name, "action": t.action}))
+    return 0
+
+
 _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
              "selftest": _cmd_selftest, "hook": _cmd_hook,
-             "cortex": _cmd_cortex}
+             "cortex": _cmd_cortex, "profile": _cmd_profile,
+             "tier": _cmd_tier}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in _COMMANDS:
-        print("danzaboss.cli <scan|verify|selftest|hook> ...", file=sys.stderr)
+        print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier> ...",
+              file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:])
 

@@ -5,6 +5,22 @@ Violation results in the AI losing boss status permanently.
 
 ---
 
+## Scope — Which Layer This Binds
+
+This Constitution is **runtime law for activated DANZABOSS** — Layers 2–3
+(profiles `OS_BOOT_TEST` and `APP_BUILD`). It binds Tony D, the driver agents,
+and any AI holding a turn in an activated repo.
+
+It does **NOT** bind Layer 0 — an AI session improving DANZABOSS itself
+(profile `OS_DEV`). There it is source material being edited, and the
+Development Constitution (`docs/OS_DEV.md`) governs instead. Two rules remain
+active in every profile: destructive-command denial (Rule 16) and explicit user
+approval for external research. Layer 0 edits the OS; Layers 2–3 obey the OS.
+The active profile is machine-resolved by `danzaboss/kernel/profile.py`
+(`danza profile` prints it); do not guess.
+
+---
+
 ## Execution Rules
 
 **1. No Assumptions.**

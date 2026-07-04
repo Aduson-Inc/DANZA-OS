@@ -22,11 +22,25 @@ from .throttle import ProposalThrottle
 from .messaging import MessagingChannel
 
 
+class ResearchApprovalRequired(Exception):
+    """Raised when a research cycle is attempted without an explicit user grant.
+
+    External research (Tavily/web/API lanes) never runs automatically in ANY
+    execution profile (C4.5). Before asking again, the caller must present:
+      1. what research is needed
+      2. why local repo evidence is insufficient
+      3. expected cost (API calls / tokens)
+      4. expected benefit
+      5. what decision the research will support
+    and only proceed with user_approved=True after the user says yes."""
+
+
 @dataclass
 class SquadConfig:
     since_days: int = 30
     source_limit: int = 15
     deep_only_big: bool = True     # cheap passes for small features, deep for big
+    require_approval: bool = True  # external research is opt-in in every profile
 
 
 class ResearchSquad:
@@ -56,8 +70,17 @@ class ResearchSquad:
                 impact=_estimate_impact(profile, feature_name)))
         return proposals
 
-    def run_cycle(self, profile: AppProfile, now: Optional[_dt.datetime] = None) -> list[Proposal]:
-        """One scheduled cycle across the profile's features. Returns what was sent."""
+    def run_cycle(self, profile: AppProfile, now: Optional[_dt.datetime] = None,
+                  *, user_approved: bool = False) -> list[Proposal]:
+        """One scheduled cycle across the profile's features. Returns what was sent.
+        Fails closed without an explicit user grant (see ResearchApprovalRequired):
+        research is never free, so it is never automatic."""
+        if self.cfg.require_approval and not user_approved:
+            raise ResearchApprovalRequired(
+                "external research needs explicit user approval: state what "
+                "research is needed, why repo evidence is insufficient, expected "
+                "cost, expected benefit, and the decision it supports; then rerun "
+                "with user_approved=True")
         now = now or _dt.datetime.utcnow()
         targets = profile.big_features() if self.cfg.deep_only_big else profile.features
         candidates: list[Proposal] = []

@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
-.danza/cortex/*.db*
+**/.danza/cortex/*.db*
 .pytest_cache/
 .danza/runtime/claude-approval
 .playwright-mcp/
@@ -8,3 +8,4 @@ nohup.out
 .danza/cortex/ui-settings.json
 .claude/settings.local.json
 .claude/**/.danza/
+.danza/runtime/profile.json
