@@ -214,3 +214,13 @@ real accumulating data. Estimated total: ~10–14 sessions.
   design time.
 - Quality threshold value (§16 Q5): set empirically during C3 against the fixture eval;
   re-plan ladder fixed at one step for now.
+- **C6 resolutions (2026-07-04, user-approved at the BUILD C6 gate):**
+  - Spec §16 Q2 (L5-vs-L2 precedence): **project truth wins.** A global (L4/L5)
+    observation that near-duplicates a project (L2) observation — same type, similar
+    title or link bag, the same fingerprint upsert uses for merging — is shadowed out
+    of every read path (`cortex/federate.py`). Cross-project knowledge surfaces only
+    where the project has no counterpart.
+  - Spec §16 Q4 (shared-store concurrency): WAL + busy_timeout on the shared SQLite
+    global store, native transactions on Postgres, last-writer-wins at row level —
+    safe because evolution history is append-only and merges are monotonic. No locking
+    layer in C6; revisit only if real multi-agent write contention appears.
