@@ -117,12 +117,15 @@ class ObservationStore:
     def get(self, obs_id: str) -> Optional[Observation]:
         return self.backend.get(obs_id)
 
-    def record_use(self, obs_id: str) -> None:
+    def record_use(self, obs_id: str, source: str = "",
+                   now: Optional[str] = None) -> None:
         o = self.backend.get(obs_id)
         if o:
             o.usage_count += 1
-            o.last_used = _utcnow()
+            o.last_used = now or _utcnow()
             self.backend.put(o)
+            # C5: every use is a replayable training row for learn.py
+            self.backend.log_use(obs_id, o.last_used, source)
 
     def query(self, q: Query) -> list[Scored]:
         signal_terms = _tokens(q.text) | {e.lower() for e in q.entities}

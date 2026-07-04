@@ -41,6 +41,11 @@ class SqliteBackend(StorageBackend):
             "CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5("
             "obs_id UNINDEXED, title, summary, tags, concepts, "
             "tokenize='porter unicode61')")
+        # C5: replayable usage log — the learning engine's training signal
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS usage_log ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, obs_id TEXT NOT NULL, "
+            "ts TEXT NOT NULL, source TEXT DEFAULT '')")
         self.conn.commit()
 
     @staticmethod
@@ -86,6 +91,18 @@ class SqliteBackend(StorageBackend):
         self.conn.execute("DELETE FROM observations WHERE id = ?", (obs_id,))
         self.conn.execute("DELETE FROM observations_fts WHERE obs_id = ?", (obs_id,))
         self.conn.commit()
+
+    def log_use(self, obs_id: str, ts: str, source: str = "") -> None:
+        self.conn.execute(
+            "INSERT INTO usage_log (obs_id, ts, source) VALUES (?, ?, ?)",
+            (obs_id, ts, source))
+        self.conn.commit()
+
+    def usage_log(self, limit: int = 1000) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT obs_id, ts, source FROM usage_log "
+            "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     def all(self, project: Optional[str] = None) -> list[Observation]:
         if project:

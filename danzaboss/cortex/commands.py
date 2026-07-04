@@ -14,8 +14,9 @@ import sys
 from typing import Optional, TextIO
 
 from .events import CaptureLog
-from .extract import draft_observations
+from .extract import configured_extractor, draft_observations
 from .identity import resolve_project
+from .learn import learn
 from .inject import build_context
 from .intent import WorkspaceState
 from .observation import Observation
@@ -45,6 +46,11 @@ def _hook_session_start(root: str, payload: dict) -> int:
     log = CaptureLog(db_path(root))
     log.open_session(sid, _project(root), environment="claude-code")
     store = ObservationStore(SqliteBackend(db_path(root)))
+    # C5 scheduler: every session start is the tick — archive what expired
+    # and apply usage learning BEFORE context is assembled, so the injected
+    # block already reflects the store's learned state.
+    store.age()
+    learn(store)
     block = build_context(store, _project(root), stats=log.stats(_project(root)))
     if block:
         print(json.dumps({"hookSpecificOutput": {
@@ -94,7 +100,11 @@ def _hook_stop(root: str, payload: dict) -> int:
         # Below the profile's noise floor nothing is drafted: tiny sessions
         # must not become observation spam (C4.5 memory diet).
         store = ObservationStore(SqliteBackend(db_path(root)))
-        for d in draft_observations(pending, _project(root)):
+        # Tier 3 first when configured (off by default); its failure or
+        # empty answer always falls back to the deterministic Tier-2 floor.
+        tier3 = configured_extractor(root)
+        drafts = tier3.extract(pending, _project(root)) if tier3 else []
+        for d in drafts or draft_observations(pending, _project(root)):
             store.upsert(d)
     log.mark_processed(sid)
     log.end_session(sid)
@@ -161,7 +171,7 @@ def _cmd_get(argv: list[str], root: str, stdin: TextIO) -> int:
     for oid in argv:
         o = store.get(oid)
         if o:
-            store.record_use(oid)
+            store.record_use(oid, source="get")
             out.append(o.to_row())
     print(json.dumps(out, indent=2))
     return 0
@@ -244,7 +254,7 @@ def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
                            intent_override=intent_override,
                            graph=GraphStore(db_path(root)))
     for item in bundle.package.items:
-        store.record_use(item.observation.id)
+        store.record_use(item.observation.id, source="retrieve")
     if as_json:
         print(json.dumps(trace(bundle), indent=2))
     elif as_explain:
@@ -264,6 +274,13 @@ def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
 def _cmd_age(argv: list[str], root: str, stdin: TextIO) -> int:
     store = ObservationStore(SqliteBackend(db_path(root)))
     print(json.dumps(store.age()))
+    return 0
+
+
+def _cmd_learn(argv: list[str], root: str, stdin: TextIO) -> int:
+    """danza cortex learn — one usage-learning pass; prints what shifted."""
+    store = ObservationStore(SqliteBackend(db_path(root)))
+    print(json.dumps(learn(store), indent=2))
     return 0
 
 
@@ -348,8 +365,9 @@ def _cmd_ui(argv: list[str], root: str, stdin: TextIO) -> int:
 
 _COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
              "search": _cmd_search, "retrieve": _cmd_retrieve,
-             "context": _cmd_context, "age": _cmd_age, "stats": _cmd_stats,
-             "ui": _cmd_ui, "index": _cmd_index, "graph": _cmd_graph}
+             "context": _cmd_context, "age": _cmd_age, "learn": _cmd_learn,
+             "stats": _cmd_stats, "ui": _cmd_ui, "index": _cmd_index,
+             "graph": _cmd_graph}
 
 
 def main(argv: list[str], *, root: Optional[str] = None,
@@ -357,7 +375,7 @@ def main(argv: list[str], *, root: Optional[str] = None,
     root = root or os.getcwd()
     stdin = stdin if stdin is not None else sys.stdin
     if not argv or argv[0] not in _COMMANDS:
-        print("danza cortex <hook|observe|get|search|retrieve|context|age|stats"
-              "|ui|index|graph> ...", file=sys.stderr)
+        print("danza cortex <hook|observe|get|search|retrieve|context|age|learn"
+              "|stats|ui|index|graph> ...", file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:], root, stdin)
