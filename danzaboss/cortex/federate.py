@@ -17,18 +17,18 @@ from __future__ import annotations
 from typing import Optional
 
 from .observation import Observation
-from .ports import Query, Scored
-from .store import ObservationStore, _jaccard, _tokens
+from .ports import Query, Scored, StorageBackend
+from .store import ObservationStore, _jaccard, _tokens, _utcnow
 
 GLOBAL_LAYER = 4          # first layer that lives in the shared store
 SHADOW_THRESHOLD = 0.5    # same bar as ObservationStore.merge_threshold
 
 
 def _shadowed(g: Observation, local: list[Observation]) -> bool:
-    """True when a project observation makes the global one redundant."""
+    """True when a live project observation makes the global one redundant."""
     g_title, g_links = _tokens(g.title), g.link_bag()
     for loc in local:
-        if loc.type != g.type:
+        if loc.type != g.type or loc.superseded_by:
             continue
         if _jaccard(_tokens(loc.title), g_title) >= SHADOW_THRESHOLD:
             return True
@@ -43,7 +43,7 @@ class FederatedBackend:
     Rows in the global store below GLOBAL_LAYER are ignored: they can only
     get there by misuse, and surfacing them would bypass repo scoping."""
 
-    def __init__(self, project, global_):
+    def __init__(self, project: "StorageBackend", global_: "StorageBackend"):
         self.project = project
         self.global_ = global_
 
@@ -59,8 +59,16 @@ class FederatedBackend:
         return self.project.get(obs_id) or self.global_.get(obs_id)
 
     def put(self, obs: Observation) -> None:
-        target = self.global_ if obs.layer >= GLOBAL_LAYER else self.project
-        target.put(obs)
+        # Residency wins over layer: updates (record_use, learn, age) must land
+        # where the row actually lives, or a legacy layer>=4 row in the project
+        # DB would fork into a shadowed global twin and its usage would vanish.
+        if self.project.get(obs.id):
+            self.project.put(obs)
+        elif self.global_.get(obs.id):
+            self.global_.put(obs)
+        else:
+            target = self.global_ if obs.layer >= GLOBAL_LAYER else self.project
+            target.put(obs)
 
     def delete(self, obs_id: str) -> None:
         if self.project.get(obs_id):
@@ -71,15 +79,16 @@ class FederatedBackend:
     def search(self, text: str, project: Optional[str] = None,
                limit: int = 10) -> list[Observation]:
         local = self.project.search(text, project=project, limit=limit)
-        out = list(local)
         seen = {o.id for o in local}
         local_all = self.project.all(project)
-        for g in self.global_.search(text, limit=limit):
-            if g.id in seen or g.layer < GLOBAL_LAYER:
-                continue
-            if not _shadowed(g, local_all):
-                out.append(g)
-        return out[:limit]
+        globals_ = [g for g in self.global_.search(text, limit=limit)
+                    if g.id not in seen and g.layer >= GLOBAL_LAYER
+                    and not _shadowed(g, local_all)]
+        # Global knowledge must not be starved when weak local matches already
+        # fill the limit: trim the local tail (weakest BM25 ranks) to make room.
+        if globals_:
+            local = local[:max(0, limit - len(globals_))]
+        return (local + globals_)[:limit]
 
     def log_use(self, obs_id: str, ts: str, source: str = "") -> None:
         target = self.project if self.project.get(obs_id) else self.global_
@@ -108,6 +117,17 @@ class FederatedStore:
     def upsert(self, obs: Observation) -> Observation:
         target = (self.global_store if obs.layer >= GLOBAL_LAYER
                   else self.project_store)
+        other = (self.project_store if target is self.global_store
+                 else self.global_store)
+        # Cross-store supersession: the old row may live in the other store;
+        # mark it there so the replacement is not shadowed by its predecessor.
+        if obs.supersedes and target.backend.get(obs.supersedes) is None:
+            old = other.backend.get(obs.supersedes)
+            if old:
+                old.superseded_by = obs.id
+                old.history.append({"ts": _utcnow(), "event": "superseded_by",
+                                    "id": obs.id})
+                other.backend.put(old)
         return target.upsert(obs)
 
     def get(self, obs_id: str) -> Optional[Observation]:

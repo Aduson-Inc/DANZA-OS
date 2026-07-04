@@ -87,6 +87,21 @@ class TestProtocol(McpBase):
         resp = self.call("tools/call", {"name": "nope"})
         self.assertEqual(resp["error"]["code"], -32602)
 
+    def test_non_object_json_frames_do_not_kill_the_loop(self):
+        out = io.StringIO()
+        self.server.run(stdin=io.StringIO(
+            '[]\n"hi"\n5\n'
+            '{"jsonrpc":"2.0","id":8,"method":"initialize",'
+            '"params":{"protocolVersion":20250618}}\n'
+            '{"jsonrpc":"2.0","id":9,"method":"ping","params":[1,2]}\n'),
+            stdout=out)
+        lines = [json.loads(l) for l in out.getvalue().splitlines()]
+        self.assertEqual([l["error"]["code"] for l in lines[:3]],
+                         [-32600, -32600, -32600])
+        self.assertEqual(lines[3]["result"]["protocolVersion"],
+                         PROTOCOL_VERSION)  # non-string version coerced
+        self.assertEqual(lines[4], {"jsonrpc": "2.0", "id": 9, "result": {}})
+
     def test_parse_error_emits_32700_and_loop_survives(self):
         out = io.StringIO()
         self.server.run(stdin=io.StringIO('{broken\n{"jsonrpc":"2.0","id":7,'

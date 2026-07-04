@@ -153,9 +153,13 @@ class CortexMcpServer:
     # -- JSON-RPC dispatch ------------------------------------------------------
     def handle(self, message: dict) -> Optional[dict]:
         """Process one JSON-RPC message; None for notifications."""
+        if not isinstance(message, dict):  # valid JSON but not a request object
+            return _error(None, _INVALID_REQUEST, "message must be an object")
         msg_id = message.get("id")
         method = message.get("method", "")
         params = message.get("params") or {}
+        if not isinstance(params, dict):  # positional params unsupported
+            params = {}
 
         if msg_id is None:  # notification — never answered
             return None
@@ -164,6 +168,8 @@ class CortexMcpServer:
 
         if method == "initialize":
             client = params.get("protocolVersion", PROTOCOL_VERSION)
+            if not isinstance(client, str):
+                client = PROTOCOL_VERSION
             version = client if client <= PROTOCOL_VERSION else PROTOCOL_VERSION
             return _result(msg_id, {
                 "protocolVersion": version,
@@ -209,7 +215,11 @@ class CortexMcpServer:
             except json.JSONDecodeError as e:
                 _write(stdout, _error(None, _PARSE_ERROR, f"parse error: {e}"))
                 continue
-            response = self.handle(message)
+            try:
+                response = self.handle(message)
+            except Exception as e:  # noqa: BLE001 — one bad frame must not kill the loop
+                response = _error(None, _INVALID_REQUEST,
+                                  f"internal error: {type(e).__name__}: {e}")
             if response is not None:
                 _write(stdout, response)
         return 0
@@ -227,7 +237,3 @@ def _error(msg_id: Any, code: int, message: str) -> dict:
 def _write(stdout: TextIO, message: dict) -> None:
     stdout.write(json.dumps(message) + "\n")
     stdout.flush()
-
-
-def serve(root: str) -> int:
-    return CortexMcpServer(root).run()

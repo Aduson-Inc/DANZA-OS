@@ -192,5 +192,49 @@ class TestCommandsFederation(unittest.TestCase):
         self.assertEqual(json.loads(out)[0]["id"], oid)
 
 
+class TestReviewFixes(unittest.TestCase):
+    """Regressions from the C6 code review (residency routing, shadowing of
+    superseded rows, search starvation, cross-store supersession)."""
+
+    def setUp(self):
+        self.fed, self.project, self.global_ = fed_pair()
+
+    def test_put_updates_row_where_it_lives_not_by_layer(self):
+        legacy = obs("legacy global-layer row", layer=4)
+        self.project.backend.put(legacy)  # pre-C6 rows all lived in the repo DB
+        self.fed.record_use(legacy.id, source="get")
+        self.assertEqual(self.project.backend.get(legacy.id).usage_count, 1)
+        self.assertIsNone(self.global_.backend.get(legacy.id))  # no fork
+
+    def test_superseded_project_row_does_not_shadow_global(self):
+        dead = self.fed.upsert(obs("Redis chosen for cache", layer=2,
+                                   concepts=["redis", "cache"]))
+        dead.superseded_by = "obs_x"
+        self.project.backend.put(dead)
+        live = self.fed.upsert(obs("Redis chosen for caching", layer=5,
+                                   concepts=["redis", "cache"]))
+        self.assertIn(live.id, {o.id for o in self.fed.backend.all("p")})
+
+    def test_search_keeps_global_hit_when_local_fills_limit(self):
+        for i in range(6):  # backend.put: distinct rows, no near-dup merging
+            self.project.backend.put(obs(f"retry note number {i} entry",
+                                         layer=2,
+                                         typ=ObsType.IMPL_DETAIL.value))
+        g = self.fed.upsert(obs("Reusable retry backoff helper", layer=5,
+                                typ=ObsType.CONVENTION.value))
+        hits = self.fed.backend.search("retry", limit=6)
+        self.assertEqual(len(hits), 6)
+        self.assertIn(g.id, {o.id for o in hits})
+
+    def test_supersedes_across_stores_marks_old_row(self):
+        old = self.fed.upsert(obs("Old retry pattern", layer=2))
+        new = self.fed.upsert(obs("Improved retry pattern", layer=5,
+                                  supersedes=old.id))
+        self.assertEqual(self.project.backend.get(old.id).superseded_by,
+                         new.id)
+        ids = {o.id for o in self.fed.backend.all("p")}
+        self.assertIn(new.id, ids)
+
+
 if __name__ == "__main__":
     unittest.main()
