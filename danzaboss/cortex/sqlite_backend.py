@@ -31,6 +31,11 @@ class SqliteBackend(StorageBackend):
         # check_same_thread False so a background extractor thread can share it
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # C6: the global store (~/.danza/cortex/global.db) is shared by every
+        # repo's sessions — WAL + busy_timeout let concurrent writers queue
+        # instead of erroring (spec §16 Q4 stance: no locking layer).
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
