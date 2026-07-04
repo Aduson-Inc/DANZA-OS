@@ -1,10 +1,23 @@
-/* CORTEX dashboard — vanilla JS, no build step. Read-only over the store. */
+/* CORTEX dashboard — vanilla JS, no build step. Read-only over the store.
+   C4.5 redesign: memory-first feed, console for the extras, n8n-style workflow. */
 "use strict";
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 
-const state = { view: "feed", q: "", type: "", items: [], knownIds: new Set(), firstLoad: true };
+const state = { view: "feed", q: "", type: "", project: "", env: "",
+                items: [], knownIds: new Set(), firstLoad: true,
+                consolePanel: "events" };
+
+/* Plain-language type badges — users read "Bug Fix", not "impl_detail". */
+const TYPE_LABEL = {
+  decision: "Decision", bug_fix: "Bug Fix", security: "Security",
+  limitation: "Limitation", milestone: "Milestone", convention: "Convention",
+  impl_detail: "Change", root_cause: "Root Cause", lesson: "Discovery",
+  perf: "Performance", dependency: "Dependency", api: "API",
+  prompt: "Prompt", session: "Session Summary",
+};
+const typeLabel = (t) => TYPE_LABEL[t] || String(t || "").replace(/_/g, " ");
 
 /* ---------- utilities ---------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
@@ -25,16 +38,16 @@ async function api(path, opts) {
   return res.json();
 }
 
-/* ---------- navigation ---------- */
-$$(".nav-btn").forEach((b) => b.addEventListener("click", () => {
-  $$(".nav-btn").forEach((x) => x.classList.toggle("active", x === b));
+/* ---------- navigation (top bar tabs) ---------- */
+$$(".tab").forEach((b) => b.addEventListener("click", () => {
+  $$(".tab").forEach((x) => x.classList.toggle("active", x === b));
   state.view = b.dataset.view;
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${state.view}`));
   $("#drawer").hidden = true;
   refresh();
 }));
 
-/* ---------- feed ---------- */
+/* ---------- memory feed ---------- */
 function bladeHTML(confidence, source) {
   const c = Math.max(0, Math.min(100, Number(confidence) || 0));
   const hot = c >= 90 ? " hot" : "";
@@ -67,7 +80,8 @@ function cardHTML(o, fresh) {
   return `<article class="card imp-${esc(o.importance)}${draft}${superseded}${freshCls}"
       data-id="${esc(o.id)}" data-mode="facts" tabindex="0">
     <div class="card-head">
-      <span class="type-chip t-${esc(o.type)}">${esc(o.type).replace(/_/g, " ")}</span>
+      <span class="card-num mono">#${o.num || "—"}</span>
+      <span class="type-chip t-${esc(o.type)}">${esc(typeLabel(o.type))}</span>
       <span class="imp-label">${esc(o.importance)}</span>
       <div class="mode-toggle" role="group" aria-label="View mode">
         <button class="mode-btn active" data-mode="facts">facts</button>
@@ -78,7 +92,7 @@ function cardHTML(o, fresh) {
     <div class="body-slot">${factsHTML(o)}</div>
     ${bladeHTML(o.confidence, o.confidence_source)}
     <div class="card-foot">
-      <span>${esc(o.id)}</span><span>${timeago(o.updated)}</span>
+      <span>${timeago(o.updated)}</span>
       <span>~${o.read_tokens}t read</span>
       ${o.usage_count ? `<span>used ${o.usage_count}×</span>` : ""}
       ${tags}
@@ -117,7 +131,7 @@ $("#feed").addEventListener("click", (ev) => {
 $("#filters").addEventListener("click", (ev) => {
   const chip = ev.target.closest(".chip");
   if (!chip) return;
-  $$(".chip").forEach((c) => c.classList.toggle("active", c === chip));
+  $$(".chip", $("#filters")).forEach((c) => c.classList.toggle("active", c === chip));
   state.type = chip.dataset.type;
   loadFeed();
 });
@@ -127,7 +141,7 @@ $("#search").addEventListener("input", (ev) => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     state.q = ev.target.value.trim();
-    if (state.view !== "feed") $$(".nav-btn")[0].click();
+    if (state.view !== "feed") $$(".tab")[0].click();
     else loadFeed();
   }, 250);
 });
@@ -136,9 +150,28 @@ async function loadFeed() {
   const params = new URLSearchParams({ limit: 100 });
   if (state.q) params.set("q", state.q);
   if (state.type) params.set("type", state.type);
+  if (state.project) params.set("project", state.project);
   const data = await api(`/api/observations?${params}`);
   renderFeed(data.items);
 }
+
+/* ---------- top-bar dropdowns ---------- */
+async function loadMeta() {
+  try {
+    const m = await api("/api/meta");
+    const opt = (v, sel) => `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(v)}</option>`;
+    $("#project-select").innerHTML = m.projects.map((p) => opt(p, m.project)).join("");
+    $("#env-select").innerHTML = m.environments.map((e) => opt(e, state.env)).join("");
+    state.project = m.project;
+  } catch { /* dropdowns are cosmetic at boot */ }
+}
+$("#project-select").addEventListener("change", (ev) => {
+  state.project = ev.target.value; loadFeed();
+});
+$("#env-select").addEventListener("change", (ev) => {
+  state.env = ev.target.value;
+  if (state.view === "console") loadConsole();
+});
 
 /* ---------- drawer ---------- */
 async function openDrawer(id) {
@@ -151,7 +184,7 @@ async function openDrawer(id) {
     `<div class="history-item"><span class="mono">${esc(h.ts || "")}</span> —
      ${esc(h.event || "")}${h.confidence ? ` (confidence → ${h.confidence})` : ""}</div>`).join("");
   $("#drawer-body").innerHTML = `
-    <span class="type-chip t-${esc(o.type)}">${esc(o.type).replace(/_/g, " ")}</span>
+    <span class="type-chip t-${esc(o.type)}">${esc(typeLabel(o.type))}</span>
     <h2>${esc(o.title)}</h2>
     ${bladeHTML(o.confidence, o.confidence_source)}
     <h3 class="section-label">Summary</h3><p>${esc(o.summary)}</p>
@@ -178,9 +211,41 @@ async function openDrawer(id) {
   $("#drawer").hidden = false;
 }
 $("#drawer-close").addEventListener("click", () => ($("#drawer").hidden = true));
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#drawer").hidden = true; });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { $("#drawer").hidden = true; $("#node-panel").hidden = true; }
+});
 
-/* ---------- explain playground ---------- */
+/* ---------- console ---------- */
+$("#console-subtabs").addEventListener("click", (ev) => {
+  const chip = ev.target.closest(".chip");
+  if (!chip) return;
+  $$(".chip", $("#console-subtabs")).forEach((c) => c.classList.toggle("active", c === chip));
+  state.consolePanel = chip.dataset.panel;
+  $$(".console-panel").forEach((p) => (p.hidden = p.id !== `panel-${state.consolePanel}`));
+  loadConsole();
+});
+
+function consoleRow(r) {
+  const t = (r.ts || "").replace("T", " ").replace("+00:00", "");
+  const sid = (r.session || "").slice(0, 8);
+  return `<div class="clog-row k-${esc(r.kind)}">
+    <span class="clog-ts">${esc(t)}</span>
+    <span class="clog-kind">${esc(r.kind)}</span>
+    <span class="clog-sid dim">${esc(sid)}</span>
+    <span class="clog-tool">${esc(r.tool)}</span>
+    <span class="clog-detail">${esc(r.detail)}</span>
+  </div>`;
+}
+
+async function loadConsole() {
+  if (state.consolePanel === "sessions") return loadSessions();
+  if (state.consolePanel !== "events") return;
+  const data = await api("/api/console?limit=200");
+  $("#console-log").innerHTML = data.items.map(consoleRow).join("") ||
+    '<p class="dim">no events captured yet</p>';
+}
+
+/* ---------- explain playground (console › retrieval trace) ---------- */
 function sigRowHTML(name, ids, titles) {
   const chips = ids.slice(0, 4).map((id) =>
     `<span class="sig-chip" title="${esc(id)}">${esc((titles[id] || id).slice(0, 34))}</span>`).join("");
@@ -252,14 +317,17 @@ $("#explain-form").addEventListener("submit", async (ev) => {
   }
 });
 
-/* ---------- sessions ---------- */
+/* ---------- sessions (console › sessions) ---------- */
 async function loadSessions() {
   const data = await api("/api/sessions");
-  $("#sessions-body").innerHTML = data.items.map((s) => `<tr>
+  const rows = state.env
+    ? data.items.filter((s) => !s.environment || s.environment === state.env)
+    : data.items;
+  $("#sessions-body").innerHTML = rows.map((s) => `<tr>
     <td>${esc(s.id).slice(0, 18)}…</td>
     <td class="status-${esc(s.status)}">${esc(s.status)}</td>
     <td>${timeago(s.started_at)}</td>
-    <td class="num">${s.observations_written ? "" : ""}${esc(String(s.prompt_count ?? 0))}</td>
+    <td class="num">${esc(String(s.prompt_count ?? 0))}</td>
     <td class="num">${esc(String(s.observations_written ?? 0))}</td>
     <td>${s.gate_blocked ? "blocked once" : "—"}</td>
   </tr>`).join("");
@@ -270,7 +338,7 @@ function bars(el, counts, crimsonKeys = []) {
   const max = Math.max(1, ...Object.values(counts));
   el.innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
     `<div class="bar-row${crimsonKeys.includes(k) ? " crimson" : ""}">
-      <span class="bar-name">${esc(k).replace(/_/g, " ")}</span>
+      <span class="bar-name">${esc(typeLabel(k))}</span>
       <div class="bar-track"><div class="bar-fill" style="transform:scaleX(${v / max})"></div></div>
       <span class="bar-count">${v}</span>
     </div>`).join("");
@@ -317,113 +385,149 @@ $("#settings-form").addEventListener("submit", async (ev) => {
   setTimeout(() => ($("#save-note").textContent = ""), 2500);
 });
 
-/* ---------- graph explorer (C4) ---------- */
-const gstate = { mode: "neighborhood", center: null };
+/* ---------- workflow view (n8n-style blocks over the knowledge graph) ---------- */
+const wf = { data: null, vb: null, drag: null };
 
-$$("#graph-form .mode-btn").forEach((b) => b.addEventListener("click", () => {
-  $$("#graph-form .mode-btn").forEach((x) => x.classList.toggle("active", x === b));
-  gstate.mode = b.dataset.gmode;
-  if (gstate.center) exploreNode(gstate.center);
-}));
-
-$("#graph-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const text = $("#graph-node").value.trim();
-  if (!text) return;
-  const data = await api(`/api/graph?${new URLSearchParams({ q: text })}`);
-  $("#graph-matches").innerHTML = (data.matches || []).map((m) =>
-    `<button type="button" class="tag graph-match" data-id="${esc(m.id)}">
-       ${esc(m.kind)}: ${esc(m.name)}</button>`).join(" ") ||
-    '<span class="dim">no matching nodes — run <code>danza cortex index</code></span>';
-});
-
-$("#graph-matches").addEventListener("click", (ev) => {
-  const b = ev.target.closest(".graph-match");
-  if (b) exploreNode(b.dataset.id);
-});
-
-async function exploreNode(id) {
-  gstate.center = id;
-  const depth = +$("#graph-depth").value || 2;
-  const data = await api(`/api/graph?${new URLSearchParams(
-    { node: id, depth, mode: gstate.mode })}`);
-  $("#graph-meta").textContent = gstate.mode === "impact"
-    ? `${data.nodes.length - 1} nodes break if ${id} changes (depth ${depth})`
-    : `${data.nodes.length} nodes · ${data.edges.length} edges (depth ${depth})`;
-  renderGraph(data);
-}
-
-function layoutGraph(nodes, edges, w, h) {
-  // deterministic: seeded on a circle, relaxed with repulsion + springs
-  nodes.forEach((n, i) => {
-    const a = (2 * Math.PI * i) / nodes.length;
-    n.x = w / 2 + Math.cos(a) * h / 3;
-    n.y = h / 2 + Math.sin(a) * h / 3;
+function wfLayers(nodes, edges) {
+  /* deterministic layered layout: entry points (nothing imports them) sit on
+     the left; foundations everything depends on drift right — reads as a flow */
+  const ids = nodes.map((n) => n.id);
+  const idset = new Set(ids);
+  const into = new Map(ids.map((id) => [id, new Set()]));
+  const outof = new Map(ids.map((id) => [id, new Set()]));
+  edges.forEach((e) => {
+    if (idset.has(e.src) && idset.has(e.dst)) {
+      into.get(e.dst).add(e.src);
+      outof.get(e.src).add(e.dst);
+    }
   });
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  for (let it = 0; it < 200; it++) {
-    for (const a of nodes) {                       // pairwise repulsion
-      for (const b of nodes) {
-        if (a === b) continue;
-        const dx = a.x - b.x, dy = a.y - b.y;
-        const d2 = Math.max(64, dx * dx + dy * dy);
-        a.x += (dx / d2) * 900; a.y += (dy / d2) * 900;
-      }
-    }
-    for (const e of edges) {                       // spring along edges
-      const s = byId.get(e.src), t = byId.get(e.dst);
-      if (!s || !t) continue;
-      const dx = t.x - s.x, dy = t.y - s.y;
-      const d = Math.max(1, Math.hypot(dx, dy));
-      const f = (d - 110) / d * 0.02;
-      s.x += dx * f; s.y += dy * f; t.x -= dx * f; t.y -= dy * f;
-    }
-    for (const n of nodes) {                       // gravity + bounds
-      n.x += (w / 2 - n.x) * 0.005; n.y += (h / 2 - n.y) * 0.005;
-      n.x = Math.min(w - 30, Math.max(30, n.x));
-      n.y = Math.min(h - 20, Math.max(20, n.y));
+  const layer = new Map();
+  const indeg = new Map(ids.map((id) => [id, into.get(id).size]));
+  const queue = ids.filter((id) => indeg.get(id) === 0).sort();
+  queue.forEach((id) => layer.set(id, 0));
+  while (queue.length) {
+    const id = queue.shift();
+    for (const nxt of [...outof.get(id)].sort()) {
+      layer.set(nxt, Math.max(layer.get(nxt) ?? 0, (layer.get(id) ?? 0) + 1));
+      indeg.set(nxt, indeg.get(nxt) - 1);
+      if (indeg.get(nxt) === 0) queue.push(nxt);
     }
   }
+  ids.filter((id) => !layer.has(id)).sort()      // cycles / isolated blocks
+     .forEach((id, i) => layer.set(id, 0));
+  return layer;
 }
 
-function renderGraph(data) {
-  const svg = $("#graph-svg");
-  const w = svg.clientWidth || 900, h = 640;
-  const nodes = data.nodes.map((n) => ({ ...n }));
-  layoutGraph(nodes, data.edges, w, h);
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const lines = data.edges.map((e) => {
+const WF = { w: 200, h: 68, gapX: 300, gapY: 100, padX: 60, padY: 50 };
+
+function wfLayout(data) {
+  const layer = wfLayers(data.nodes, data.edges);
+  const cols = new Map();
+  data.nodes.forEach((n) => {
+    const l = layer.get(n.id) ?? 0;
+    if (!cols.has(l)) cols.set(l, []);
+    cols.get(l).push(n);
+  });
+  [...cols.values()].forEach((col) => col.sort((a, b) => a.id.localeCompare(b.id)));
+  for (const [l, col] of cols) {
+    col.forEach((n, i) => {
+      n.x = WF.padX + l * WF.gapX;
+      n.y = WF.padY + i * WF.gapY;
+    });
+  }
+  const maxL = Math.max(0, ...cols.keys());
+  const maxRows = Math.max(1, ...[...cols.values()].map((c) => c.length));
+  return { width: WF.padX * 2 + maxL * WF.gapX + WF.w,
+           height: WF.padY * 2 + (maxRows - 1) * WF.gapY + WF.h };
+}
+
+function wfRender() {
+  const svg = $("#workflow-svg");
+  const data = wf.data;
+  if (!data || !data.nodes.length) {
+    $("#workflow-meta").innerHTML =
+      'no graph yet — run <code>danza cortex index</code> first';
+    svg.innerHTML = "";
+    return;
+  }
+  const dims = wfLayout(data);
+  if (!wf.vb) wf.vb = { x: 0, y: 0, w: dims.width, h: Math.max(dims.height, 400) };
+  const byId = new Map(data.nodes.map((n) => [n.id, n]));
+  const paths = data.edges.map((e) => {
     const s = byId.get(e.src), t = byId.get(e.dst);
     if (!s || !t) return "";
-    return `<line class="gedge r-${esc(e.relation)}" x1="${s.x}" y1="${s.y}"
-      x2="${t.x}" y2="${t.y}"><title>${esc(e.src)} —${esc(e.relation)}→ ${esc(e.dst)}</title></line>`;
+    const x1 = s.x + WF.w, y1 = s.y + WF.h / 2;
+    const x2 = t.x, y2 = t.y + WF.h / 2;
+    const dx = Math.max(40, (x2 - x1) / 2);
+    const width = Math.min(5, 1 + Math.log2(e.weight + 1));
+    return `<path class="wf-edge" style="stroke-width:${width}"
+      d="M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}">
+      <title>${esc(e.src)} → ${esc(e.dst)} · ${e.weight} imports</title></path>`;
   }).join("");
-  const dots = nodes.map((n) => {
-    const center = n.id === data.center ? " center" : "";
-    const label = n.name.length > 28 ? "…" + n.name.slice(-27) : n.name;
-    return `<g class="gnode k-${esc(n.kind)}${center}" data-id="${esc(n.id)}"
-        transform="translate(${n.x},${n.y})">
-      <circle r="${n.id === data.center ? 9 : 6}"><title>${esc(n.id)}</title></circle>
-      <text x="10" y="4">${esc(label)}</text></g>`;
-  }).join("");
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = lines + dots;
+  const blocks = data.nodes.map((n) => `
+    <g class="wf-node" data-id="${esc(n.id)}" transform="translate(${n.x},${n.y})">
+      <rect width="${WF.w}" height="${WF.h}" rx="8"></rect>
+      <rect class="wf-accent" width="4" height="${WF.h}" rx="2"></rect>
+      <text class="wf-title" x="16" y="28">${esc(n.label)}</text>
+      <text class="wf-sub" x="16" y="50">${n.file_count} files${
+        n.observations ? ` · ${n.observations} memories` : ""}</text>
+    </g>`).join("");
+  svg.setAttribute("viewBox", `${wf.vb.x} ${wf.vb.y} ${wf.vb.w} ${wf.vb.h}`);
+  svg.innerHTML = paths + blocks;
+  $("#workflow-meta").textContent =
+    `${data.nodes.length} blocks · ${data.edges.length} flows — ` +
+    `scroll to zoom, drag to pan, click a block for its files`;
 }
 
-$("#graph-svg").addEventListener("click", (ev) => {
-  const g = ev.target.closest(".gnode");
-  if (g) exploreNode(g.dataset.id);
+async function loadWorkflow() {
+  if (!wf.data) wf.data = await api("/api/workflow");
+  wfRender();
+}
+
+/* zoom (wheel) + pan (drag) on the workflow canvas */
+$("#workflow-svg").addEventListener("wheel", (ev) => {
+  if (!wf.vb) return;
+  ev.preventDefault();
+  const svg = $("#workflow-svg");
+  const rect = svg.getBoundingClientRect();
+  const mx = wf.vb.x + (ev.clientX - rect.left) / rect.width * wf.vb.w;
+  const my = wf.vb.y + (ev.clientY - rect.top) / rect.height * wf.vb.h;
+  const k = ev.deltaY > 0 ? 1.15 : 1 / 1.15;
+  wf.vb = { x: mx - (mx - wf.vb.x) * k, y: my - (my - wf.vb.y) * k,
+            w: wf.vb.w * k, h: wf.vb.h * k };
+  svg.setAttribute("viewBox", `${wf.vb.x} ${wf.vb.y} ${wf.vb.w} ${wf.vb.h}`);
+}, { passive: false });
+
+$("#workflow-svg").addEventListener("mousedown", (ev) => {
+  if (ev.target.closest(".wf-node")) return;
+  wf.drag = { x: ev.clientX, y: ev.clientY, vb: { ...wf.vb } };
 });
+window.addEventListener("mousemove", (ev) => {
+  if (!wf.drag) return;
+  const svg = $("#workflow-svg");
+  const rect = svg.getBoundingClientRect();
+  wf.vb.x = wf.drag.vb.x - (ev.clientX - wf.drag.x) / rect.width * wf.vb.w;
+  wf.vb.y = wf.drag.vb.y - (ev.clientY - wf.drag.y) / rect.height * wf.vb.h;
+  svg.setAttribute("viewBox", `${wf.vb.x} ${wf.vb.y} ${wf.vb.w} ${wf.vb.h}`);
+});
+window.addEventListener("mouseup", () => (wf.drag = null));
 
-async function loadGraph() {
-  if (gstate.center) return;                       // keep the current view
-  const data = await api("/api/graph");
-  $("#graph-meta").textContent =
-    `${data.stats.nodes} nodes · ${data.stats.edges} edges — search above, or click a hub`;
-  $("#graph-matches").innerHTML = (data.top || []).map((m) =>
-    `<button type="button" class="tag graph-match" data-id="${esc(m.id)}">
-       ${esc(m.kind)}: ${esc(m.name)} (${m.degree})</button>`).join(" ");
-}
+$("#workflow-reset").addEventListener("click", () => { wf.vb = null; wfRender(); });
+
+$("#workflow-svg").addEventListener("click", (ev) => {
+  const g = ev.target.closest(".wf-node");
+  if (!g || !wf.data) return;
+  const n = wf.data.nodes.find((x) => x.id === g.dataset.id);
+  if (!n) return;
+  $("#node-panel-body").innerHTML = `
+    <h2>${esc(n.label)}</h2>
+    <p class="dim mono">${esc(n.id)}</p>
+    <p>${n.file_count} files${n.observations ? ` · ${n.observations} attached memories` : ""}</p>
+    <h3 class="section-label">Files in this block</h3>
+    <ul class="files">${n.files.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`;
+  $("#node-panel").hidden = false;
+});
+$("#node-panel-close").addEventListener("click", () => ($("#node-panel").hidden = true));
 
 /* ---------- live (SSE) ---------- */
 function pulse() {
@@ -446,16 +550,12 @@ function connectLive() {
 
 /* ---------- boot ---------- */
 function refresh() {
-  ({ feed: loadFeed, sessions: loadSessions, stats: loadStats,
-     settings: loadSettings, explain: () => {},
-     graph: loadGraph }[state.view] || loadFeed)();
+  ({ feed: loadFeed, console: loadConsole, workflow: loadWorkflow,
+     stats: loadStats, settings: loadSettings }[state.view] || loadFeed)();
 }
 
 (async function boot() {
-  try {
-    const s = await api("/api/stats");
-    $("#project-name").textContent = s.project || "";
-  } catch { /* stats are cosmetic at boot */ }
+  await loadMeta();
   refresh();
   connectLive();
 })();

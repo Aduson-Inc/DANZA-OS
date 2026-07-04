@@ -95,6 +95,31 @@ class TestCortexUI(unittest.TestCase):
             status = e.code
         self.assertEqual(status, 405)
 
+    def test_feed_items_carry_simple_numbers(self):
+        _, _, body = get(self.port, "/api/observations")
+        item = json.loads(body)["items"][0]
+        self.assertGreaterEqual(item.get("num", 0), 1)  # human-friendly #N
+
+    def test_meta_lists_projects_and_environments(self):
+        _, _, body = get(self.port, "/api/meta")
+        m = json.loads(body)
+        self.assertIn(m["project"], m["projects"])
+        self.assertTrue(m["environments"])
+
+    def test_console_streams_capture_telemetry(self):
+        # seed one session with a mutation event via the real hook handlers
+        commands._hook_session_start(self.root, {"session_id": "ui-s1"})
+        from danzaboss.cortex.events import CaptureLog
+        log = CaptureLog(commands.db_path(self.root))
+        log.record_event("ui-s1", "Edit", file_path="danzaboss/cli.py")
+        _, _, body = get(self.port, "/api/console")
+        items = json.loads(body)["items"]
+        kinds = {i["kind"] for i in items}
+        self.assertIn("mutation", kinds)
+        self.assertIn("session", kinds)
+        mut = next(i for i in items if i["kind"] == "mutation")
+        self.assertEqual(mut["detail"], "danzaboss/cli.py")
+
     def test_snapshot_version_moves_on_write(self):
         v1 = snapshot_version(commands.db_path(self.root))
         ObservationStore(SqliteBackend(commands.db_path(self.root))).upsert(
@@ -164,6 +189,54 @@ class TestGraphEndpoint(unittest.TestCase):
             self.fail("expected 405")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 405)
+
+
+class TestWorkflowEndpoint(unittest.TestCase):
+    """C4.5 UI: /api/workflow aggregates the file graph into subsystem blocks."""
+
+    @classmethod
+    def setUpClass(cls):
+        from danzaboss.cortex.graph import GraphStore
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = cls.tmp.name
+        g = GraphStore(commands.db_path(cls.root))
+        files = ("danzaboss/cli.py", "danzaboss/kernel/state.py",
+                 "danzaboss/kernel/profile.py", "danzaboss/hooks/guards.py",
+                 "README.md")
+        for name in files:
+            g.add_node("file", name, project="p")
+        g.add_edge("file:danzaboss/cli.py", "file:danzaboss/kernel/profile.py", "imports")
+        g.add_edge("file:danzaboss/cli.py", "file:danzaboss/hooks/guards.py", "imports")
+        g.add_edge("file:danzaboss/hooks/guards.py",
+                   "file:danzaboss/kernel/state.py", "imports")
+        g.add_node("observation", "obs_x", project="p")
+        g.add_edge("observation:obs_x", "file:danzaboss/kernel/profile.py", "about")
+        cls.server, cls.port = serve_in_thread(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.tmp.cleanup()
+
+    def test_blocks_are_groups_not_files(self):
+        _, _, body = get(self.port, "/api/workflow")
+        data = json.loads(body)
+        ids = {n["id"] for n in data["nodes"]}
+        self.assertEqual(ids, {"danzaboss", "danzaboss/kernel",
+                               "danzaboss/hooks", "root"})
+        kernel = next(n for n in data["nodes"] if n["id"] == "danzaboss/kernel")
+        self.assertEqual(kernel["file_count"], 2)
+        self.assertIn("danzaboss/kernel/profile.py", kernel["files"])
+        self.assertEqual(kernel["observations"], 1)  # obs_x is about profile.py
+
+    def test_flows_are_aggregated_imports_between_groups(self):
+        _, _, body = get(self.port, "/api/workflow")
+        flows = {(e["src"], e["dst"]): e["weight"]
+                 for e in json.loads(body)["edges"]}
+        self.assertEqual(flows[("danzaboss", "danzaboss/kernel")], 1)
+        self.assertEqual(flows[("danzaboss", "danzaboss/hooks")], 1)
+        self.assertEqual(flows[("danzaboss/hooks", "danzaboss/kernel")], 1)
+        self.assertTrue(all(s != d for (s, d) in flows))  # no self-loops
 
 
 if __name__ == "__main__":

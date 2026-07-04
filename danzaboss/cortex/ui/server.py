@@ -128,6 +128,12 @@ class CortexUIHandler(BaseHTTPRequestHandler):
                 self._api_observation(route.rsplit("/", 1)[1])
             elif route == "/api/sessions":
                 self._api_sessions()
+            elif route == "/api/console":
+                self._api_console(q)
+            elif route == "/api/workflow":
+                self._api_workflow()
+            elif route == "/api/meta":
+                self._api_meta()
             elif route == "/api/stats":
                 self._api_stats()
             elif route == "/api/settings":
@@ -178,8 +184,16 @@ class CortexUIHandler(BaseHTTPRequestHandler):
         if importance:
             items = [o for o in items if o.importance == importance]
         total = len(items)
-        self._json({"total": total,
-                    "items": [_trim(o) for o in items[offset:offset + limit]]})
+        # simple human-friendly numbers (#1, #2, …) — stable per store, mapped
+        # from the observations table rowid, like a ticket number
+        nums = {r[1]: r[0] for r in be.conn.execute(
+            "SELECT rowid, id FROM observations").fetchall()}
+        out = []
+        for o in items[offset:offset + limit]:
+            row = _trim(o)
+            row["num"] = nums.get(o.id, 0)
+            out.append(row)
+        self._json({"total": total, "items": out})
 
     def _api_observation(self, obs_id: str) -> None:
         o = self._store().get(obs_id)
@@ -193,6 +207,104 @@ class CortexUIHandler(BaseHTTPRequestHandler):
         rows = log.conn.execute(
             "SELECT * FROM sessions ORDER BY started_at DESC LIMIT 50").fetchall()
         self._json({"items": [dict(r) for r in rows]})
+
+    def _api_console(self, q: dict) -> None:
+        """Console stream (C4.5 UI): the raw telemetry that stays OUT of the
+        memory feed — tool events, session lifecycle, distillation gate hits.
+        Newest first, merged across sources, honestly derived from the capture
+        log (no synthetic event kinds)."""
+        limit = int((q.get("limit") or ["200"])[0])
+        log = CaptureLog(self.db_path)
+        rows: list[dict] = []
+        for r in log.conn.execute(
+                "SELECT session_id, ts, tool, file_path, command, outcome "
+                "FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall():
+            d = dict(r)
+            kind = "memory"
+            if d["tool"] == "Bash":
+                kind = "command"
+            elif d["tool"] in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+                kind = "mutation"
+            rows.append({"kind": kind, "ts": d["ts"], "session": d["session_id"],
+                         "detail": d["file_path"] or d["command"] or d["tool"],
+                         "tool": d["tool"], "outcome": d["outcome"]})
+        for r in log.conn.execute(
+                "SELECT id, started_at, ended_at, status, gate_blocked, "
+                "observations_written FROM sessions "
+                "ORDER BY started_at DESC LIMIT 40").fetchall():
+            d = dict(r)
+            rows.append({"kind": "session", "ts": d["started_at"],
+                         "session": d["id"], "tool": "SessionStart",
+                         "detail": "session opened", "outcome": ""})
+            if d["gate_blocked"]:
+                rows.append({"kind": "gate", "ts": d["ended_at"] or d["started_at"],
+                             "session": d["id"], "tool": "Stop",
+                             "detail": "distillation gate blocked the stop",
+                             "outcome": ""})
+            if d["ended_at"]:
+                rows.append({"kind": "session", "ts": d["ended_at"],
+                             "session": d["id"], "tool": "Stop",
+                             "detail": f"session closed · "
+                                       f"{d['observations_written']} distilled",
+                             "outcome": ""})
+        rows.sort(key=lambda r: r["ts"], reverse=True)
+        self._json({"items": rows[:limit]})
+
+    def _api_workflow(self) -> None:
+        """Workflow map (C4.5 UI): the knowledge graph aggregated into big
+        subsystem/feature blocks — n8n-style nodes, not one node per file.
+        Each block lists its member files; edges are import flows between
+        blocks weighted by how many file-level imports they bundle."""
+        from ..graph import GraphStore
+        graph = GraphStore(self.db_path)
+
+        def group_of(path: str) -> str:
+            parts = path.split("/")
+            if len(parts) == 1:
+                return "root"
+            if parts[0] == "danzaboss":
+                return "/".join(parts[:2]) if len(parts) > 2 else parts[0]
+            return parts[0]
+
+        files = graph.conn.execute(
+            "SELECT id, name FROM graph_nodes WHERE kind = 'file'").fetchall()
+        member: dict[str, list[str]] = {}
+        gid: dict[str, str] = {}          # file node id -> group key
+        for node_id, name in files:
+            g = group_of(name)
+            member.setdefault(g, []).append(name)
+            gid[node_id] = g
+        obs_count: dict[str, int] = {}
+        for (src, dst) in graph.conn.execute(
+                "SELECT src, dst FROM graph_edges WHERE relation = 'about'").fetchall():
+            if dst in gid:
+                g = gid[dst]
+                obs_count[g] = obs_count.get(g, 0) + 1
+        flows: dict[tuple[str, str], int] = {}
+        for (src, dst) in graph.conn.execute(
+                "SELECT src, dst FROM graph_edges WHERE relation = 'imports'").fetchall():
+            gs, gd = gid.get(src), gid.get(dst)
+            if gs and gd and gs != gd:
+                flows[(gs, gd)] = flows.get((gs, gd), 0) + 1
+        nodes = [{"id": g, "label": g.split("/")[-1], "files": sorted(fs),
+                  "file_count": len(fs), "observations": obs_count.get(g, 0)}
+                 for g, fs in sorted(member.items())]
+        edges = [{"src": s, "dst": d, "weight": w}
+                 for (s, d), w in sorted(flows.items())]
+        self._json({"nodes": nodes, "edges": edges})
+
+    def _api_meta(self) -> None:
+        """Top-bar dropdown data: known projects and AI environments."""
+        be = SqliteBackend(self.db_path)
+        projects = [r[0] for r in be.conn.execute(
+            "SELECT DISTINCT project FROM observations ORDER BY project").fetchall()]
+        log = CaptureLog(self.db_path)
+        envs = [r[0] for r in log.conn.execute(
+            "SELECT DISTINCT environment FROM sessions "
+            "WHERE environment != '' ORDER BY environment").fetchall()]
+        self._json({"project": self.project,
+                    "projects": projects or [self.project],
+                    "environments": envs or ["claude-code"]})
 
     def _api_stats(self) -> None:
         log = CaptureLog(self.db_path)
