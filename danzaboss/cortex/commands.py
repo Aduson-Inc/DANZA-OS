@@ -357,11 +357,18 @@ def _cmd_ui(argv: list[str], root: str, stdin: TextIO) -> int:
     return 0
 
 
+def _cmd_mcp(argv: list[str], root: str, stdin: TextIO) -> int:
+    """danza cortex mcp — MCP stdio server; an external client's doorway
+    into this repo's memory (C6). Blocks until the client closes stdin."""
+    from .mcp_server import CortexMcpServer  # local: protocol loop is optional
+    return CortexMcpServer(root).run(stdin=stdin)
+
+
 _COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
              "search": _cmd_search, "retrieve": _cmd_retrieve,
              "context": _cmd_context, "age": _cmd_age, "learn": _cmd_learn,
              "stats": _cmd_stats, "ui": _cmd_ui, "index": _cmd_index,
-             "graph": _cmd_graph}
+             "graph": _cmd_graph, "mcp": _cmd_mcp}
 
 
 def main(argv: list[str], *, root: Optional[str] = None,
@@ -370,6 +377,6 @@ def main(argv: list[str], *, root: Optional[str] = None,
     stdin = stdin if stdin is not None else sys.stdin
     if not argv or argv[0] not in _COMMANDS:
         print("danza cortex <hook|observe|get|search|retrieve|context|age|learn"
-              "|stats|ui|index|graph> ...", file=sys.stderr)
+              "|stats|ui|index|graph|mcp> ...", file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:], root, stdin)

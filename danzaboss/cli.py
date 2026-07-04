@@ -6,7 +6,7 @@ Commands:
   danzaboss.cli selftest                        run the cold-start harness
   danzaboss.cli hook pretooluse                 Claude Code PreToolUse guard (reads CC JSON on stdin)
   danzaboss.cli hook stop                       Claude Code Stop hook
-  danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|learn|stats|ui|index|graph>
+  danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|learn|stats|ui|index|graph|mcp>
                                                 CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
   danzaboss.cli profile                         print the active execution profile (OS_DEV|OS_BOOT_TEST|APP_BUILD)
   danzaboss.cli tier <paths...> [--commit]      cheapest safe verification tier for a change set
