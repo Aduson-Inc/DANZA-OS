@@ -1,4 +1,4 @@
-# CORTEX Build Design — Wiring the Cognitive Memory into DANZA OS
+# CORTEX Build Design — Wiring the Cognitive Memory into DANZA-OS
 
 **Date:** 2026-07-03
 **Status:** Approved design (brainstormed + user-validated section by section)

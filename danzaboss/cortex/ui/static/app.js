@@ -128,11 +128,8 @@ $("#feed").addEventListener("click", (ev) => {
 });
 
 /* filters + search */
-$("#filters").addEventListener("click", (ev) => {
-  const chip = ev.target.closest(".chip");
-  if (!chip) return;
-  $$(".chip", $("#filters")).forEach((c) => c.classList.toggle("active", c === chip));
-  state.type = chip.dataset.type;
+$("#type-filter").addEventListener("change", (ev) => {
+  state.type = ev.target.value;
   loadFeed();
 });
 

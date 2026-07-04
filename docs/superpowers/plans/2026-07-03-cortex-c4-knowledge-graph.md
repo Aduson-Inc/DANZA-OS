@@ -176,7 +176,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd "/home/tre/dev/DANZA OS" && python3 -m unittest danzaboss.tests.test_cortex_graph -v 2>&1 | tail -5` — actually the suite convention is `cd danzaboss/tests && python3 test_cortex_graph.py`; use: `cd "/home/tre/dev/DANZA OS/danzaboss/tests" && python3 test_cortex_graph.py`
+Run: `cd "/home/tre/dev/DANZA-OS" && python3 -m unittest danzaboss.tests.test_cortex_graph -v 2>&1 | tail -5` — actually the suite convention is `cd danzaboss/tests && python3 test_cortex_graph.py`; use: `cd "/home/tre/dev/DANZA-OS/danzaboss/tests" && python3 test_cortex_graph.py`
 Expected: FAIL with `ModuleNotFoundError: No module named 'danzaboss.cortex.graph'`
 
 - [ ] **Step 3: Implement `danzaboss/cortex/graph.py`**
@@ -426,12 +426,12 @@ class GraphStore:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd "/home/tre/dev/DANZA OS/danzaboss/tests" && python3 test_cortex_graph.py`
+Run: `cd "/home/tre/dev/DANZA-OS/danzaboss/tests" && python3 test_cortex_graph.py`
 Expected: `OK` (13 tests)
 
 - [ ] **Step 5: Run the full suite, then commit**
 
-Run: `cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3`
+Run: `cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3`
 Expected: `OK`, test count 227 + 13 = 240
 
 ```bash
@@ -565,7 +565,7 @@ class TestSelfRepoAcceptance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.g = GraphStore(":memory:")
-        scan_repo(REPO_ROOT, "DANZA OS", cls.g)
+        scan_repo(REPO_ROOT, "DANZA-OS", cls.g)
 
     def test_impact_of_observation_py(self):
         broke = {nid for nid, _ in
@@ -607,7 +607,7 @@ Note: `test_symbols_declared`'s first assert is redundant scaffolding — keep o
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd "/home/tre/dev/DANZA OS/danzaboss/tests" && python3 test_cortex_repo_intel.py`
+Run: `cd "/home/tre/dev/DANZA-OS/danzaboss/tests" && python3 test_cortex_repo_intel.py`
 Expected: FAIL with `ModuleNotFoundError: No module named 'danzaboss.cortex.repo_intel'`
 
 - [ ] **Step 3: Implement `danzaboss/cortex/repo_intel.py`**
@@ -791,12 +791,12 @@ def scan_repo(root: str, project: str, graph: GraphStore,
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd "/home/tre/dev/DANZA OS/danzaboss/tests" && python3 test_cortex_repo_intel.py`
+Run: `cd "/home/tre/dev/DANZA-OS/danzaboss/tests" && python3 test_cortex_repo_intel.py`
 Expected: `OK` (9 tests). If `test_impact_of_observation_py` fails, debug import resolution — the cortex modules use relative imports (`from .observation import Observation`), so level-1 resolution from `danzaboss.cortex.store` must yield `danzaboss.cortex.observation`.
 
 - [ ] **Step 5: Run the full suite, then commit**
 
-Run: `cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3`
+Run: `cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3`
 Expected: `OK`
 
 ```bash
@@ -830,12 +830,12 @@ Implementation notes (full code left to the implementer — the shapes above are
 
 - [ ] **Step 1: Implement `danzaboss/cortex/git_intel.py`** per the contract above (module docstring: why = commits are the join between memory and code; fail-soft discipline).
 
-- [ ] **Step 2: Write tests** in `danzaboss/tests/test_cortex_git_intel.py` covering: `parse_log` on a two-commit fixture string (shas, dates, subjects, file lists); `ingest_git` on a real temp git repo (`skipUnless(shutil.which("git"))`, `git init` + config user + one commit) asserting the commit node and `modifies` edge exist; `link_observations` with an in-memory store+graph — an observation with `files=["pkg/core.py"]` and `related_commits=["abc1234"]` gets `about` and `references` edges (seed the graph with `file:pkg/core.py` and `commit:abc1234def...`). Run: `cd "/home/tre/dev/DANZA OS/danzaboss/tests" && python3 test_cortex_git_intel.py` → `OK`.
+- [ ] **Step 2: Write tests** in `danzaboss/tests/test_cortex_git_intel.py` covering: `parse_log` on a two-commit fixture string (shas, dates, subjects, file lists); `ingest_git` on a real temp git repo (`skipUnless(shutil.which("git"))`, `git init` + config user + one commit) asserting the commit node and `modifies` edge exist; `link_observations` with an in-memory store+graph — an observation with `files=["pkg/core.py"]` and `related_commits=["abc1234"]` gets `about` and `references` edges (seed the graph with `file:pkg/core.py` and `commit:abc1234def...`). Run: `cd "/home/tre/dev/DANZA-OS/danzaboss/tests" && python3 test_cortex_git_intel.py` → `OK`.
 
 - [ ] **Step 3: Full suite + commit**
 
 ```bash
-cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
+cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
 git add danzaboss/cortex/git_intel.py danzaboss/tests/test_cortex_git_intel.py
 git commit -m "feat(cortex): C4 git intelligence — commits and observation links enter the graph
 
@@ -893,7 +893,7 @@ In `hybrid_retrieve`, change the signals dict entry to `"graph": _sig_graph(grap
 - [ ] **Step 3: Full suite + commit**
 
 ```bash
-cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
+cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
 git add danzaboss/cortex/retrieve.py danzaboss/cortex/quality.py danzaboss/cortex/commands.py danzaboss/cortex/ui/server.py danzaboss/tests/test_cortex_graph_signal.py
 git commit -m "feat(cortex): C4 live graph signal — impact closure feeds RRF fusion
 
@@ -967,7 +967,7 @@ Register: `_COMMANDS = {..., "index": _cmd_index, "graph": _cmd_graph}` and usag
 
 - [ ] **Step 1: Implement both commands** (use `take_opt`-style flag popping copied from `_cmd_retrieve`).
 - [ ] **Step 2: Tests** — in a temp root with a tiny py file + no git: `index` exits 0 and prints stats JSON with `files >= 1`; `graph <that-file> --impact` exits 0 with `mode == "impact"`; unknown node exits 1.
-- [ ] **Step 3: Smoke on this repo:** `cd "/home/tre/dev/DANZA OS" && PYTHONPATH=. python3 -m danzaboss.cli cortex index` then `PYTHONPATH=. python3 -m danzaboss.cli cortex graph danzaboss/cortex/observation.py --impact` — expect store.py/retrieve.py in the closure. Show output.
+- [ ] **Step 3: Smoke on this repo:** `cd "/home/tre/dev/DANZA-OS" && PYTHONPATH=. python3 -m danzaboss.cli cortex index` then `PYTHONPATH=. python3 -m danzaboss.cli cortex graph danzaboss/cortex/observation.py --impact` — expect store.py/retrieve.py in the closure. Show output.
 - [ ] **Step 4: Full suite + commit**
 
 ```bash
@@ -1030,7 +1030,7 @@ Route dispatch, inserted before the 404 fallback: `elif route == "/api/graph": s
 - [ ] **Step 3: Full suite + commit**
 
 ```bash
-cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
+cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
 git add danzaboss/cortex/ui/server.py danzaboss/tests/test_cortex_ui.py
 git commit -m "feat(cortex): /api/graph endpoint — search, subgraph, impact closure over HTTP
 
@@ -1219,7 +1219,7 @@ And in `refresh()` change the map to include `graph: loadGraph`:
 - [ ] **Step 3: Full suite + commit**
 
 ```bash
-cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
+cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
 git add danzaboss/cortex/ui/static/
 git commit -m "feat(cortex): graph explorer view — SVG force layout with impact mode
 
@@ -1357,12 +1357,12 @@ if __name__ == "__main__":
 
 Caution: the `links` signal also uses `changed_files` (direct `obs.files` overlap) — the relevant observations here are attached to *dependent* files, never the changed file, so only the graph reaches them. If `s3 == s4`, check the decoys actually outrank in C3 (they share prompt words: "stripe", "payment", "jwt").
 
-- [ ] **Step 1: Write and run the eval.** `cd "/home/tre/dev/DANZA OS/danzaboss/tests" && python3 test_cortex_graph_eval.py` → `OK`.
+- [ ] **Step 1: Write and run the eval.** `cd "/home/tre/dev/DANZA-OS/danzaboss/tests" && python3 test_cortex_graph_eval.py` → `OK`.
 - [ ] **Step 2: Update CLAUDE.md test counts** — replace the stale "227 tests" occurrences with the new total from the final suite run.
 - [ ] **Step 3: Full suite, commit, push**
 
 ```bash
-cd "/home/tre/dev/DANZA OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
+cd "/home/tre/dev/DANZA-OS" && ./danzaboss/run_tests.sh 2>&1 | tail -3
 git add danzaboss/tests/test_cortex_graph_eval.py CLAUDE.md
 git commit -m "test(cortex): C4 acceptance eval — graph-bound retrieval beats C3; doc refresh
 

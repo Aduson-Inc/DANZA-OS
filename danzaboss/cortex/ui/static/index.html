@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CORTEX — DANZA OS memory</title>
+<title>CORTEX — DANZA-OS memory</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpolygon points='24,4 30,16 19,38 10,38' fill='%23c8102e'/%3E%3Cpolygon points='27,18 38,38 30,38 23,26' fill='%23c8102e'/%3E%3Cpolygon points='33,6 44,26 37,26 29,12' fill='%23e8354f'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +16,8 @@
 <header class="topbar">
   <div class="brand">
     <div class="mark" id="mark" title="CORTEX">
-      <svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true">
+      <!-- placeholder mark — swaps to the real ADUSON logo (/static/logo.svg|png) when provided -->
+      <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
         <polygon points="24,4 30,16 19,38 10,38" fill="var(--crimson)"/>
         <polygon points="27,18 38,38 30,38 23,26" fill="var(--crimson)"/>
         <polygon points="33,6 44,26 37,26 29,12" fill="var(--ember)"/>
@@ -49,16 +50,22 @@
   <!-- MEMORY — the default screen. What does DANZABOSS remember? -->
   <section class="view" id="view-feed">
     <div class="column">
-      <div class="filters" id="filters">
-        <button class="chip active" data-type="">all</button>
-        <button class="chip" data-type="decision">decision</button>
-        <button class="chip" data-type="bug_fix">bug fix</button>
-        <button class="chip" data-type="milestone">milestone</button>
-        <button class="chip" data-type="convention">convention</button>
-        <button class="chip" data-type="lesson">discovery</button>
-        <button class="chip" data-type="impl_detail">change</button>
-        <button class="chip" data-type="security">security</button>
-        <button class="chip" data-type="limitation">limitation</button>
+      <div class="filters">
+        <select id="type-filter" class="select mono" title="Filter by memory type">
+          <option value="" selected>All</option>
+          <option value="decision">Decisions</option>
+          <option value="bug_fix">Bug Fixes</option>
+          <option value="milestone">Milestones</option>
+          <option value="convention">Conventions</option>
+          <option value="lesson">Discoveries</option>
+          <option value="root_cause">Root Causes</option>
+          <option value="impl_detail">Changes</option>
+          <option value="security">Security</option>
+          <option value="limitation">Limitations</option>
+          <option value="perf">Performance</option>
+          <option value="dependency">Dependencies</option>
+          <option value="api">APIs</option>
+        </select>
       </div>
       <div class="feed" id="feed"></div>
       <div class="empty" id="feed-empty" hidden>

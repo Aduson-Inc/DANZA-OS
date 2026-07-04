@@ -88,7 +88,7 @@ Claude/Codex/Grok as interchangeable drivers**:
 Telegram/Discord ──► Hermes Agent (always-on runtime, messaging, its own memory)
                          │  delegates "build/fix/ship" jobs (MCP)
                          ▼
-                     DANZA OS  ── constitution · verifiable tasks · capability security · CORTEX memory
+                     DANZA-OS  ── constitution · verifiable tasks · capability security · CORTEX memory
                          │  dispatches jonathan-builder on the best driver per task
               ┌──────────┼───────────┬──────────────┐
               ▼          ▼           ▼              ▼

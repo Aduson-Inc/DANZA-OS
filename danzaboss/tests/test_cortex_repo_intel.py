@@ -92,7 +92,7 @@ class TestSelfRepoAcceptance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.g = GraphStore(":memory:")
-        scan_repo(REPO_ROOT, "DANZA OS", cls.g)
+        scan_repo(REPO_ROOT, "DANZA-OS", cls.g)
 
     def test_impact_of_observation_py(self):
         broke = {nid for nid, _ in

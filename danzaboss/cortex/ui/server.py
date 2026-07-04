@@ -25,7 +25,9 @@ from ..store import ObservationStore
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-         ".js": "application/javascript; charset=utf-8", ".svg": "image/svg+xml"}
+         ".js": "application/javascript; charset=utf-8", ".svg": "image/svg+xml",
+         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+         ".webp": "image/webp"}
 
 DEFAULT_SETTINGS = {"port": 33000, "max_full": 5, "token_ceiling": 2000,
                     "show_economics": True}

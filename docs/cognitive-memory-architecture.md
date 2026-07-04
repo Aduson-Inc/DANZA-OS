@@ -2,7 +2,7 @@
 
 **Codename:** CORTEX (Cognitive Observation, Retrieval & Token-Efficient eXchange)
 **Status:** Design spec (v0.1) — blueprint before code, per approved deliverable.
-**Home:** A subsystem *inside* DANZA OS. Every project / app / workflow DANZA builds
+**Home:** A subsystem *inside* DANZA-OS. Every project / app / workflow DANZA builds
 inherits a project-scoped memory automatically; cross-project knowledge is shared.
 **Source of truth:** local repo. Multi-stack / multi-DB by design (adapter architecture).
 
@@ -426,7 +426,7 @@ budget optimization → QualityScorer gate → ContextPackage (+ explanations) �
 
 ---
 
-## 11. Integration with DANZA OS
+## 11. Integration with DANZA-OS
 
 CORTEX is not bolted on; it maps onto the existing agent roster and the v2 modules already built:
 
