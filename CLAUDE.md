@@ -10,7 +10,7 @@ DANZABOSS is a **multi-AI development operating system**: a framework of prompts
 files that lets one or more AI environments build a *target application* under a fixed
 constitution. It is not an application itself. The only executable code that ships with the
 OS is the research pipeline (`tools/research-pipeline/`) and the promoted brain
-(`danzaboss/` — kernel, CORTEX, hooks, research, runtime; 396 tests).
+(`danzaboss/` — kernel, CORTEX, hooks, research, runtime; 401 tests).
 
 The **local repository is the single source of truth.** Never compare against GitHub or
 assume an online version is newer. Local files are authoritative.
@@ -39,14 +39,14 @@ assume an online version is newer. Local files are authoritative.
   logs/NNN.md                Per-run records (append-only, historical)
   *-template.md              Read-only templates (Rule 34)
   runtime/team-state.json    Machine-checkable turn state (Upgrade #2; created by kernel)
-danzaboss/                  THE BRAIN (promoted, authoritative) — Python, stdlib only, 396 tests
+danzaboss/                  THE BRAIN (promoted, authoritative) — Python, stdlib only, 401 tests
   kernel/ planning/ memory/ context/ security/ observability/ orchestration/ selftest/
   cortex/                    CORTEX cognitive memory (capture, store, FTS5, inject, extract, CLI)
   hooks/                     Governance guards + gates (capability, anti-theatre, verify, regression)
   research/                  Research squad: multisource collector, throttle, proposals, messaging
   runtime/                   scan (learn any repo) · verify (real tests) · runner
   cli.py                     `danza` command the agents + hooks call
-  tests/  run_tests.sh       396 unit tests + cold-start harness
+  tests/  run_tests.sh       401 unit tests + cold-start harness
 docs/                        Design docs (architecture, ADRs, research, lexicon)
 tools/research-pipeline/     YouTube -> NotebookLM research (the external senses)
 RUNBOOK.md                   How to try DANZA on a real app
@@ -113,7 +113,7 @@ Each maps to one approved upgrade; all are unit-tested (`danzaboss/tests/`). Pat
 - **Start / take a turn:** trigger phrase **"Who's the Boss?"** → `SKILL.md` spawns
   `tony-d-orchestrator`, which runs the mandatory startup (mode detection, run log,
   turn lock, load constitution).
-- **Run the test suite:** `./danzaboss/run_tests.sh` (396 tests)
+- **Run the test suite:** `./danzaboss/run_tests.sh` (401 tests)
 - **CORTEX memory:** `PYTHONPATH=. python3 -m danzaboss.cli cortex <search|get|observe|retrieve|context|age|learn|stats|ui|mcp>` —
   repo-scoped cognitive memory at `.danza/cortex/cortex.db`, federated with the
   L4/L5 global store (`~/.danza/cortex/global.db`, or Neon via
