@@ -9,3 +9,4 @@ nohup.out
 .claude/settings.local.json
 .claude/**/.danza/
 .danza/runtime/profile.json
+**/.danza/cortex/project.json

@@ -15,6 +15,7 @@ from typing import Optional, TextIO
 
 from .events import CaptureLog
 from .extract import draft_observations
+from .identity import resolve_project
 from .inject import build_context
 from .intent import WorkspaceState
 from .observation import Observation
@@ -29,7 +30,7 @@ def db_path(root: str) -> str:
 
 
 def _project(root: str) -> str:
-    return os.path.basename(os.path.abspath(root))
+    return resolve_project(root)
 
 
 def _read_json(stdin: TextIO) -> dict:

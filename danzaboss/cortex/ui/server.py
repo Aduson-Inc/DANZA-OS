@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 from ..events import CaptureLog
+from ..identity import resolve_project
 from ..inject import est_tokens
 from ..sqlite_backend import SqliteBackend
 from ..store import ObservationStore
@@ -399,7 +400,7 @@ def make_server(root: str, port: int = 0) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (CortexUIHandler,), {
         "root": root,
         "db_path": os.path.join(root, ".danza", "cortex", "cortex.db"),
-        "project": os.path.basename(os.path.abspath(root)),
+        "project": resolve_project(root),
     })
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     server.daemon_threads = True
