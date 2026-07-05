@@ -41,6 +41,17 @@ class ParseTests(unittest.TestCase):
         text = json.dumps({"type": "result", "result": inner})
         self.assertEqual(checkpoints.parse_verdict(text)["verdict"], "revise")
 
+    def test_parse_verdict_accepts_envelope_with_object_result(self):
+        # P2-M1: some CLIs decode for us — result arrives as an object,
+        # not a string. str() would yield Python repr and fail to parse.
+        text = json.dumps({"type": "result", "result": VALID_VERDICT})
+        self.assertEqual(checkpoints.parse_verdict(text)["verdict"], "revise")
+
+    def test_parse_json_reply_passes_object_result_through(self):
+        plan = {"spec_ref": "spec", "tasks": [{"id": "1", "description": "x"}]}
+        text = json.dumps({"result": plan})
+        self.assertEqual(checkpoints.parse_json_reply(text), plan)
+
     def test_parse_verdict_rejects_missing_key(self):
         bad = {k: v for k, v in VALID_VERDICT.items() if k != "summary"}
         with self.assertRaises(checkpoints.CheckpointError):

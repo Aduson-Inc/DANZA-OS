@@ -60,7 +60,12 @@ def parse_json_reply(text: str) -> object:
     data = _loads(text)
     if isinstance(data, dict) and "result" in data and not all(
             k in data for k in VERDICT_KEYS):
-        data = _loads(str(data["result"]))
+        result = data["result"]
+        # Some CLIs decode the payload for us: result is already an
+        # object, not JSON text — str() would yield Python repr and
+        # fail to parse (P2-M1).
+        data = result if isinstance(result, (dict, list)) else _loads(
+            str(result))
     return data
 
 
