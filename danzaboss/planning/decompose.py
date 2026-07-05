@@ -22,6 +22,14 @@ class VerificationKind(str, Enum):
     MANUAL_GATE = "manual_gate"         # explicit human/QA sign-off (last resort)
 
 
+# W1 plan-record vocabulary (workstation design spec section 6). The
+# workstation planner validates against these; the dispatch gate below
+# stays verification-only.
+TASK_KINDS = ("scaffold", "backend", "frontend", "db-migration",
+              "integration", "config", "design", "test")
+HARD_STOP_FLAGS = ("auth", "payment", "db-schema")
+
+
 @dataclass
 class Verification:
     kind: VerificationKind
@@ -43,6 +51,14 @@ class Task:
     description: str
     verification: Optional[Verification] = None
     subtasks: list["Task"] = field(default_factory=list)
+
+    # W1 planning fields (design spec section 6) — optional so pre-W1
+    # callers and tests construct Tasks exactly as before.
+    kind: Optional[str] = None
+    size_est: Optional[int] = None       # estimated minutes; policy cap 30
+    depends_on: tuple[str, ...] = ()
+    writes: tuple[str, ...] = ()         # files/areas touched (wave planning)
+    flags: tuple[str, ...] = ()          # hard-stop markers (Rules 13-15)
 
     # -- properties -----------------------------------------------------------
     def is_leaf(self) -> bool:

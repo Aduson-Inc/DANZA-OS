@@ -1,11 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "DANZABOSS plan",
-  "description": "Derived from spec.md. A tree of tasks; every leaf must carry a verification method (Upgrade #4).",
+  "description": "Derived from spec.md. A tree of tasks; every leaf must carry a verification method (Upgrade #4). W1 (workstation design spec section 6) adds hierarchical ids, kind, size_est, depends_on, writes, flags.",
   "type": "object",
   "required": ["spec_ref", "tasks"],
   "properties": {
     "spec_ref": {"type": "string", "description": "path/hash of the spec this plan derives from"},
+    "order": {"type": "array", "items": {"type": "string"}, "description": "leaf ids in validated execution order (written by the workstation planner)"},
     "tasks": {"type": "array", "items": {"$ref": "#/definitions/task"}}
   },
   "definitions": {
@@ -13,8 +14,13 @@
       "type": "object",
       "required": ["id", "description"],
       "properties": {
-        "id": {"type": "string"},
-        "description": {"type": "string"},
+        "id": {"type": "string", "pattern": "^\\d+(\\.\\d+){0,2}$", "description": "hierarchical section.feature.task"},
+        "description": {"type": "string", "description": "ONE concern; conjunction chains are rejected by the validator"},
+        "kind": {"enum": ["scaffold", "backend", "frontend", "db-migration", "integration", "config", "design", "test"]},
+        "size_est": {"type": "integer", "minimum": 1, "maximum": 30, "description": "estimated minutes; hard cap 30 (split larger tasks)"},
+        "depends_on": {"type": "array", "items": {"type": "string"}, "description": "task ids that must complete first (leaves only)"},
+        "writes": {"type": "array", "items": {"type": "string"}, "maxItems": 3, "description": "files/areas touched; kept for wave planning"},
+        "flags": {"type": "array", "items": {"enum": ["auth", "payment", "db-schema"]}, "description": "hard-stop markers surfaced at planning time (Rules 13-15)"},
         "verification": {
           "type": ["object", "null"],
           "required": ["kind", "detail"],
