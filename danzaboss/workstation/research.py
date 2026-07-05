@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from pathlib import Path
 
 from danzaboss.workstation import checkpoints as checkpoints_mod
+from danzaboss.workstation.wizard import Wizard
 
 DIGEST_VERDICTS = ("saturated", "crowded_but_viable", "novel")
 DIGEST_KEYS = ("verdict", "summary", "competitors", "differentiation")
@@ -169,3 +171,76 @@ def tavily_from_env(command: list[str],
     run_reality_check into the honest no-provider path."""
     api_key = env.get(TAVILY_ENV, "").strip()
     return TavilyProvider(api_key, command) if api_key else None
+
+
+RESEARCH_RELDIR = Path(".danza") / "onboarding" / "research"
+DIGEST_FILENAME = "reality-digest.json"
+OBSERVATION_FILENAME = "observation.json"
+
+
+def digest_path(root) -> Path:
+    return Path(root) / RESEARCH_RELDIR / DIGEST_FILENAME
+
+
+def save_digest(root, digest: dict) -> Path:
+    """Whole-file overwrite is correct here: the digest is a generated,
+    re-runnable artifact (like spec.md), not merged user state — the
+    Rule 35 merge discipline protects answers.json, not caches."""
+    path = digest_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(digest, indent=2, sort_keys=True),
+                   encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def load_digest(root) -> dict | None:
+    """Cached digest, or None. Persisting across a stale r_reality step
+    is deliberate: the wizard's status says 're-approve me', the cache
+    says 'here is what the last run cost' — never a silent re-spend."""
+    path = digest_path(root)
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ResearchError(f"corrupt digest (not an object): {path}")
+    return data
+
+
+def digest_to_observation(digest: dict, answers: dict) -> dict:
+    """Deterministic CORTEX-shaped record so build-time Carmella inherits
+    the research instead of re-spending it (spec section 4)."""
+    name = answers.get("project_name") or answers.get("seed_name", "project")
+    return {
+        "type": "research",
+        "title": f"Reality check: {name} — {digest['verdict']}",
+        "summary": digest["summary"],
+        "tags": ["reality-check", "onboarding", digest["verdict"]],
+        "concepts": [c["name"] for c in digest["competitors"]],
+    }
+
+
+def run_reality_check(root, provider, *, timeout: int = 300) -> dict:
+    """One explicit research pass against the target repo's answers. The
+    caller's click IS the user approval external research requires in
+    every profile — nothing in the OS calls this automatically.
+    provider=None records the skipped path honestly so the wizard can
+    proceed and spec.md says 'not run' instead of pretending."""
+    wizard = Wizard(root)
+    if provider is None:
+        digest = {"skipped": True, "reason": "no_provider",
+                  "summary": ("reality check unavailable: no research "
+                              "provider configured")}
+        wizard.record_result("r_reality", digest)
+        return digest
+    digest = validate_digest(provider.run(wizard.answers, timeout=timeout))
+    save_digest(root, digest)
+    observation = digest_to_observation(digest, wizard.answers)
+    obs_path = digest_path(root).with_name(OBSERVATION_FILENAME)
+    obs_tmp = obs_path.with_name(obs_path.name + ".tmp")
+    obs_tmp.write_text(json.dumps(observation, indent=2, sort_keys=True),
+                       encoding="utf-8")
+    os.replace(obs_tmp, obs_path)
+    wizard.record_result("r_reality", digest)
+    return digest

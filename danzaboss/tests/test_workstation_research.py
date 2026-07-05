@@ -148,5 +148,105 @@ class ProviderTests(unittest.TestCase):
         self.assertIsInstance(provider, research.TavilyProvider)
 
 
+class _FixtureProvider:
+    """Provider double: fixture digest, records the answers it was given."""
+
+    def __init__(self, digest: dict):
+        self.digest = digest
+        self.seen: dict | None = None
+
+    def run(self, answers: dict, *, timeout: int = 300) -> dict:
+        self.seen = answers
+        return dict(self.digest)
+
+
+def make_app_wizard(root: Path) -> Wizard:
+    wizard = Wizard(root)
+    wizard.submit("p0", {"project_type": "saas"})
+    wizard.submit("p1", CONCEPT_ANSWERS)
+    return wizard
+
+
+class CacheTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def test_load_missing_returns_none(self):
+        self.assertIsNone(research.load_digest(self.tmp))
+
+    def test_save_load_roundtrip(self):
+        path = research.save_digest(self.tmp, dict(VALID_DIGEST))
+        self.assertTrue(str(path).endswith("reality-digest.json"))
+        self.assertEqual(research.load_digest(self.tmp)["verdict"],
+                         "crowded_but_viable")
+
+    def test_corrupt_digest_fails_closed(self):
+        path = research.digest_path(self.tmp)
+        path.parent.mkdir(parents=True)
+        path.write_text('["not", "an", "object"]', encoding="utf-8")
+        with self.assertRaises(research.ResearchError):
+            research.load_digest(self.tmp)
+
+
+class ObservationTests(unittest.TestCase):
+    def test_observation_shape_is_deterministic(self):
+        obs = research.digest_to_observation(VALID_DIGEST, CONCEPT_ANSWERS)
+        self.assertEqual(obs["type"], "research")
+        self.assertIn("WalkWise", obs["title"])
+        self.assertIn("crowded_but_viable", obs["title"])
+        self.assertEqual(obs["concepts"], ["Rover", "Wag"])
+        self.assertEqual(
+            obs, research.digest_to_observation(VALID_DIGEST,
+                                                CONCEPT_ANSWERS))
+
+
+class RunRealityCheckTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        make_app_wizard(self.tmp)
+
+    def test_run_records_caches_and_distills(self):
+        provider = _FixtureProvider(VALID_DIGEST)
+        digest = research.run_reality_check(self.tmp, provider)
+        self.assertEqual(provider.seen["project_name"], "WalkWise")
+        wizard = Wizard(self.tmp)
+        self.assertEqual(wizard.status("r_reality"), "complete")
+        self.assertEqual(wizard.result("r_reality")["verdict"],
+                         "crowded_but_viable")
+        self.assertEqual(research.load_digest(self.tmp)["summary"],
+                         digest["summary"])
+        obs_path = self.tmp / ".danza" / "onboarding" / "research" \
+            / "observation.json"
+        self.assertIn("WalkWise",
+                      json.loads(obs_path.read_text())["title"])
+
+    def test_no_provider_records_honest_skip(self):
+        digest = research.run_reality_check(self.tmp, None)
+        self.assertTrue(digest["skipped"])
+        wizard = Wizard(self.tmp)
+        self.assertEqual(wizard.status("r_reality"), "complete")
+        self.assertTrue(wizard.result("r_reality")["skipped"])
+        self.assertIsNone(research.load_digest(self.tmp))
+
+    def test_invalid_provider_digest_fails_closed(self):
+        provider = _FixtureProvider({"verdict": "meh"})
+        with self.assertRaises(research.ResearchError):
+            research.run_reality_check(self.tmp, provider)
+        self.assertEqual(Wizard(self.tmp).status("r_reality"), "pending")
+
+    def test_concept_edit_stales_digest_but_keeps_cache(self):
+        research.run_reality_check(self.tmp, _FixtureProvider(VALID_DIGEST))
+        wizard = Wizard(self.tmp)
+        wizard.submit("p1", dict(CONCEPT_ANSWERS,
+                                 concept_what="Cat sitting marketplace"))
+        wizard = Wizard(self.tmp)
+        self.assertEqual(wizard.status("r_reality"), "stale")
+        self.assertIsNotNone(research.load_digest(self.tmp))
+
+
 if __name__ == "__main__":
     unittest.main()
