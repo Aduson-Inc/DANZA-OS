@@ -16,6 +16,10 @@ from pathlib import Path
 
 from danzaboss.planning.decompose import (HARD_STOP_FLAGS, TASK_KINDS, Task,
                                           Verification, VerificationKind)
+from danzaboss.workstation import checkpoints
+from danzaboss.workstation import compiler
+from danzaboss.workstation import templates as templates_mod
+from danzaboss.workstation.wizard import Wizard
 
 
 class PlanningError(ValueError):
@@ -289,3 +293,119 @@ def write_plan(root: str | os.PathLike, plan: dict,
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
     return json_path, md_path
+
+
+MAX_ROUNDS = 3
+
+PLAN_CONTRACT = (
+    "Respond with ONLY a JSON object, no prose around it, shaped exactly:\n"
+    '{"spec_ref": str, "tasks": [<task>, ...]}\n'
+    'where <task> = {"id": dotted integers — "1" section, "1.2" feature, '
+    '"1.2.3" task, "description": str (ONE concern; no \'and then\' '
+    'chains), "subtasks": [<task>, ...] on internal nodes} '
+    "and every LEAF instead adds: "
+    '"kind": one of ' + str(list(TASK_KINDS)) + ', '
+    '"size_est": estimated minutes (integer, max ' + str(MAX_SIZE_EST)
+    + '), "writes": [1-' + str(MAX_WRITES) + ' files or areas], '
+    '"depends_on": [task ids] (optional), '
+    '"flags": subset of ' + str(list(HARD_STOP_FLAGS)) + ' (optional), '
+    '"verification": {"kind": one of '
+    + str([k.value for k in VerificationKind])
+    + ', "detail": a concrete command or check}'
+)
+
+
+def build_planning_prompt(spec_text: str, *,
+                          testing_defaults: dict | None = None,
+                          violations: tuple[str, ...] = (),
+                          prior_plan: dict | None = None) -> str:
+    """Deterministic planning prompt: the spec IS the context (same
+    principle as checkpoints.build_prompt — the headless call needs no
+    repo access). Bounce rounds inline the machine's violation list plus
+    the rejected plan for re-splitting."""
+    lines = [
+        "You are the DANZA planner. Decompose the spec below into an",
+        "ordered task tree: sections (app areas) -> features -> leaf",
+        "tasks of 20-30 minutes each. Every leaf must be independently",
+        "verifiable. Test-first where behavior is specified (business",
+        "logic, endpoints, data rules); scaffold/config verify at tier",
+        "0-1 (build passes, lint, boots).", ""]
+    if testing_defaults:
+        lines += ["Test policy from the approved stack template (JSON):",
+                  json.dumps(testing_defaults, indent=2, sort_keys=True), ""]
+    lines += ["Spec:", spec_text, ""]
+    if violations:
+        lines.append("Your previous reply was REJECTED by machine "
+                     "validation.")
+        if prior_plan is not None:
+            lines += ["Previous plan (JSON):",
+                      json.dumps(prior_plan, indent=2, sort_keys=True)]
+        lines.append("Violations to fix (split oversized tasks; keep all "
+                     "the work):")
+        lines += [f"- {v}" for v in violations]
+        lines.append("")
+    lines.append(PLAN_CONTRACT)
+    return "\n".join(lines)
+
+
+def run_planning(root: str | os.PathLike, command: list[str], *,
+                 timeout: int = 600, max_rounds: int = MAX_ROUNDS,
+                 template_dir=templates_mod.DEFAULT_DIR) -> dict:
+    """spec.md -> validated plan artifacts (design spec section 6).
+
+    Calls the boss CLI headless (same injectable-argv seam as
+    checkpoints.run_headless), machine-validates each proposal, bounces
+    violations back up to max_rounds, then fails closed: a plan that
+    never validates must not arm the button. There is deliberately no
+    degraded mode — unlike checkpoints, nothing downstream can proceed
+    without a valid plan."""
+    spec_path = Path(root) / compiler.SPEC_RELPATH
+    if not spec_path.exists():
+        raise PlanningError(f"no approved spec at {spec_path}; planning "
+                            "runs only after final approval")
+    spec_text = spec_path.read_text(encoding="utf-8")
+    answers = Wizard(root).answers
+    testing_defaults = None
+    chosen = answers.get("stack_template")
+    if chosen:
+        library = {t.key: t
+                   for t in templates_mod.load_templates(template_dir)}
+        if chosen in library:
+            testing_defaults = library[chosen].testing_defaults
+    violations: tuple[str, ...] = ()
+    prior_plan: dict | None = None
+    for round_num in range(1, max_rounds + 1):
+        prompt = build_planning_prompt(spec_text,
+                                       testing_defaults=testing_defaults,
+                                       violations=violations,
+                                       prior_plan=prior_plan)
+        try:
+            reply = checkpoints.run_headless(command, prompt,
+                                             timeout=timeout)
+        except checkpoints.CheckpointUnavailable as exc:
+            raise PlanningUnavailable(str(exc)) from exc
+        try:
+            data = checkpoints.parse_json_reply(reply)
+            tasks = parse_plan(data)
+        except (checkpoints.CheckpointError, PlanningError) as exc:
+            violations = (f"reply was not a valid plan object: {exc}",)
+            prior_plan = None
+            continue
+        found = validate_plan(tasks)
+        ordered: tuple[Task, ...] = ()
+        if not found:
+            try:
+                ordered = order_tasks(tasks)
+            except PlanningError as exc:
+                found = [str(exc)]
+        if found:
+            violations = tuple(found)
+            prior_plan = data
+            continue
+        json_path, md_path = write_plan(root, data, ordered)
+        return {"plan": data, "order": [t.id for t in ordered],
+                "rounds": round_num, "plan_json": str(json_path),
+                "plan_md": str(md_path)}
+    raise PlanningError(
+        f"plan still invalid after {max_rounds} rounds; last violations: "
+        + "; ".join(violations))
