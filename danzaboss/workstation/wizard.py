@@ -130,6 +130,17 @@ class Wizard:
         step = self._require_step(step_id, kind=None)
         if step.kind == "phase":
             raise WizardError(f"{step_id} is a phase; use submit()")
+        if approved:
+            # An approval must postdate everything it approves: a checkpoint
+            # blessed before upstream answers exist would survive them
+            # (first-time submits never stale) and fake completeness.
+            for earlier in self.flow():
+                if earlier.id == step_id:
+                    break
+                if self.status(earlier.id) not in TERMINAL:
+                    raise WizardError(
+                        f"cannot approve {step_id}: {earlier.id} is "
+                        f"{self.status(earlier.id)}")
         if step.kind == "checkpoint":
             status = "approved" if approved else "pending"
         else:  # research
@@ -153,9 +164,14 @@ class Wizard:
         self._state["steps"].setdefault(step_id, {})["status"] = status
 
     def _stale_after(self, step_id: str) -> None:
-        """Everything terminal after an edited step must be re-earned."""
+        """Everything terminal after an edited step must be re-earned.
+
+        Iterates the FULL tree, not the active flow: a project_type flip
+        re-scopes the flow before this runs, and out-of-flow statuses must
+        stale too or flipping back would rehydrate unearned approvals.
+        """
         seen = False
-        for step in self.flow():
+        for step in FLOW:
             if step.id == step_id:
                 seen = True
                 continue

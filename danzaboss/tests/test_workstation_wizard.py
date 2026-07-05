@@ -126,6 +126,25 @@ class RevisionRule(WizardBase):
         self.wiz.submit("p1", dict(P1_ANSWERS, concept_what="Changed."))
         self.assertEqual(self.wiz.current_step().id, "r_reality")
 
+    def test_project_type_flip_flop_does_not_rehydrate_approvals(self):
+        # Final-review fix: _stale_after must walk FLOW, not the active
+        # flow, or switching away and back resurrects unearned approvals.
+        self._complete_through_stack()
+        self.wiz.submit("p0", {"project_type": "design_ideas"})
+        self.wiz.submit("p0", {"project_type": "saas"})
+        for later in ("p1", "r_reality", "cp_concept", "p2", "p3", "cp_stack"):
+            self.assertEqual(self.wiz.status(later), "stale", later)
+        self.assertFalse(self.wiz.is_complete())
+
+    def test_premature_checkpoint_approval_raises(self):
+        # Final-review fix: an approval must postdate everything it
+        # approves — first-time submits never stale, so a premature
+        # approval would survive answers it never saw.
+        self.wiz.submit("p0", {"project_type": "saas"})
+        with self.assertRaises(WizardError):
+            self.wiz.record_result("cp_concept", {"verdict": "ok"},
+                                   approved=True)
+
 
 class ResumeAndResults(WizardBase):
     def test_resume_from_disk(self):

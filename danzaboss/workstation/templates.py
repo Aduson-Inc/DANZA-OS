@@ -17,6 +17,13 @@ REQUIRED_FIELDS = ("name", "tagline", "best_for", "components", "why",
                    "tradeoffs", "avoid_when", "testing_defaults",
                    "philosophy_fit", "rank")
 
+# Presence alone is not fail-closed: a string best_for or a string rank
+# loads fine and explodes later inside select_templates — past bad state.
+_FIELD_TYPES = {"name": str, "tagline": str, "best_for": dict,
+                "components": dict, "why": str, "tradeoffs": str,
+                "avoid_when": str, "testing_defaults": dict,
+                "philosophy_fit": str, "rank": int}
+
 
 @dataclass(frozen=True)
 class StackTemplate:
@@ -46,6 +53,12 @@ def load_templates(directory: str | Path = DEFAULT_DIR
         missing = [f for f in REQUIRED_FIELDS if f not in data]
         if missing:
             raise ValueError(f"{path.name}: missing fields {missing}")
+        for field, expected in _FIELD_TYPES.items():
+            value = data[field]
+            if isinstance(value, bool) or not isinstance(value, expected):
+                raise ValueError(
+                    f"{path.name}: field {field!r} must be "
+                    f"{expected.__name__}, got {type(value).__name__}")
         templates.append(StackTemplate(
             key=path.stem, **{f: data[f] for f in REQUIRED_FIELDS}))
     if not templates:

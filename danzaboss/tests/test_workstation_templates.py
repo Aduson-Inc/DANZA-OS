@@ -77,6 +77,25 @@ class Validation(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_templates(tmp)
 
+    def test_wrong_field_type_fails_closed(self):
+        # Final-review fix: presence-only validation let a string rank or
+        # string best_for load, deferring the explosion to select time.
+        import json
+        import tempfile
+        from pathlib import Path
+        good = {"name": "x", "tagline": "x",
+                "best_for": {"project_types": ["saas"], "capabilities": []},
+                "components": {}, "why": "x", "tradeoffs": "x",
+                "avoid_when": "x", "testing_defaults": {},
+                "philosophy_fit": "x", "rank": 1}
+        for field, bad_value in (("rank", "3"), ("best_for", "saas"),
+                                 ("rank", True)):
+            with tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "bad.json").write_text(
+                    json.dumps(dict(good, **{field: bad_value})))
+                with self.assertRaises(ValueError, msg=f"{field}={bad_value}"):
+                    load_templates(tmp)
+
 
 if __name__ == "__main__":
     unittest.main()
