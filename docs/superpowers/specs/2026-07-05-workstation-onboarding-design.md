@@ -233,6 +233,16 @@ UI: "Igniting…" → "TONY DANZA! — system active"
 UI displays `tmux attach -t danza-<project>`; optional pane pipe to a log file the
 UI tails read-only (no parsing).
 
+**Session-host abstraction:** the conductor's session-host is an interface (same
+socket discipline as runners and research providers), not a tmux dependency. tmux is
+the default POSIX implementation — it gives the boss session a persistent detached
+terminal that survives dashboard restarts and browser closes and stays attachable
+for human watch/intervene. The fallback implementation is **headless-per-turn**
+(`claude -p "Who's the Boss?"` per relay turn) for hosts without tmux (native
+Windows) or users who prefer invisible operation; it trades away attach-and-watch
+only. The choice of host is orthogonal to how many LLMs are connected: one runner
+means one session, whichever host implements it.
+
 **Relay loop** (conductor polls team-state.json mtime ~2s):
 `ready_for_<runner>` + cadence allows → spawn a **fresh** session (fresh context per
 turn) and ignite · feature count hits N → `awaiting_user`: pause, show checkpoint
