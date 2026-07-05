@@ -171,3 +171,71 @@ def validate_plan(tasks: tuple[Task, ...]) -> list[str]:
                 violations.append(f"{tid}: depends_on may not reference "
                                   "itself or an ancestor")
     return violations
+
+
+def _id_key(task_id: str) -> tuple[int, ...]:
+    """Numeric segment order: '1.10' after '1.2' — section order, then id
+    (the spec section-6 tie-break)."""
+    return tuple(int(part) for part in task_id.split("."))
+
+
+def _leaves(tasks: tuple[Task, ...]) -> list[Task]:
+    out: list[Task] = []
+    for task in tasks:
+        if task.is_leaf():
+            out.append(task)
+        else:
+            out.extend(_leaves(tuple(task.subtasks)))
+    return out
+
+
+def order_tasks(tasks: tuple[Task, ...]) -> tuple[Task, ...]:
+    """Deterministic topological order of the leaves: dependencies first,
+    ties broken by numeric id. depends_on may target an internal node —
+    that expands to every leaf under it. v1 flattens to a single linear
+    order (one builder); `writes` stays on each task so wave planning
+    can parallelize later."""
+    index: dict[str, Task] = {}
+
+    def register(task: Task) -> None:
+        index[task.id] = task
+        for sub in task.subtasks:
+            register(sub)
+
+    for task in tasks:
+        register(task)
+    leaves = _leaves(tasks)
+    dep_sets: dict[str, set[str]] = {}
+    for item in leaves:
+        expanded: set[str] = set()
+        for target in item.depends_on:
+            if target not in index:
+                raise PlanningError(
+                    f"{item.id}: depends_on unknown task {target!r}")
+            expanded.update(t.id for t in _leaves((index[target],)))
+        dep_sets[item.id] = expanded
+    ordered: list[Task] = []
+    done: set[str] = set()
+    remaining = {item.id: item for item in leaves}
+    while remaining:
+        ready = sorted((lid for lid in remaining if dep_sets[lid] <= done),
+                       key=_id_key)
+        if not ready:
+            raise PlanningError("dependency cycle among: "
+                                + ", ".join(sorted(remaining, key=_id_key)))
+        for lid in ready:
+            ordered.append(remaining.pop(lid))
+            done.add(lid)
+    return tuple(ordered)
+
+
+def feature_nodes(tasks: tuple[Task, ...]) -> tuple[str, ...]:
+    """Feature ids for Rule 3 turn counting: the first two id segments of
+    each leaf (a section-level leaf counts as its own feature), unique,
+    in the order given — pass order_tasks() output for execution order."""
+    out: list[str] = []
+    for item in _leaves(tasks):
+        feature = ".".join(item.id.split(".")[:2])
+        if feature not in out:
+            out.append(feature)
+    return tuple(out)
