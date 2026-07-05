@@ -13,6 +13,8 @@ from pathlib import Path
 
 from danzaboss.workstation.templates import StackTemplate
 
+SPEC_RELPATH = Path(".danza") / "spec.md"
+
 CADENCE_LABELS = {
     "relay": "relay — 2 features per turn, alternate environments",
     "continuous": ("continuous-checkpointed — fresh session per turn, "
@@ -104,7 +106,7 @@ def compile_spec(*, answers: dict, template: StackTemplate | None,
 
 def write_spec(root: str | os.PathLike, text: str) -> Path:
     """Write .danza/spec.md atomically; returns the path written."""
-    path = Path(root) / ".danza" / "spec.md"
+    path = Path(root) / SPEC_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")

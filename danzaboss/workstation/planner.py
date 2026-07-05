@@ -9,7 +9,10 @@ calibrate later through CORTEX observations.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+from pathlib import Path
 
 from danzaboss.planning.decompose import (HARD_STOP_FLAGS, TASK_KINDS, Task,
                                           Verification, VerificationKind)
@@ -239,3 +242,50 @@ def feature_nodes(tasks: tuple[Task, ...]) -> tuple[str, ...]:
         if feature not in out:
             out.append(feature)
     return tuple(out)
+
+
+PLAN_JSON_RELPATH = Path(".danza") / "plan.json"
+PLAN_MD_RELPATH = Path(".danza") / "plan.md"
+
+
+def render_plan_md(plan: dict, ordered: tuple[Task, ...]) -> str:
+    """Human-readable numbered build order (.danza/plan.md, the UI right
+    panel). Hard-stop flags are called out so the user sees where the
+    build will pause (Rules 13-15) — no surprise mid-build stops."""
+    features = feature_nodes(ordered)
+    lines = [f"# Plan — {plan['spec_ref']}", "",
+             f"{len(ordered)} tasks across {len(features)} features "
+             f"(Rule 3 counts feature nodes: {', '.join(features)})", ""]
+    for n, task in enumerate(ordered, start=1):
+        lines.append(f"{n}. **{task.id}** ({task.kind}, ~{task.size_est}m) "
+                     f"{task.description}")
+        lines.append(f"   - verify [{task.verification.kind.value}]: "
+                     f"{task.verification.detail}")
+        lines.append(f"   - writes: {', '.join(task.writes)}")
+        if task.depends_on:
+            lines.append(f"   - after: {', '.join(task.depends_on)}")
+        if task.flags:
+            lines.append(f"   - HARD STOP flags: {', '.join(task.flags)} — "
+                         "build pauses for user approval here")
+    return "\n".join(lines) + "\n"
+
+
+def write_plan(root: str | os.PathLike, plan: dict,
+               ordered: tuple[Task, ...]) -> tuple[Path, Path]:
+    """Persist .danza/plan.json and .danza/plan.md atomically. plan.json
+    carries the accepted plan plus the computed `order` so the scheduler
+    never re-derives it. Both are generated artifacts, regenerated whole
+    on each planning run — plain overwrite is correct here (same
+    reasoning as compiler.write_spec)."""
+    payload = dict(plan)
+    payload["order"] = [task.id for task in ordered]
+    json_path = Path(root) / PLAN_JSON_RELPATH
+    md_path = Path(root) / PLAN_MD_RELPATH
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    for path, text in (
+            (json_path, json.dumps(payload, indent=2, sort_keys=True) + "\n"),
+            (md_path, render_plan_md(plan, ordered))):
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    return json_path, md_path
