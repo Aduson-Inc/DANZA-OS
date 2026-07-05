@@ -67,3 +67,21 @@ class SeedRouting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailClosedGuards(unittest.TestCase):
+    """Deferred P1 minors: declaration-time kind validation and unknown
+    project_type rejection (corrupt-state guard)."""
+
+    def test_unknown_question_kind_raises(self):
+        from danzaboss.workstation.tree import Question
+        with self.assertRaises(ValueError):
+            Question("q", "prompt", "vibes")
+
+    def test_unknown_step_kind_raises(self):
+        with self.assertRaises(ValueError):
+            Step("s", "party", "title")
+
+    def test_unknown_project_type_raises(self):
+        with self.assertRaises(ValueError):
+            step_applies(FLOW[1], "spaceship")

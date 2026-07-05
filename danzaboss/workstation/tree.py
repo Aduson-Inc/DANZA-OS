@@ -11,6 +11,9 @@ from dataclasses import dataclass
 APP_PROJECT_TYPES = frozenset({"website", "saas"})
 SEED_PROJECT_TYPES = frozenset({"design_ideas", "workflow", "other", "not_sure"})
 
+QUESTION_KINDS = ("choice", "text", "longtext", "list", "multi", "uploads")
+STEP_KINDS = ("phase", "research", "checkpoint")
+
 
 @dataclass(frozen=True)
 class Question:
@@ -22,20 +25,30 @@ class Question:
     """
     id: str
     prompt: str
-    kind: str  # "choice" | "text" | "longtext" | "list" | "multi" | "uploads"
+    kind: str  # one of QUESTION_KINDS
     options: tuple[str, ...] = ()
     required: bool = True
     default: str | None = None
     show_if: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def __post_init__(self) -> None:
+        # Fail closed at declaration time: a typo'd kind would otherwise
+        # surface only when the engine validates an answer against it.
+        if self.kind not in QUESTION_KINDS:
+            raise ValueError(f"{self.id}: unknown question kind {self.kind!r}")
 
 
 @dataclass(frozen=True)
 class Step:
     """One flow step: a question phase, a research pass, or an AI checkpoint."""
     id: str
-    kind: str  # "phase" | "research" | "checkpoint"
+    kind: str  # one of STEP_KINDS
     title: str
     questions: tuple[Question, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind not in STEP_KINDS:
+            raise ValueError(f"{self.id}: unknown step kind {self.kind!r}")
 
 
 FLOW: tuple[Step, ...] = (
@@ -108,11 +121,15 @@ FLOW: tuple[Step, ...] = (
 
 
 def step_applies(step: Step, project_type: str | None) -> bool:
-    """Route by project type: seed types skip the full interview (D9)."""
+    """Route by project type: seed types skip the full interview (D9).
+    An unrecognized type raises — the wizard's choice validation makes it
+    unreachable through submit(), so reaching it means corrupt state."""
     if step.id == "p0":
         return True
     if project_type is None:
         return False
     if project_type in APP_PROJECT_TYPES:
         return step.id != "p_seed"
-    return step.id == "p_seed"
+    if project_type in SEED_PROJECT_TYPES:
+        return step.id == "p_seed"
+    raise ValueError(f"unknown project_type: {project_type!r}")
