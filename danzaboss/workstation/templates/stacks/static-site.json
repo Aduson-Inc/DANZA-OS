@@ -1,0 +1,14 @@
+{
+  "name": "Static site",
+  "tagline": "Plain HTML/CSS/JS or Astro — no backend, no database",
+  "best_for": {"project_types": ["website"], "capabilities": []},
+  "components": {"frontend": "HTML/CSS/JS or Astro", "backend": "none",
+                 "database": "none", "auth": "none", "payments": "none",
+                 "hosting": "any static host (free tiers)"},
+  "why": "Zero moving parts. For landing pages and portfolios nothing beats a static site for cost, speed, and reliability.",
+  "tradeoffs": "No user accounts, no server logic. Adding either later means moving to another template.",
+  "avoid_when": "Any capability is checked — accounts, payments, or realtime need a backend.",
+  "testing_defaults": {"framework": "none", "tiers": "tier 0-1: build passes, links resolve"},
+  "philosophy_fit": "Maximal: free-first, lightweight-first, local-first.",
+  "rank": 1
+}

@@ -1,0 +1,18 @@
+{
+  "name": "SaaS Standard (Python)",
+  "tagline": "FastAPI backend, React front, Postgres",
+  "best_for": {"project_types": ["saas", "website"],
+               "capabilities": ["accounts_auth", "payments", "admin_panel",
+                                "notifications", "file_uploads", "search"]},
+  "components": {"frontend": "React + Vite", "backend": "FastAPI",
+                 "database": "Postgres", "orm": "SQLAlchemy",
+                 "auth": "fastapi-users or session auth", "payments": "Stripe",
+                 "hosting": "any container host"},
+  "why": "The same proven SaaS shape for Python-preferring teams, and the natural pick when the app's core involves data processing or ML.",
+  "tradeoffs": "Two languages (Python back, TS front); API types must be kept in sync.",
+  "avoid_when": "The team wants one language everywhere — use the TypeScript standard.",
+  "testing_defaults": {"framework": "pytest + playwright",
+                       "tiers": "test-first business logic and endpoints; smoke/integration for UI"},
+  "philosophy_fit": "Moderate: free-first achievable; heavier than the lightweight tool stack.",
+  "rank": 4
+}

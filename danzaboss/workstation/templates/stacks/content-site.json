@@ -1,0 +1,14 @@
+{
+  "name": "Content site / blog",
+  "tagline": "Astro + Markdown content, SEO-first",
+  "best_for": {"project_types": ["website"], "capabilities": ["search"]},
+  "components": {"frontend": "Astro", "content": "Markdown files (optional CMS later)",
+                 "backend": "none", "database": "none", "auth": "none",
+                 "payments": "none", "hosting": "any static host (free tiers)"},
+  "why": "Content-heavy sites need fast pages and clean markup for SEO; Astro renders Markdown to static HTML with near-zero JavaScript.",
+  "tradeoffs": "Dynamic features require adding islands or a backend later.",
+  "avoid_when": "Users need accounts or the content is user-generated.",
+  "testing_defaults": {"framework": "none", "tiers": "tier 0-1: build passes, links resolve"},
+  "philosophy_fit": "High: free-first, lightweight-first.",
+  "rank": 2
+}

@@ -1,0 +1,18 @@
+{
+  "name": "SaaS Standard (TypeScript)",
+  "tagline": "The boring, proven SaaS stack",
+  "best_for": {"project_types": ["saas", "website"],
+               "capabilities": ["accounts_auth", "payments", "admin_panel",
+                                "notifications", "file_uploads", "search"]},
+  "components": {"frontend": "Next.js", "backend": "Next.js API routes",
+                 "database": "Postgres", "orm": "Prisma or Drizzle",
+                 "auth": "Auth.js", "payments": "Stripe",
+                 "hosting": "Vercel or any Node host"},
+  "why": "One language front and back, shared types across the API boundary, and the largest ecosystem of reference material — AI builders make fewer wrong guesses on this path.",
+  "tradeoffs": "Node toolchain weight; vendor gravity toward Vercel defaults.",
+  "avoid_when": "The core is data/ML-heavy (pair with a Python service or use the Python standard).",
+  "testing_defaults": {"framework": "vitest + playwright",
+                       "tiers": "test-first business logic and API routes; smoke/integration for UI"},
+  "philosophy_fit": "Moderate: free tiers exist end-to-end but the toolchain is not lightweight.",
+  "rank": 3
+}

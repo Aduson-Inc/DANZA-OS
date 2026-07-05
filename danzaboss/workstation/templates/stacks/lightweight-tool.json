@@ -1,0 +1,17 @@
+{
+  "name": "Lightweight app / internal tool",
+  "tagline": "Flask or FastAPI + HTMX + SQLite — zero ops",
+  "best_for": {"project_types": ["saas", "website"],
+               "capabilities": ["accounts_auth", "admin_panel", "search"]},
+  "components": {"frontend": "HTMX + server templates", "backend": "Flask or FastAPI",
+                 "database": "SQLite", "auth": "session auth",
+                 "payments": "none (add Stripe later if needed)",
+                 "hosting": "single small VPS or local"},
+  "why": "For modest-scale apps and internal tools, one process and one file database deliver everything with nothing to operate — the philosophy-purest choice.",
+  "tradeoffs": "SQLite writes serialize; heavy concurrent traffic eventually forces the Postgres upgrade path (to the Python standard).",
+  "avoid_when": "Payments at launch, high write concurrency, or a large realtime surface.",
+  "testing_defaults": {"framework": "pytest",
+                       "tiers": "test-first business logic; tier 0-1 for templates/config"},
+  "philosophy_fit": "Maximal: free-first, lightweight-first, local-first.",
+  "rank": 5
+}

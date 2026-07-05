@@ -1,0 +1,17 @@
+{
+  "name": "Realtime / collaborative app",
+  "tagline": "Next.js + Supabase — live data on a free tier",
+  "best_for": {"project_types": ["saas"],
+               "capabilities": ["realtime", "accounts_auth", "notifications",
+                                "file_uploads"]},
+  "components": {"frontend": "Next.js", "backend": "Supabase (Postgres + realtime + auth)",
+                 "database": "Postgres (Supabase)", "auth": "Supabase Auth",
+                 "payments": "Stripe", "hosting": "Vercel + Supabase free tiers"},
+  "why": "When features must update live across clients, Supabase bundles the database, subscriptions, and auth into one service with a generous free tier.",
+  "tradeoffs": "Vendor coupling to Supabase; migrating off later is real work.",
+  "avoid_when": "No realtime requirement — the plain SaaS standards are simpler.",
+  "testing_defaults": {"framework": "vitest + playwright",
+                       "tiers": "test-first business logic; integration tests for realtime flows"},
+  "philosophy_fit": "Moderate: free-first yes, local-first no (cloud service at the core).",
+  "rank": 6
+}

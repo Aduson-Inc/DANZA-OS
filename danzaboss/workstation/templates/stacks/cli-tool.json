@@ -1,0 +1,15 @@
+{
+  "name": "CLI / automation tool",
+  "tagline": "Python + Typer + SQLite, installed with pipx",
+  "best_for": {"project_types": ["workflow"], "capabilities": ["search"]},
+  "components": {"frontend": "terminal (Typer CLI)", "backend": "Python",
+                 "database": "SQLite (or plain files)", "auth": "none",
+                 "payments": "none", "hosting": "user's machine (pipx install)"},
+  "why": "Workflow and automation ideas are usually best as a sharp command-line tool: instant startup, scriptable, no server to run.",
+  "tradeoffs": "Terminal-only audience; a UI later means a separate template.",
+  "avoid_when": "Non-technical end users need to operate it.",
+  "testing_defaults": {"framework": "pytest",
+                       "tiers": "test-first command logic; tier 0-1 for packaging"},
+  "philosophy_fit": "Maximal: free-first, lightweight-first, local-first.",
+  "rank": 7
+}
