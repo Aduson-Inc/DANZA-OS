@@ -209,6 +209,28 @@ class RunCheckpointTests(unittest.TestCase):
         self.assertIn("'no-such-template' is not in the template library",
                       prompt)
 
+    def test_stale_reality_digest_is_not_injected_into_prompt(self):
+        """Final-review I1: editing p1 stales r_reality; a subsequent
+        checkpoint run must not ground itself in the stale digest."""
+        digest = {"verdict": "novel", "summary": "wide open market",
+                  "competitors": [], "differentiation": "first mover"}
+        Wizard(self.tmp).record_result("r_reality", digest)
+        prompt_file = self.tmp / "prompt.txt"
+        command = make_stub(self.tmp, (
+            "import json, pathlib, sys\n"
+            f"pathlib.Path({str(prompt_file)!r}).write_text(sys.argv[1])\n"
+            f"print(json.dumps({VALID_VERDICT!r}))\n"))
+        checkpoints.run_checkpoint(self.tmp, "cp_concept", command)
+        self.assertIn("wide open market",
+                      prompt_file.read_text(encoding="utf-8"))
+        wizard = Wizard(self.tmp)
+        wizard.submit("p1", dict(P1_ANSWERS,
+                                 concept_what="Cat sitting marketplace"))
+        checkpoints.run_checkpoint(self.tmp, "cp_concept", command)
+        prompt = prompt_file.read_text(encoding="utf-8")
+        self.assertNotIn("Reality digest", prompt)
+        self.assertNotIn("wide open market", prompt)
+
     def test_phase_step_is_rejected_by_wizard_seam(self):
         command = make_stub(self.tmp, "print('unused')\n")
         with self.assertRaises(ValueError):

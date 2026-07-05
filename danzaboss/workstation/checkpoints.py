@@ -201,8 +201,13 @@ def run_checkpoint(root, step_id: str, command: list[str], *,
                 and chosen not in {t.key for t in library}):
             concerns.append(
                 f"{chosen!r} is not in the template library")
+    # Freshness gate: result() returns stored data regardless of status,
+    # and re-running research never re-stales downstream checkpoints — so
+    # a staled digest must not ground this review in the wrong reality.
+    research = (wizard.result("r_reality")
+                if wizard.status("r_reality") == "complete" else None)
     prompt = build_prompt(step_id, answers,
-                          research=wizard.result("r_reality"),
+                          research=research,
                           stack_options=stack_options,
                           memory=read_memory(root),
                           concerns=tuple(concerns))
