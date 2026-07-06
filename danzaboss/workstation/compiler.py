@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from danzaboss.workstation.checkpoints import CHECKPOINT_IDS
 from danzaboss.workstation.templates import StackTemplate
 
 SPEC_RELPATH = Path(".danza") / "spec.md"
@@ -44,8 +45,11 @@ def compile_spec(*, answers: dict, template: StackTemplate | None,
                      f"{research.get('summary', '')}".rstrip(" —"))
     else:
         lines.append("Reality check: not run (user skipped or unavailable).")
-    for cp_id, summary in sorted(checkpoints.items()):
-        lines.append(f"> {cp_id}: {summary}")
+    # Flow order, not alphabetical (which puts cp_final before cp_stack);
+    # ids outside the known flow trail in sorted order.
+    known = [cp for cp in CHECKPOINT_IDS if cp in checkpoints]
+    for cp_id in known + sorted(set(checkpoints) - set(known)):
+        lines.append(f"> {cp_id}: {checkpoints[cp_id]}")
 
     lines += ["", "## 2. Functional requirements"]
     for n, feat in enumerate(answers.get("features_must", []), start=1):

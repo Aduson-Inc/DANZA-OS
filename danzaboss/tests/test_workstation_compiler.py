@@ -79,6 +79,18 @@ class CompileSpec(unittest.TestCase):
         tail = self.text.split("## 8. Open questions")[1]
         self.assertIn("None.", tail)
 
+    def test_checkpoint_summaries_render_in_flow_order(self):
+        text = compile_spec(
+            answers=ANSWERS, template=_template("saas-ts"),
+            checkpoints={"cp_final": "Rundown approved.",
+                         "cp_stack": "Stack fits.",
+                         "cp_concept": "Concept confirmed.",
+                         "cp_extra": "From a future flow."},
+        )
+        positions = [text.index(f"> {cp}:") for cp in
+                     ("cp_concept", "cp_stack", "cp_final", "cp_extra")]
+        self.assertEqual(positions, sorted(positions))
+
 
 class Overrides(unittest.TestCase):
     def test_custom_stack_and_override_notes(self):
