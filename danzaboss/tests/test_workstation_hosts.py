@@ -93,7 +93,7 @@ class TestTmuxHostIgnite(unittest.TestCase):
         self.assertEqual(sk[0], "tmux")
         self.assertIn("send-keys", sk)
         self.assertIn("-t", sk)
-        self.assertEqual(sk[sk.index("-t") + 1], "=boss1")
+        self.assertEqual(sk[sk.index("-t") + 1], "=boss1:")
         self.assertIn(IGNITION_MESSAGE, sk)
         self.assertIn("Enter", sk)
 

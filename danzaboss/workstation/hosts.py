@@ -128,8 +128,10 @@ class TmuxHost:
             # "=" forces an exact session match: bare -t targets prefix-
             # match, so danza-app would resolve to danza-app2 (verified
             # against tmux 3.x) — wrong-session sends/kills across repos.
+            # Pane-taking commands need the trailing ":" (default window)
+            # — bare "=name" parses as a pane target and fails.
             sk = self._run(
-                ["tmux", "send-keys", "-t", f"={name}", IGNITION_MESSAGE,
+                ["tmux", "send-keys", "-t", f"={name}:", IGNITION_MESSAGE,
                  "Enter"],
                 capture_output=True, text=True,
             )
@@ -157,7 +159,7 @@ class TmuxHost:
         control flow, so silence beats an exception.
         """
         result = self._run(
-            ["tmux", "capture-pane", "-p", "-t", f"={name}"],
+            ["tmux", "capture-pane", "-p", "-t", f"={name}:"],
             capture_output=True, text=True,
         )
         if result.returncode != 0:
