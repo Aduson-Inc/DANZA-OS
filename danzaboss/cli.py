@@ -34,7 +34,7 @@ from .hooks.guards import GuardConfig, hard_stop_guard, file_protection_guard
 from .workstation.runners import (RunnerError, RUNNERS_RELPATH,
                                   detect_runners, default_config,
                                   save_runners, load_runners)
-from .workstation.hosts import TmuxHost, HeadlessHost, pick_host
+from .workstation.hosts import HostError, TmuxHost, HeadlessHost, pick_host
 from .workstation.conductor import Conductor, ConductorError, Action
 
 
@@ -236,17 +236,17 @@ def _cmd_conduct(argv: list[str]) -> int:
         return 2
 
     try:
+        # pick_host may degrade tmux -> headless; the RESOLVED mode must
+        # travel with the host or the conductor would pick argv off the
+        # raw config and feed an interactive claude to the headless host.
         host_type = pick_host(config["session_host"])
         if host_type == "tmux":
             host = TmuxHost()
         else:
             host = HeadlessHost(log_dir=Path(root) / ".danza" / "runtime")
-        action = Conductor(root, host,
+        action = Conductor(root, host, session_mode=host_type,
                            poll_interval=poll_interval).run(max_ticks=max_ticks)
-    except ConductorError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    except RunnerError as exc:
+    except (ConductorError, RunnerError, HostError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

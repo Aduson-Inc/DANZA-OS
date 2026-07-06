@@ -116,6 +116,24 @@ class ConductCmd(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertTrue(err.getvalue().strip(), "stderr must be non-empty")
 
+    def test_host_error_exits_2_one_line(self):
+        """HostError from ignite (e.g. the boss binary vanished after the
+        registry was written) must exit 2 with one stderr line, not a
+        traceback (review finding, W1-P4 final)."""
+        self._make_headless_registry()
+        config = runners_mod.load_runners(self.root)
+        config["runners"]["claude"]["headless"] = [
+            "/nonexistent-danza-boss-xyz", "-p"]
+        runners_mod.save_runners(self.root, config)
+        self._init_state()  # status ready -> first tick ignites
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = main(["conduct", str(self.root), "--max-ticks", "1"])
+        self.assertEqual(rc, 2)
+        self.assertIn("ignite", err.getvalue())
+        pidfile = self.root / conductor_mod.PIDFILE_RELPATH
+        self.assertFalse(pidfile.exists(), "pidfile released on HostError")
+
     def test_max_ticks_0_exits_0_and_releases_pidfile(self):
         """Zero-tick run: the loop body never executes, action stays WAIT
         (non-terminal), exit 0; the finally block in run() must release the
