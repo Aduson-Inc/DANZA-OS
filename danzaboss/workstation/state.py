@@ -9,8 +9,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
-STATE_RELPATH = Path(".danza") / "onboarding" / "answers.json"
+STATE_RELPATH: Path = Path(".danza") / "onboarding" / "answers.json"
 
 
 def state_path(root: str | os.PathLike) -> Path:
@@ -18,10 +19,15 @@ def state_path(root: str | os.PathLike) -> Path:
     return Path(root) / STATE_RELPATH
 
 
-def load_state(root: str | os.PathLike) -> dict:
+def load_state(root: str | os.PathLike) -> dict[str, Any]:
     """Current wizard state, or an empty shape. Fails closed on a file
-    that exists but is not a JSON object."""
-    raw: dict = {}
+    that exists but is not a JSON object.
+
+    Deliberate asymmetry with save_state: loading corrupt state raises
+    (the reader must not act on garbage), while saving over corrupt
+    state heals it (the writer's merged snapshot is the best truth
+    available and an atomic replace cannot make things worse)."""
+    raw: dict[str, Any] = {}
     path = state_path(root)
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -32,11 +38,14 @@ def load_state(root: str | os.PathLike) -> dict:
     return raw
 
 
-def save_state(root: str | os.PathLike, state: dict) -> None:
-    """Merge answers/steps over what is on disk, then atomic-replace."""
+def save_state(root: str | os.PathLike, state: dict[str, Any]) -> None:
+    """Merge answers/steps over what is on disk, then atomic-replace.
+
+    Unlike load_state, a corrupt on-disk file does not raise here — it
+    is replaced wholesale (see load_state docstring for why)."""
     path = state_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    on_disk: dict = {}
+    on_disk: dict[str, Any] = {}
     if path.exists():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))

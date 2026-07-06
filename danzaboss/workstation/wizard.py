@@ -56,6 +56,9 @@ class Wizard:
     # ---- read side ----------------------------------------------------
     @property
     def answers(self) -> dict:
+        """Every stored answer, including ones behind branches that are
+        currently hidden (a branch switch never deletes data). Callers
+        that must see only the live flow filter via visible_questions()."""
         return dict(self._state["answers"])
 
     def project_type(self) -> str | None:
@@ -161,6 +164,7 @@ class Wizard:
         raise WizardError(f"step not in the active flow: {step_id}")
 
     def _set_status(self, step_id: str, status: str) -> None:
+        """In-memory status write; callers persist via save_state."""
         self._state["steps"].setdefault(step_id, {})["status"] = status
 
     def _stale_after(self, step_id: str) -> None:
