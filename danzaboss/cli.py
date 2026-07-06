@@ -10,6 +10,9 @@ Commands:
                                                 CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
   danzaboss.cli profile                         print the active execution profile (OS_DEV|OS_BOOT_TEST|APP_BUILD)
   danzaboss.cli tier <paths...> [--commit]      cheapest safe verification tier for a change set
+  danzaboss.cli runners <root>                  detect/show the runner registry for a project root
+  danzaboss.cli conduct <root> [--poll N] [--max-ticks N]
+                                                run the conductor relay loop against a project root
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
 """
@@ -18,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 from .cortex import commands as cortex_commands
 from .kernel.profile import active_profile
@@ -27,6 +31,11 @@ from .runtime.verify import run_verification
 from .selftest.harness import run_cold_start
 from .hooks.events import ToolEvent
 from .hooks.guards import GuardConfig, hard_stop_guard, file_protection_guard
+from .workstation.runners import (RunnerError, RUNNERS_RELPATH,
+                                  detect_runners, default_config,
+                                  save_runners, load_runners)
+from .workstation.hosts import TmuxHost, HeadlessHost, pick_host
+from .workstation.conductor import Conductor, ConductorError, Action
 
 
 def _cmd_scan(argv: list[str]) -> int:
@@ -146,16 +155,118 @@ def _cmd_tier(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_runners(argv: list[str]) -> int:
+    """Detect or display the runner registry for a project root.
+
+    First call: runs detect_runners(), builds default_config(), writes it to
+    RUNNERS_RELPATH, and prints a human line per runner plus the chosen boss
+    and the path written.  Subsequent calls: load_runners() + pretty-print.
+    NO overwrite on subsequent calls — the /models screen owns edits to
+    runners.json once it exists; overwriting would discard user choices.
+    """
+    if not argv:
+        print("usage: danzaboss.cli runners <root>", file=sys.stderr)
+        return 2
+    root = argv[0]
+    try:
+        path = Path(root) / RUNNERS_RELPATH
+        if path.exists():
+            # /models screen owns edits — never overwrite an existing registry
+            config = load_runners(root)
+            print(json.dumps(config, indent=2))
+        else:
+            detected = detect_runners()
+            config = default_config(detected)
+            written = save_runners(root, config)
+            for name, entry in config["runners"].items():
+                status = "detected" if entry["detected"] else "not found"
+                print(f"{name}: {status}")
+            print(f"boss: {config['boss']}")
+            print(f"written: {written}")
+    except RunnerError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_conduct(argv: list[str]) -> int:
+    """Run the conductor relay loop against a project root.
+
+    Parses <root>, optional --poll <seconds>, and optional --max-ticks <n>.
+    Loads runners.json to pick the right host type, then hands control to
+    Conductor.run().  Exit codes: 0 for STOP_DONE or non-terminal exhaustion
+    (WAIT/IGNITE after max-ticks); 1 for HALT_BLOCKED or STOP_VALVE (human
+    intervention needed); 2 for RunnerError or ConductorError (one-line
+    stderr, no traceback).
+    """
+    if not argv:
+        print("usage: danzaboss.cli conduct <root> [--poll N] [--max-ticks N]",
+              file=sys.stderr)
+        return 2
+
+    root = argv[0]
+    rest = argv[1:]
+    poll_interval = 2.0
+    max_ticks: int | None = None
+
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--poll" and i + 1 < len(rest):
+            try:
+                poll_interval = float(rest[i + 1])
+            except ValueError:
+                print(f"--poll must be a number", file=sys.stderr)
+                return 2
+            i += 2
+        elif rest[i] == "--max-ticks" and i + 1 < len(rest):
+            try:
+                max_ticks = int(rest[i + 1])
+            except ValueError:
+                print(f"--max-ticks must be an integer", file=sys.stderr)
+                return 2
+            i += 2
+        else:
+            print(f"unknown argument: {rest[i]}", file=sys.stderr)
+            return 2
+
+    try:
+        config = load_runners(root)
+    except RunnerError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    try:
+        host_type = pick_host(config["session_host"])
+        if host_type == "tmux":
+            host = TmuxHost()
+        else:
+            host = HeadlessHost(log_dir=Path(root) / ".danza" / "runtime")
+        action = Conductor(root, host,
+                           poll_interval=poll_interval).run(max_ticks=max_ticks)
+    except ConductorError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except RunnerError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if action in (Action.HALT_BLOCKED, Action.STOP_VALVE):
+        return 1
+    return 0
+
+
 _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
              "selftest": _cmd_selftest, "hook": _cmd_hook,
              "cortex": _cmd_cortex, "profile": _cmd_profile,
-             "tier": _cmd_tier}
+             "tier": _cmd_tier, "runners": _cmd_runners,
+             "conduct": _cmd_conduct}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in _COMMANDS:
-        print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier> ...",
+        print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier"
+              "|runners|conduct> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:])
