@@ -13,11 +13,12 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from danzaboss.kernel.state import StateError, StateManager, TeamState
 from danzaboss.workstation import runners as runners_mod
@@ -56,14 +57,21 @@ def decide(state: TeamState, watch: Watch) -> Action:
     """Pure decision table — same discipline as kernel.scheduler.decide.
 
     Order matters: human-needed states outrank the valve, and the valve
-    outranks ignition (a relay burning sessions must not get one more)."""
+    outranks ignition (a relay burning sessions must not get one more).
+
+    "awaiting_handoff" ignites too: kernel handoff() leaves that status
+    as the departing boss's FINAL act (state.py), so once its session is
+    gone the baton already belongs to current_boss and nobody else will
+    ever flip the status — waiting here would deadlock the relay. With a
+    session still alive it means the departing boss is wrapping up: wait."""
     if state.status == "blocked":
         return Action.HALT_BLOCKED
     if state.status == "done":
         return Action.STOP_DONE
     if watch.dead_sessions >= DEAD_SESSION_VALVE:
         return Action.STOP_VALVE
-    if state.status == "ready" and not watch.session_alive:
+    if (state.status in ("ready", "awaiting_handoff")
+            and not watch.session_alive):
         return Action.IGNITE
     return Action.WAIT
 
@@ -95,8 +103,12 @@ LOG_RELPATH = Path(".danza") / "runtime" / "conductor-log.jsonl"
 
 def session_name(root: str | os.PathLike) -> str:
     """`danza-<project>` (spec section 7) — stable per repo so a
-    restarted conductor finds the session it left behind."""
-    return f"danza-{Path(root).resolve().name}"
+    restarted conductor finds the session it left behind. Sanitized:
+    tmux rejects or rewrites '.'/':' in session names AND parses them
+    as window/pane separators in -t targets, so a repo named
+    'myapp.web' would create one name and probe another forever."""
+    return "danza-" + re.sub(r"[^A-Za-z0-9_-]", "_",
+                             Path(root).resolve().name)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -119,15 +131,25 @@ def acquire_pidfile(root: str | os.PathLike, *, pid: int | None = None,
     pid = os.getpid() if pid is None else pid
     path = Path(root) / PIDFILE_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        text = path.read_text(encoding="utf-8").strip()
-        existing = int(text) if text.isdigit() else None
-        if existing is not None and alive(existing):
-            raise ConductorError(
-                f"another conductor is running (pid {existing}); two "
-                "conductors would double-ignite")
-    path.write_text(f"{pid}\n", encoding="utf-8")
-    return path
+    for _ in range(2):  # one reclaim attempt, then give up
+        try:
+            # O_EXCL closes the check-then-write race: two conductors
+            # starting together must not both pass an exists() check.
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            text = path.read_text(encoding="utf-8").strip()
+            existing = int(text) if text.isdigit() else None
+            if existing is not None and alive(existing):
+                raise ConductorError(
+                    f"another conductor is running (pid {existing}); two "
+                    "conductors would double-ignite")
+            path.unlink(missing_ok=True)  # stale: reclaim and retry
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"{pid}\n")
+        return path
+    raise ConductorError("pidfile contention: could not claim "
+                         f"{path} after reclaiming a stale pid")
 
 
 def release_pidfile(root: str | os.PathLike, *,
@@ -148,7 +170,8 @@ class Conductor:
     _TERMINAL = frozenset({Action.HALT_BLOCKED, Action.STOP_DONE,
                            Action.STOP_VALVE})
 
-    def __init__(self, root: str | os.PathLike, host, *,
+    def __init__(self, root: str | os.PathLike, host: Any, *,
+                 session_mode: str | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep,
                  poll_interval: float = 2.0,
@@ -159,9 +182,15 @@ class Conductor:
         self._sleep = sleep
         self._poll_interval = poll_interval
         self._stall_minutes = stall_minutes
-        # Fail closed at construction: no registry, no relay (the UI
-        # button stays dark with a reason — spec section 7).
+        # Fail closed at construction: no registry / no boss / no usable
+        # argv means no relay (the UI button stays dark with a reason —
+        # spec section 7) — not a RunnerError ten minutes into a run.
         self._config = runners_mod.load_runners(root)
+        # The RESOLVED host mode must come from whoever built `host`
+        # (pick_host may have degraded tmux -> headless); trusting the
+        # raw config here would feed interactive argv to a headless host.
+        self._mode = session_mode or self._config.get("session_host")
+        self._session_argv = self._argv()
         self._manager = StateManager(str(self._root / TEAM_STATE_RELPATH))
         self._name = session_name(root)
         self._watch = Watch(session_alive=False, turn_at_ignite=None,
@@ -171,7 +200,7 @@ class Conductor:
         self._stall_logged = False
 
     # -- the postman's ONLY writes ---------------------------------------
-    def log(self, event: str, **fields) -> None:
+    def log(self, event: str, **fields: Any) -> None:
         """Append one JSONL line. This log plus the pidfile are the
         conductor's entire write surface (postman discipline)."""
         path = self._root / LOG_RELPATH
@@ -184,10 +213,11 @@ class Conductor:
 
     # -- internals --------------------------------------------------------
     def _argv(self) -> list[str]:
-        """Interactive argv for attachable hosts, headless argv when the
-        registry says headless — keyed off the CONFIG, not isinstance,
-        so test doubles and future hosts need no special-casing."""
-        if self._config.get("session_host") == "headless":
+        """Interactive argv for attachable hosts, headless argv for the
+        headless host — keyed off the RESOLVED mode (constructor), not
+        isinstance, so test doubles and future hosts need no
+        special-casing."""
+        if self._mode == "headless":
             return runners_mod.headless_argv(self._config)
         return runners_mod.interactive_argv(self._config)
 
@@ -195,8 +225,14 @@ class Conductor:
         alive = self._host.alive(self._name)
         if self._watch.session_alive and not alive:
             self._watch = observe_session_end(state, self._watch)
+            # A death mid-turn (in_progress) is an ORPHANED turn: nothing
+            # will ever flip the status back, the valve only counts from
+            # ignition cycles, and is_stalled needs a live session — so
+            # this log line is the one surface the human gets (Rule 33).
             self.log("session_end", turn_number=state.turn_number,
-                     dead_sessions=self._watch.dead_sessions)
+                     dead_sessions=self._watch.dead_sessions,
+                     status=state.status,
+                     orphaned_turn=state.status == "in_progress")
         elif alive and not self._watch.session_alive:
             # Conductor restarted while the session survived: adopt it
             # (crash recovery by statelessness, spec section 7).
@@ -219,9 +255,10 @@ class Conductor:
     def tick(self) -> Action:
         try:
             state = self._manager.load()
-        except (StateError, ValueError) as exc:
+        except (StateError, TypeError, ValueError) as exc:
             # An unreadable team-state must not crash the daemon: wait
             # and keep reporting until a boss or human repairs it.
+            # TypeError covers TeamState(**raw) choking on unknown keys.
             self.log("state_error", error=str(exc))
             return Action.WAIT
         self._refresh_watch(state)
@@ -233,7 +270,7 @@ class Conductor:
             self._stall_logged = True  # once per episode
         action = decide(state, self._watch)
         if action is Action.IGNITE:
-            argv = self._argv()
+            argv = self._session_argv
             self._host.ignite(self._name, self._root, argv)
             self._watch = replace(self._watch, session_alive=True,
                                   turn_at_ignite=state.turn_number,

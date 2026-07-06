@@ -97,6 +97,41 @@ class Ignition(LoopFixture):
         _, _, argv = self.host.ignites[0]
         self.assertEqual(argv, ["claude", "-p", "--output-format", "json"])
 
+    def test_session_mode_override_beats_config(self):
+        # pick_host may degrade tmux -> headless when tmux is absent; the
+        # RESOLVED mode must drive argv or the headless host gets an
+        # interactive claude (review finding, W1-P4 final).
+        self.conductor(session_mode="headless").tick()
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude", "-p", "--output-format", "json"])
+
+    def test_null_boss_fails_at_construction(self):
+        runners_mod.save_runners(
+            self.root, runners_mod.default_config({"claude": False,
+                                                   "codex": False}))
+        with self.assertRaises(runners_mod.RunnerError):
+            self.conductor()
+
+    def test_relay_continues_after_handoff(self):
+        # handoff() leaves awaiting_handoff; the conductor must ignite
+        # the next boss once the departing session exits (deadlock fix).
+        con = self.conductor()
+        con.tick()                                     # ignite turn 0
+        self.manager.transition(to_status="in_progress", actor="claude")
+        self.manager.handoff("claude")                 # -> awaiting_handoff
+        self.host.alive_now = False                    # session exits
+        con.tick()                                     # observe death
+        self.assertEqual(len(self.host.ignites), 2)    # next boss ignited
+
+    def test_orphaned_turn_surfaced_in_session_end(self):
+        con = self.conductor()
+        con.tick()                                     # ignite
+        self.manager.transition(to_status="in_progress", actor="claude")
+        self.host.alive_now = False                    # dies mid-turn
+        self.assertIs(con.tick(), Action.WAIT)
+        ends = [e for e in self.log_events() if e["event"] == "session_end"]
+        self.assertTrue(ends and ends[-1]["orphaned_turn"])
+
     def test_never_writes_team_state(self):
         state_path = self.root / TEAM_STATE_RELPATH
         before = state_path.read_text(encoding="utf-8")
@@ -184,10 +219,30 @@ class Pidfile(LoopFixture):
         self.assertTrue((self.root / PIDFILE_RELPATH).exists())
 
 
+class SessionName(unittest.TestCase):
+    def test_dots_and_colons_sanitized_for_tmux(self):
+        with tempfile.TemporaryDirectory(suffix="my.app") as tmp:
+            name = session_name(tmp)
+            self.assertTrue(name.startswith("danza-"))
+            self.assertNotIn(".", name)
+            self.assertNotIn(":", name)
+
+
 class Degraded(LoopFixture):
     def test_corrupt_team_state_survived_as_wait(self):
         (self.root / TEAM_STATE_RELPATH).write_text("{not json",
                                                     encoding="utf-8")
+        con = self.conductor()
+        self.assertIs(con.tick(), Action.WAIT)
+        self.assertIn("state_error", {e["event"] for e in self.log_events()})
+
+    def test_unknown_team_state_key_survived_as_wait(self):
+        # TeamState(**raw) raises TypeError on unknown keys — must be
+        # caught, not crash the daemon (review finding, W1-P4 final).
+        path = self.root / TEAM_STATE_RELPATH
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc["notes"] = "written by an external tool"
+        path.write_text(json.dumps(doc), encoding="utf-8")
         con = self.conductor()
         self.assertIs(con.tick(), Action.WAIT)
         self.assertIn("state_error", {e["event"] for e in self.log_events()})

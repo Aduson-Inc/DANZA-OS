@@ -47,10 +47,22 @@ class Decide(unittest.TestCase):
         self.assertIs(decide(state(status="ready"),
                              watch(session_alive=True)), Action.WAIT)
 
-    def test_in_progress_and_awaiting_handoff_wait(self):
+    def test_in_progress_and_awaiting_handoff_wait_while_session_lives(self):
         for status in ("in_progress", "awaiting_handoff"):
             self.assertIs(decide(state(status=status),
                                  watch(session_alive=True)), Action.WAIT)
+
+    def test_awaiting_handoff_with_dead_session_ignites_next_boss(self):
+        # kernel handoff() leaves status awaiting_handoff as the departing
+        # boss's final act; waiting here would deadlock the relay forever.
+        self.assertIs(decide(state(status="awaiting_handoff"), watch()),
+                      Action.IGNITE)
+
+    def test_in_progress_with_dead_session_still_waits(self):
+        # An orphaned turn is surfaced via the session_end log, not by
+        # igniting over a turn someone may still own.
+        self.assertIs(decide(state(status="in_progress"), watch()),
+                      Action.WAIT)
 
 
 class Valve(unittest.TestCase):
