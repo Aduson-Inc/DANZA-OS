@@ -1,19 +1,22 @@
 # CORTEX Build Design — Wiring the Cognitive Memory into DANZA-OS
 
 **Date:** 2026-07-03
-**Status:** Approved design (brainstormed + user-validated section by section)
+**Status:** LEGACY approved design. This file preserves the starting point for the CORTEX build; it is not the current state of CORTEX.
 **Supersedes nothing; implements:** `docs/cognitive-memory-architecture.md` (spec v0.1)
 **Approach:** A — vertical slice with VPS-readiness tweaks (user-approved)
+
+Current baseline: CORTEX is now REAL/PARTIAL. It has local SQLite observations, capture logs, retrieval, graph, dashboard, MCP read tools, and existing repo memory data. The starting-state bullets below have been rewritten to preserve history without presenting stale claims as current reality.
 
 ---
 
 ## 1. Context — verified starting state
 
-- `docs/cognitive-memory-architecture.md` is a blueprint. Of its P1–P8 roadmap, **only P1
-  exists in code** (`danzaboss/cortex/`: `observation.py`, `store.py`, `ports.py`,
-  `sqlite_backend.py`, `app_profile.py` — 578 lines, tested). P2–P8 have zero code.
-- **P1 is dead code**: nothing in the live loop reads or writes an observation. The CLI
-  exposes only `scan | verify | selftest | hook`; the hook path only runs guards.
+- LEGACY STARTING STATE: at the start of this design, only the first CORTEX slice existed
+  in code (`danzaboss/cortex/`: `observation.py`, `store.py`, `ports.py`,
+  `sqlite_backend.py`, `app_profile.py`). Later slices now exist in the repository.
+- DOCUMENTATION DRIFT RESOLVED: CORTEX is no longer accurately described as dead code.
+  Current source includes write/read paths through CLI commands, hooks, retrieval, UI,
+  graph, and MCP surfaces.
 - `memory/store.py` (Upgrade #7) and `context/pipeline.py` (Upgrade #8) are separate,
   simpler systems; the pipeline compiles per-driver context from `MemoryStore` only.
 - Reference implementations verified locally:

@@ -1,16 +1,17 @@
-# DANZABOSS — Runbook: try it on a real app
+# DANZA-OS Runbook
 
-This is the one working set. Below is exactly how to point DANZA at a real app and run it.
-Honest status is at the bottom — read it before your first run.
+DANZA-OS is currently a real Python-based agent governance and memory toolkit with a functioning CORTEX memory subsystem. It is not yet a finished turnkey app-building OS. The end-to-end multi-agent app-building loop still needs verification and hardening.
 
-## The one working set (layout)
+This runbook describes the current local toolkit surface. It is not a clean-install or production deployment guide.
+
+## Current Layout
 
 ```
 CLAUDE.md            Entry doc every AI reads first
 .claude/             Live agent layer — 8 agents + constitution + "Who's the Boss?" skill
-  settings.example.json   Hook wiring (rename to settings.json to activate; verify API first)
-.danza/              Runtime state + auto-memory
-danzaboss/          The Python brain (promoted, authoritative) — 124 tests
+  settings.json      Current Claude Code hook settings; do not edit casually
+.danza/              Runtime state + local CORTEX data
+danzaboss/           Python toolkit: CLI, CORTEX, kernel, hooks, planning, research, workstation
   kernel/ planning/ memory/ context/ security/ observability/ orchestration/ selftest/
   cortex/ hooks/ research/
   runtime/   scan (learn any repo) · verify (run real tests) · runner
@@ -20,56 +21,44 @@ docs/                Design docs (architecture, ADRs, research)
 tools/research-pipeline/   YouTube→NotebookLM research helper
 ```
 
-## Prove the brain works (30 seconds)
+## Prove The Local Toolkit Works
 
 ```bash
 # from the repo root
-./danzaboss/run_tests.sh                                   # 124 tests, should be green
-PYTHONPATH=. python3 -m danzaboss.cli selftest             # cold-start harness, 8/8
+./danzaboss/run_tests.sh
+PYTHONPATH=. python3 -m danzaboss.cli selftest
 ```
 
-## Try it on a real app
+Recent audit evidence: `selftest` passed 8/8. The full unittest suite discovered 672 tests in this environment, with 4 CORTEX UI endpoint errors caused by sandbox localhost socket restrictions and 14 optional skips. Treat test counts as current-run evidence rather than a fixed documentation claim.
 
-**1. Learn the app** (works on any stack — TS, Python, Go, …):
+## Current CLI Surfaces
+
 ```bash
+# Learn a target app profile from heuristics
 PYTHONPATH=. python3 -m danzaboss.cli scan /path/to/your/app --domain "what it is"
-# prints the learned AppProfile: languages, frameworks, databases, features, confidence
+
+# Run a target app verification command
+PYTHONPATH=. python3 -m danzaboss.cli verify "npm test" /path/to/your/app
+
+# Inspect active execution profile
+PYTHONPATH=. python3 -m danzaboss.cli profile
+
+# Use CORTEX memory commands
+PYTHONPATH=. python3 -m danzaboss.cli cortex <search|get|observe|retrieve|context|age|learn|stats|ui|mcp>
 ```
 
-**2. (Optional) Turn on the governance hooks** so the build can't fake work or regress:
-```bash
-# verify Claude Code's current hooks API, then:
-cp .claude/settings.example.json .claude/settings.json
-```
+## Claude Code Agent Loop
 
-**3. Build features** — in Claude Code with DANZA installed, type:
-```
-Who's the Boss?
-```
-Tony D runs onboarding (learns intent, uses the AppProfile), then the build cycle:
-Samantha maps → Jonathan builds → Bonnie verifies → Angela logs. The hooks (if on) enforce
-capability/hard-stop/anti-theatre/verify/regression.
+The Claude Code operational layer is PARTIAL. The files exist, and `.claude/settings.json` is present in this repository, but the full turnkey app-building loop is still UNVERIFIED from the current audit baseline.
 
-**4. Verify a change** with the app's own tests (the QA gate):
-```bash
-PYTHONPATH=. python3 -m danzaboss.cli verify "npm test" /path/to/your/app     # or: pytest, go test, …
-# exit 0 = pass; feeds "verify before done" + the regression gate
-```
+Do not assume this is production-safe or unattended. Treat any real target-app run as a controlled validation exercise.
 
-## Honest status (read before first run)
+## Honest Status
 
-- ✅ **The brain is real and tested:** scan, verify, selftest, hooks logic, CORTEX memory,
-  kernel, capabilities — 124 unit tests, and the CLI runs live (it scanned this repo).
-- ◑ **The agent build loop** ("Who's the Boss?") runs in Claude Code where the 8 agents are
-  registered. It is the original prompt/agent layer driving the build; it has **not yet been run
-  end-to-end on a real app**, so expect rough edges on the first try.
-- ◑ **Hooks are not active by default.** They're written and tested, but you must rename
-  `settings.example.json` → `settings.json` AND verify the event names against Claude Code's
-  current hooks docs first. Until then the guards enforce nothing at runtime.
-- ⚠️ **Building is done by the agents, not the Python.** `danzaboss/` plans, remembers, verifies, and
-  guards; it does not itself write code headlessly (that's the future API-key/SDK path).
-
-## First recommended run
-Point `danza scan` at a small, low-stakes app, eyeball the AppProfile it learns, then try one
-tiny feature via "Who's the Boss?" with hooks OFF — watch how the agents behave — before turning
-hooks on and trusting it unattended.
+- REAL: Python toolkit, CLI, selftest, kernel state, hooks logic, CORTEX local memory.
+- REAL: CORTEX dashboard and MCP read surface exist.
+- PARTIAL: Packaging and installability.
+- PARTIAL: Workstation/onboarding library stack.
+- SCAFFOLD: Live research providers.
+- UNVERIFIED: Clean install and end-to-end multi-agent app-building reliability.
+- DOCUMENTATION DRIFT: Older docs may still contain stale test counts or old CORTEX status claims.

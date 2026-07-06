@@ -1,25 +1,40 @@
-# DANZABOSS — Install into any app repo
+# DANZA-OS Install Reality
 
-## Copy these into your app's repo root:
-- `.claude/`     (agents, constitution, "Who's the Boss?" skill, active hooks)
-- `.danza/`      (state + memory)
-- `danzaboss/`   (the Python brain)
-- `CLAUDE.md`
+DANZA-OS is currently a real Python-based agent governance and memory toolkit with a functioning CORTEX memory subsystem. It is not yet a finished turnkey app-building OS. The end-to-end multi-agent app-building loop still needs verification and hardening.
 
-Optional: `tools/`, `docs/`, `RUNBOOK.md`.
+## Current Install Status
 
-## Requirement
-Python 3.10+ on the machine (`python3 --version`). Everything is stdlib-only — no pip installs.
+Status: PARTIAL/UNVERIFIED.
 
-## Run it
-In Claude Code, from your app repo, type:  **Who's the Boss?**
-- First run (no handoff) → self-checks, scans/learns your app, builds.
-- Hooks are already ACTIVE: destructive commands (`rm -rf`, drop table) are denied,
-  auth/payment/schema edits escalate to you, `.claude/` + templates are protected.
-  Hooks fail OPEN on any error — they can never brick your session.
+There is no confirmed clean install story yet and no package manifest such as `pyproject.toml`. Most commands assume running from the repository root with `PYTHONPATH=.`.
 
-## Verify before trusting it (optional, 30s)
+## Local Requirement
+
+Python 3.10+ is expected. The OS-level Python code is intended to stay stdlib-only, though optional adapters and external tools may require separate setup.
+
+## Current Local Command Pattern
+
+From the repo root:
+
 ```
-./danzaboss/run_tests.sh                        # 124 tests
-PYTHONPATH=. python3 -m danzaboss.cli selftest  # 8/8
+PYTHONPATH=. python3 -m danzaboss.cli selftest
+PYTHONPATH=. python3 -m danzaboss.cli profile
+PYTHONPATH=. python3 -m danzaboss.cli cortex <command>
 ```
+
+## Claude Code Operational Files
+
+`.claude/`, `.danza/`, and `CLAUDE.md` are operational files for the current Claude Code setup. Treat them as runtime context, not disposable documentation.
+
+This docs-only stabilization did not change Claude Code settings, agent prompts, rules, hooks, runtime state, source code, or tests.
+
+## Verification Reality
+
+Use:
+
+```
+./danzaboss/run_tests.sh
+PYTHONPATH=. python3 -m danzaboss.cli selftest
+```
+
+Do not rely on old hardcoded counts such as 124 or 401. The recent audit discovered 672 unittest cases in this environment; `selftest` passed 8/8. The full suite needs an environment that allows localhost socket binding for CORTEX UI endpoint tests.

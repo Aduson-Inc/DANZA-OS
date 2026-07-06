@@ -1,10 +1,12 @@
 # Cognitive Memory & Context System — Architecture Specification
 
 **Codename:** CORTEX (Cognitive Observation, Retrieval & Token-Efficient eXchange)
-**Status:** Design spec (v0.1) — blueprint before code, per approved deliverable.
+**Status:** LEGACY architecture spec. It remains useful as design background, but it is not a complete current-state document.
 **Home:** A subsystem *inside* DANZA-OS. Every project / app / workflow DANZA builds
 inherits a project-scoped memory automatically; cross-project knowledge is shared.
 **Source of truth:** local repo. Multi-stack / multi-DB by design (adapter architecture).
+
+Current baseline: CORTEX is now REAL/PARTIAL in `danzaboss/cortex/` as a local memory/context system. Some items below are roadmap or historical design language rather than current product reality.
 
 ---
 
@@ -433,7 +435,7 @@ CORTEX is not bolted on; it maps onto the existing agent roster and the v2 modul
 | DANZA piece | CORTEX role |
 |---|---|
 | `samantha-mapper` | feeds **RepositoryIntelligence** (its 6-pass scan becomes the repo graph) |
-| `mona-historian` | owner of **ObservationStore** L3 + **LearningEngine** (build history/patterns) |
+| `mona-historian` | RETIRED / LEGACY owner reference; CORTEX now owns build-history and pattern memory concepts |
 | `angela-auditor` | emits **decision** observations (the WHY) — decision memory |
 | `carmella-researcher` | populates L5 cross-project reusable knowledge from research |
 | `tony-d-orchestrator` | primary **ContextAssembler** consumer; requests packages per turn |

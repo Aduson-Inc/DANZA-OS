@@ -1,5 +1,7 @@
 # Overlap Analysis & Remedies — DANZABOSS
 
+**Status:** LEGACY analysis with useful context. Mona references below are RETIRED/LEGACY. Current baseline: CORTEX is the active memory direction, while older `.danza/*.md` and `memory/store.py` surfaces still exist as overlapping/partial systems.
+
 Goal: identify every place where two components claim the same responsibility, assign a
 **single owner** to each function, and record the remedy. "Remedy" is either **code-enforced**
 (a v2 module makes the overlap structurally impossible) or **doc-level** (a boundary rule added
@@ -12,12 +14,12 @@ functional responsibility; flag any claimed by more than one owner; assign a sin
 ---
 
 ## O1 — Memory triple-counting (HIGH)
-**Overlap:** `decision-log.md` (Angela), `turn-log.md` (Tony D), and `build-history.md` (Mona)
+**Overlap:** `decision-log.md` (Angela), `turn-log.md` (Tony D), and `build-history.md` (Mona, now RETIRED/LEGACY)
 all record "what happened this turn." The same event was written in three places with no
 reconciliation — a divergence risk and a token waste.
 **Single owner:** the **episodic memory stream** (`memory/store.py`, scope=`episodic`).
 **Remedy — CODE-ENFORCED (Upgrade #7):** all three become *projections* of one append-only
-event log. Angela tags decision events, Tony D tags turn events, Mona tags build events; each
+event log. Angela tags decision events, Tony D tags turn events, and the retired Mona role is now represented by CORTEX build-history observations; each
 "file" is just a filtered view. One write, many reads.
 **Evidence:** `test_memory.py::test_append_only_persists_across_instances`, `::test_retrieve_ranks_by_relevance`.
 
@@ -57,7 +59,7 @@ danger-zone flags through the episodic log, which Samantha reads.
 Danger Zones are Samantha-written from Angela-sourced flags.
 
 ## O6 — `patterns.md` append-only vs "evolving" (LOW, rule conflict)
-**Overlap:** Constitution Rule 36 marks `patterns.md` append-only; Mona's brief says patterns
+**Overlap:** Constitution Rule 36 marks `patterns.md` append-only; Mona's retired brief says patterns
 "evolve/update," which contradicts append-only.
 **Resolution:** patterns are **append-only records**; the "current best pattern" is a **derived
 view** (latest record with confidence ≥ threshold). Nothing is edited in place.
@@ -93,7 +95,7 @@ only by the orchestrator. The concentration remains by design (single scheduler)
 | Authoritative verification | Bonnie — QA | Jonathan (pre-flight only) | Rule 5 + decompose gate |
 | External knowledge | Carmella — Researcher | Billy (requests) | capability `research_net` |
 | Codebase security audit | Billy — Security | Carmella (patterns) | scheduled in back half |
-| Build history / patterns | Mona — Historian | all (emit events) | append-only episodic |
+| Build history / patterns | CORTEX (Mona retired/legacy) | all (emit events) | append-only episodic / observations |
 | Design system | Hank — Designer | — | owns onboarding §7 |
 | Turn ownership truth | `team-state.json` | all (read) | schema + turn lock |
 | Event/decision history | episodic memory stream | all (tagged writes) | append-only JSONL |

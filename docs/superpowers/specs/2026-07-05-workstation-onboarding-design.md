@@ -1,9 +1,9 @@
 # DANZA Workstation — Onboarding Dashboard & Conductor (W1)
 
 **Date:** 2026-07-05
-**Status:** Approved design (user-reviewed in session), pre-implementation
+**Status:** LEGACY approved design. Parts of the workstation now exist as libraries, but this file is not a current product-readiness report.
 **Layer:** 0 work on Layer 1 — this extends the boot image; nothing here runs DANZABOSS in this repo
-**Prereqs:** CORTEX C1–C6 complete (401 tests), CORTEX UI server pattern (port 33000), kernel scheduler dual modes, planning/decompose verifiable-task gate, kernel/tiers
+**Prereqs at design time:** CORTEX C1–C6, CORTEX UI server pattern (port 33000), kernel scheduler dual modes, planning/decompose verifiable-task gate, kernel/tiers. Do not treat the old 401-test reference as current test evidence.
 
 ---
 

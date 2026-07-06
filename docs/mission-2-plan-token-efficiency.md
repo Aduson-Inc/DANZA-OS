@@ -2,7 +2,7 @@
 
 **Author:** Fable (Layer 0, Chief Systems Architect) · **Date:** 2026-07-02
 **For:** the next session's architect. Read this before touching anything.
-**Status:** PROPOSED — approved by the user for handoff; not yet implemented.
+**Status:** LEGACY / DOCUMENTATION DRIFT. This document records an earlier audit and plan. It contains stale claims, including old test counts and statements that CORTEX was dead code. Current baseline: DANZA-OS is a real Python-based agent governance and memory toolkit with a functioning CORTEX memory subsystem. It is not yet a finished turnkey app-building OS.
 
 ---
 
@@ -10,17 +10,17 @@
 
 This doc was written on the user's **Windows 11 laptop**. The repo is being moved to a **Linux machine running Claude Code**. Consequences:
 
-1. **Machine-specific findings do NOT transfer.** The `python3`-is-a-broken-Store-stub problem, missing `yt_dlp`, and "no git" were properties of the old laptop. On Linux, `python3` will exist and the 3 `/tmp` test errors (§1) will not reproduce (they were POSIX-only tests failing on Windows — expect **124/124 green on Linux**). Still ship P0.2 and P0.3: the defect is **single-interpreter fragility and POSIX-only tests**, not Windows itself. The OS must run on both.
+1. **Machine-specific findings do NOT transfer.** The `python3`-is-a-broken-Store-stub problem, missing `yt_dlp`, and "no git" were properties of the old laptop. Do not rely on this document's old 124-test baseline; current test evidence belongs in top-level status docs and current test output.
 2. **My session memory and scratchpad do not exist there.** Any reference in this doc to sandbox paths or session memory is dead; this doc + the repo are the only carriers of the findings. The activation-simulation evidence (F1 built with 36 passing tests, agent honesty, 5x ceremony multiplier) cannot be re-inspected — re-derive by re-running a sandboxed activation if needed.
 3. **NEW P0 ITEM — highest priority: environment preflight gate ("work anywhere or stop and ask").** The user's requirement: DANZABOSS must either run correctly in any environment or **stop BEFORE doing anything and tell the user exactly which dependencies are missing**. Implement as `danza doctor` (or extend `selftest`): check interpreter resolution (python3/python), git presence, write access, `.danza/` integrity, optional deps (`yt_dlp`), and available MCP tools (Rule 41). Wire it as **step 0 of Tony D's startup sequence**: doctor fails → STOP, print the missing-dependency list to the user, do not proceed (fail-closed, Rules 2/20). This replaces the luck we had this session, where activation only survived the broken `python3` because session memory leaked the workaround.
 4. **The new machine has `claude-mem` and `CTX` tools.** Before implementing P4 (CORTEX wiring): run the Rule 41 capability scan, and evaluate whether claude-mem/CTX can serve as (or complement) the CORTEX backend. Rules of engagement: (a) do not build a parallel memory system if the environment already provides one that fits; (b) but the OS must NEVER hard-depend on them — they won't exist on other machines. CORTEX's core must stay stdlib + repo-local (`cortex/ports.py` already defines the adapter seam); environment tools plug in as optional adapters behind a doctor check. Record whatever you decide in `.danza/memory/` and the decision log.
-5. **Re-establish baselines on arrival before changing anything:** `./danzaboss/run_tests.sh` (expect 124/124), `PYTHONPATH=. python3 -m danzaboss.cli selftest` (expect 8/8), the four hook-guard probes from §1 (deny/deny/ask/allow), and `git init` if the copy still isn't a repo. Then proceed P0 → P6.
+5. **Re-establish baselines on arrival before changing anything:** `./danzaboss/run_tests.sh`, `PYTHONPATH=. python3 -m danzaboss.cli selftest`, and the four hook-guard probes from §1 (deny/deny/ask/allow). Treat exact test counts as current-run evidence, not a historical constant.
 
 ---
 
 ## 1. What happened this session (evidence, condensed)
 
-**Mission 1 audit (repo = Layer 1 blueprint, read-only):** 124 tests exist (121 pass on Windows; 3 errors = `/tmp` hardcoded in `test_runtime.py:55,59,63`). CLI `selftest` 8/8, `scan`/`verify`/`hook` all work with `python` (NOT `python3` — broken Store stub on this machine). ~17 of 28 brain modules are dead code (gates, dispatcher, CORTEX store, memory store, context pipeline, tracer, parallel planner, research squad, DanzaSession). Registered PreToolUse hook in `.claude/settings.json` calls `python3` → **inert on Windows, fails open silently**. INSTALL.md and RUNBOOK.md contradict each other on hook activation.
+**Mission 1 audit (repo = Layer 1 blueprint, read-only):** LEGACY EVIDENCE from an older machine and older repo state. It recorded a 124-test baseline, Windows/POSIX failures, and several modules as not wired into the live loop. Current status must be taken from the top-level status docs and current test output, not this historical paragraph.
 
 **Layer-2 activation simulation (sandboxed copy, greenfield):** Triggered "Who's the Boss?" → Tony D ran a real turn: mode detection ✔, run log 001 ✔, Angela genuinely spawned ✔, honest selftest ✔, active onboarding with real Carmella research (pipeline-offline honestly flagged) ✔, Hank produced real design tokens ✔, `team-state.json` correctly bootstrapped from Rule 45 text alone ✔ (refuting predicted defect D1 behaviorally — but it depended on model diligence, not mechanism), CORTEX consult honestly reported "empty, fresh system" ✔ (D4's theatre risk didn't fire, but the prompt's "auto-records" claim is still false). Jonathan built **F1 (gig-tracking core): ~15 files, 36 tests, independently re-run PASS**, found and fixed a real Windows port-reuse bug, flagged honest unknowns. Angela audited all 5 of his decisions against source. Samantha wrote a full system map and found a real latent defect (`venues.usual_rate` write-orphan). **F2 was killed mid-build by user stop.** Bonnie's gate, self-assessment, handoff, takeover mode, and relay were **never observed** — still unverified.
 
@@ -54,23 +54,22 @@ Reported subagent token counters for the activation run:
 
 - Rule 3 (constitution) fixes the **count**: exactly 2 features/turn. It never defines a feature's **size**.
 - Observed: Tony D sized features unilaterally during onboarding (roadmap F1-F6). F1 became a mega-feature — schema + server + static shell + quick-add + venue memory + full test suite (~5 features of work labeled "1"), while F2 (money dashboard) was maybe a fifth of that. "2 features per turn" with undefined size = unbounded turns.
-- The blueprint ALREADY contains the fix, unwired: `danzaboss/planning/decompose.py` (verifiable-task gate: every leaf task needs a concrete verification — tested, dead) and `danzaboss/planning/spec_template.md` + `plan_schema.json` (Upgrade #3, scaffolded, never wired into the prompt layer). Feature sizing is exactly what these were built for.
+- The blueprint ALREADY contains part of the fix, but integration remains PARTIAL: `danzaboss/planning/decompose.py` (verifiable-task gate: every leaf task needs a concrete verification) and `danzaboss/planning/spec_template.md` + `plan_schema.json` (Upgrade #3). Feature sizing is exactly what these were built for.
 
-### Q4: Is CORTEX working? — NO (one component excepted).
+### Q4: Is CORTEX working? — LEGACY ANSWER, now stale.
 
-- **Working:** `cortex/app_profile.py` — live via `cli scan`; AppProfile was really captured in the run.
-- **Not working:** the actual cognitive memory engine (`cortex/observation.py`, `store.py`, `sqlite_backend.py`) is dead code — nothing ever writes or reads an observation. `.danza/build-orders.md` and `patterns.md` are empty placeholders "pointing to CORTEX."
-- **Worse:** `tony-d-orchestrator.md:74,116,162` tells Tony D that CORTEX "tracks patterns automatically" and "auto-records this turn's build data (observation extractor); no manual step." **That machinery does not exist.** In our run the agents were honest about it ("CORTEX consulted — empty, fresh system"), but the false prompt claim is standing theatre-bait, and it means **nothing is ever learned between turns** — the compounding-knowledge promise (STACKRONYM) is currently zero-compounding.
+- DOCUMENTATION DRIFT: this section no longer describes the current repository. CORTEX now has a real local observation store, SQLite/FTS persistence, capture logs, retrieval, graph, UI, MCP surface, and existing repo memory data.
+- CURRENT TRUTH: CORTEX is REAL/PARTIAL. It functions as a local memory/context system, but the full app-building OS loop and memory quality still need verification and hardening.
 
 ---
 
 ## 3. Root causes of the token burn (ranked)
 
 1. **Report-relay-through-orchestrator:** full driver reports flow into Tony D's ever-growing context and get re-narrated. Same bytes processed 3-4x.
-2. **No compiled per-driver context:** every agent re-reads the whole stack (CLAUDE.md, 45-rule constitution, state files). `context/pipeline.py` (select→compress→isolate, token-budgeted) was built precisely for this and is dead code.
+2. **No fully integrated compiled per-driver context:** every agent can still be pushed toward large operational reads. `context/pipeline.py` (select->compress->isolate, token-budgeted) exists, but live integration remains PARTIAL.
 3. **Fixed ceremony regardless of risk** (Q2 above).
 4. **Undefined feature size** (Q3 above) → mega-features → mega-reviews.
-5. **Evidence-as-prose-duplication:** Rule 42/43 compliance implemented by copying the same facts into decision-log + run-log + turn-log + self-assessment. `observability/trace.py` (JSONL spans) was built for cheap evidence and is dead code.
+5. **Evidence-as-prose-duplication:** Rule 42/43 compliance can duplicate the same facts into decision-log + run-log + turn-log + self-assessment. `observability/trace.py` (JSONL spans) exists, but integration remains PARTIAL.
 6. **No inter-turn memory** (Q4) → next turn re-derives everything from raw files.
 
 ---
