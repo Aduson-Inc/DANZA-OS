@@ -44,6 +44,7 @@ class TestExplainEndpoint(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
         cls.tmp.cleanup()
 
     def _get(self, path):
@@ -52,7 +53,8 @@ class TestExplainEndpoint(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=5) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read())
+            with e:  # HTTPError carries an open response socket
+                return e.code, json.loads(e.read())
 
     def test_explain_runs_the_real_pipeline(self):
         q = urllib.parse.urlencode({"prompt": "fix the jwt auth bug", "budget": 600})

@@ -34,6 +34,7 @@ class TestCortexUI(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
         cls.tmp.cleanup()
 
     def test_index_and_static_served(self):
@@ -63,6 +64,7 @@ class TestCortexUI(unittest.TestCase):
             status, _, _ = get(self.port, "/api/observations/obs_nope")
         except urllib.error.HTTPError as e:
             status = e.code
+            e.close()  # HTTPError carries an open response socket
         self.assertEqual(status, 404)
 
     def test_stats_and_sessions(self):
@@ -93,6 +95,7 @@ class TestCortexUI(unittest.TestCase):
                 status = r.status
         except urllib.error.HTTPError as e:
             status = e.code
+            e.close()
         self.assertEqual(status, 405)
 
     def test_feed_items_carry_simple_numbers(self):
@@ -149,6 +152,7 @@ class TestGraphEndpoint(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
         cls.tmp.cleanup()
 
     def test_bare_call_returns_overview(self):
@@ -179,6 +183,7 @@ class TestGraphEndpoint(unittest.TestCase):
             self.fail("expected 404")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 404)
+            e.close()
 
     def test_post_is_rejected_read_only(self):
         req = urllib.request.Request(
@@ -189,6 +194,7 @@ class TestGraphEndpoint(unittest.TestCase):
             self.fail("expected 405")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 405)
+            e.close()
 
 
 class TestWorkflowEndpoint(unittest.TestCase):
@@ -216,6 +222,7 @@ class TestWorkflowEndpoint(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
         cls.tmp.cleanup()
 
     def test_blocks_are_groups_not_files(self):
