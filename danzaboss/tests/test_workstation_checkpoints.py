@@ -154,6 +154,28 @@ class MemoryTests(unittest.TestCase):
         self.assertLessEqual(
             len(checkpoints.read_memory(self.tmp, cap=10)), 10)
 
+    def test_cap_cuts_at_file_boundaries(self):
+        mem = self.tmp / ".danza" / "memory"
+        mem.mkdir(parents=True)
+        (mem / "a.md").write_text("alpha", encoding="utf-8")
+        (mem / "b.md").write_text("bravo " * 40, encoding="utf-8")
+        (mem / "c.md").write_text("charlie", encoding="utf-8")
+        first = f"--- a.md ---\nalpha"
+        text = checkpoints.read_memory(self.tmp, cap=len(first) + 60)
+        # b.md does not fit: omitted whole, never truncated mid-file.
+        self.assertIn("alpha", text)
+        self.assertNotIn("bravo", text)
+        # later files that still fit are kept — omission is per file.
+        self.assertIn("charlie", text)
+
+    def test_oversized_first_file_hard_capped(self):
+        mem = self.tmp / ".danza" / "memory"
+        mem.mkdir(parents=True)
+        (mem / "a.md").write_text("x" * 500, encoding="utf-8")
+        text = checkpoints.read_memory(self.tmp, cap=50)
+        self.assertEqual(len(text), 50)
+        self.assertIn("x", text)
+
 
 class PromptTests(unittest.TestCase):
     def test_prompt_includes_answers_memory_and_contract(self):

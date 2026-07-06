@@ -148,13 +148,24 @@ def read_memory(root, *, cap: int = 8000) -> str:
     """Rule 32: user memory files must inform checkpoint review when they
     exist. Reads the TARGET repo's .danza/memory/*.md, sorted for
     determinism, capped so memory informs the prompt without drowning
-    the answers."""
+    the answers. The cap cuts at file boundaries — a file that does not
+    fit is omitted whole (a truncated preference can invert its meaning);
+    only when the very first file alone exceeds the cap is it hard-cut,
+    so memory never silently vanishes."""
     directory = Path(root) / MEMORY_RELDIR
     if not directory.is_dir():
         return ""
-    parts = [f"--- {path.name} ---\n{path.read_text(encoding='utf-8')}"
-             for path in sorted(directory.glob("*.md"))]
-    return "\n".join(parts)[:cap]
+    kept: list[str] = []
+    used = 0
+    for path in sorted(directory.glob("*.md")):
+        part = f"--- {path.name} ---\n{path.read_text(encoding='utf-8')}"
+        cost = len(part) + (1 if kept else 0)  # joining newline
+        if used + cost <= cap:
+            kept.append(part)
+            used += cost
+        elif not kept:
+            return part[:cap]
+    return "\n".join(kept)
 
 
 def build_prompt(step_id: str, answers: dict, *,
