@@ -86,10 +86,12 @@ class GraphStore:
         if project:
             ids = [r["id"] for r in self.conn.execute(
                 "SELECT id FROM graph_nodes WHERE project = ?", (project,))]
-            qs = ",".join("?" for _ in ids) or "''"
-            self.conn.execute(
-                f"DELETE FROM graph_edges WHERE src IN ({qs}) OR dst IN ({qs})",
-                ids + ids)
+            if ids:  # empty IN () is invalid SQL; nothing to delete anyway
+                qs = ",".join("?" for _ in ids)
+                self.conn.execute(
+                    f"DELETE FROM graph_edges "
+                    f"WHERE src IN ({qs}) OR dst IN ({qs})",
+                    ids + ids)
             self.conn.execute(
                 "DELETE FROM graph_nodes WHERE project = ?", (project,))
         else:
@@ -220,7 +222,9 @@ class GraphStore:
         uniq = list(dict.fromkeys(ids))[:cap]
         nodes = [n for n in (self.node(i) for i in uniq) if n]
         idset = {n.id for n in nodes}
-        qs = ",".join("?" for _ in idset) or "''"
+        if not idset:  # unknown root: empty IN () is invalid SQL
+            return [], []
+        qs = ",".join("?" for _ in idset)
         edges = [{"src": r["src"], "dst": r["dst"], "relation": r["relation"]}
                  for r in self.conn.execute(
                      f"SELECT src, dst, relation FROM graph_edges "

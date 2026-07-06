@@ -115,6 +115,23 @@ class TestGraphStore(unittest.TestCase):
         ids = {n.id for n in nodes}
         self.assertEqual(ids, {"file:lib_a.py", "file:app.py", "file:core.py"})
 
+    def test_subgraph_unknown_node_returns_empty(self):
+        nodes, edges = diamond().subgraph("file:ghost.py", depth=1)
+        self.assertEqual(nodes, [])
+        self.assertEqual(edges, [])
+
+    def test_clear_project_without_nodes_is_noop(self):
+        g = diamond()
+        g.clear("no-such-project")
+        self.assertEqual(g.stats()["nodes"], 4)
+        self.assertEqual(g.stats()["edges"], 4)
+
+    def test_clear_all_without_project(self):
+        g = diamond()
+        g.clear()
+        self.assertEqual(g.stats()["nodes"], 0)
+        self.assertEqual(g.stats()["edges"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
