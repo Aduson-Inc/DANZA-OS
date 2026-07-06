@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Callable
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -65,7 +66,9 @@ class RunnerError(ValueError):
 # Detection
 # ---------------------------------------------------------------------------
 
-def detect_runners(which=shutil.which) -> dict[str, bool]:
+def detect_runners(
+        which: Callable[[str], str | None] = shutil.which
+) -> dict[str, bool]:
     """Return presence (True/False) for every known runner, keyed by runner
     name.  Uses *which* to locate each runner's binary — injectable so tests
     never hit the real filesystem.
@@ -180,7 +183,7 @@ def validate_config(config: object) -> dict:
 # Persistence
 # ---------------------------------------------------------------------------
 
-def save_runners(root, config: dict) -> Path:
+def save_runners(root: str | os.PathLike, config: dict) -> Path:
     """Validate *config* and atomically write it to RUNNERS_RELPATH under
     *root*.
 
@@ -191,13 +194,13 @@ def save_runners(root, config: dict) -> Path:
     validate_config(config)
     path = Path(root) / RUNNERS_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
     return path
 
 
-def load_runners(root) -> dict:
+def load_runners(root: str | os.PathLike) -> dict:
     """Read and validate the runner config from RUNNERS_RELPATH under *root*.
 
     Missing file → RunnerError mentioning /models so callers can surface a

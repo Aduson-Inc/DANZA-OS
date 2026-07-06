@@ -93,7 +93,7 @@ class TestTmuxHostIgnite(unittest.TestCase):
         self.assertEqual(sk[0], "tmux")
         self.assertIn("send-keys", sk)
         self.assertIn("-t", sk)
-        self.assertEqual(sk[sk.index("-t") + 1], "boss1")
+        self.assertEqual(sk[sk.index("-t") + 1], "=boss1")
         self.assertIn(IGNITION_MESSAGE, sk)
         self.assertIn("Enter", sk)
 
@@ -169,7 +169,7 @@ class TestTmuxHostAlive(unittest.TestCase):
         h.alive("abc")
         self.assertIn("has-session", cmds[0])
         self.assertIn("-t", cmds[0])
-        self.assertEqual(cmds[0][cmds[0].index("-t") + 1], "abc")
+        self.assertEqual(cmds[0][cmds[0].index("-t") + 1], "=abc")
 
 
 class TestTmuxHostTail(unittest.TestCase):
@@ -207,7 +207,7 @@ class TestTmuxHostKill(unittest.TestCase):
         self.assertEqual(len(cmds), 1)
         self.assertIn("kill-session", cmds[0])
         self.assertIn("-t", cmds[0])
-        self.assertEqual(cmds[0][cmds[0].index("-t") + 1], "dying")
+        self.assertEqual(cmds[0][cmds[0].index("-t") + 1], "=dying")
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +322,25 @@ class TestHeadlessHostAlive(unittest.TestCase):
     def test_alive_false_for_unknown_name(self):
         h = HeadlessHost(self.log_dir, popen=lambda *a, **k: _fake_popen())
         self.assertFalse(h.alive("never-started"))
+
+    def test_restarted_host_adopts_surviving_process_via_pid_file(self):
+        # In-memory handles die with the conductor; without the persisted
+        # pid a restart would ignite a SECOND boss (Rule 38 hazard —
+        # review finding, W1-P4 final).
+        handle = _fake_popen(poll_result=None)
+        handle.pid = 4242
+        first = HeadlessHost(self.log_dir, popen=lambda *a, **k: handle)
+        first.ignite("run", "/x", [])
+        probes = []
+        reborn = HeadlessHost(self.log_dir,
+                              popen=lambda *a, **k: _fake_popen(),
+                              pid_alive=lambda p: probes.append(p) or True)
+        self.assertTrue(reborn.alive("run"))
+        self.assertEqual(probes, [4242])
+        dead = HeadlessHost(self.log_dir,
+                            popen=lambda *a, **k: _fake_popen(),
+                            pid_alive=lambda p: False)
+        self.assertFalse(dead.alive("run"))
 
 
 class TestHeadlessHostTail(unittest.TestCase):

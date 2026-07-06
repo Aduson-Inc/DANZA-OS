@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
@@ -35,6 +36,17 @@ IGNITION_MESSAGE = "Who's the Boss?"
 
 class HostError(RuntimeError):
     """A host operation failed (bad exit code, missing binary, OS error)."""
+
+
+def _signal0_alive(pid: int) -> bool:
+    """Signal-0 liveness probe (PermissionError = exists but not ours)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +125,12 @@ class TmuxHost:
                 f"tmux new-session exited {result.returncode}: {excerpt}")
 
         try:
+            # "=" forces an exact session match: bare -t targets prefix-
+            # match, so danza-app would resolve to danza-app2 (verified
+            # against tmux 3.x) — wrong-session sends/kills across repos.
             sk = self._run(
-                ["tmux", "send-keys", "-t", name, IGNITION_MESSAGE, "Enter"],
+                ["tmux", "send-keys", "-t", f"={name}", IGNITION_MESSAGE,
+                 "Enter"],
                 capture_output=True, text=True,
             )
         except OSError as exc:
@@ -126,9 +142,10 @@ class TmuxHost:
                 f"tmux send-keys exited {sk.returncode}: {excerpt}")
 
     def alive(self, name: str) -> bool:
-        """True iff tmux has-session exits 0 for `name`."""
+        """True iff tmux has-session exits 0 for exactly `name` (the "="
+        prefix disables tmux's prefix matching — see ignite)."""
         result = self._run(
-            ["tmux", "has-session", "-t", name],
+            ["tmux", "has-session", "-t", f"={name}"],
             capture_output=True, text=True,
         )
         return result.returncode == 0
@@ -140,7 +157,7 @@ class TmuxHost:
         control flow, so silence beats an exception.
         """
         result = self._run(
-            ["tmux", "capture-pane", "-p", "-t", name],
+            ["tmux", "capture-pane", "-p", "-t", f"={name}"],
             capture_output=True, text=True,
         )
         if result.returncode != 0:
@@ -151,7 +168,7 @@ class TmuxHost:
     def kill(self, name: str) -> None:
         """Kill the named tmux session (best-effort; errors are not surfaced)."""
         self._run(
-            ["tmux", "kill-session", "-t", name],
+            ["tmux", "kill-session", "-t", f"={name}"],
             capture_output=True, text=True,
         )
 
@@ -176,9 +193,11 @@ class HeadlessHost:
     """
 
     def __init__(self, log_dir: str | os.PathLike,
-                 popen: Callable = subprocess.Popen) -> None:
+                 popen: Callable = subprocess.Popen,
+                 pid_alive: Callable[[int], bool] | None = None) -> None:
         self._log_dir = Path(log_dir)
         self._popen = popen
+        self._pid_alive = pid_alive or _signal0_alive
         self._handles: dict[str, object] = {}
         # Log file handles are stored alongside process handles so they are
         # explicitly closed on kill() rather than relying on GC — avoids
@@ -227,13 +246,31 @@ class HeadlessHost:
 
         self._handles[name] = handle
         self._log_fhs[name] = log_fh
+        # Persist the pid: in-memory handles die with the conductor, and
+        # a restarted conductor that cannot see a surviving boss would
+        # ignite a SECOND one against the same repo (two turn owners —
+        # the exact corruption Rule 38 forbids).
+        pid = getattr(handle, "pid", None)
+        if pid is not None:
+            (self._log_dir / f"{name}.pid").write_text(f"{pid}\n",
+                                                       encoding="utf-8")
+
+    def _persisted_pid(self, name: str) -> int | None:
+        path = self._log_dir / f"{name}.pid"
+        if not path.exists():
+            return None
+        text = path.read_text(encoding="utf-8").strip()
+        return int(text) if text.isdigit() else None
 
     def alive(self, name: str) -> bool:
-        """True iff a handle exists for `name` and the process has not exited."""
+        """True iff the process for `name` is running. Falls back to the
+        persisted pid + signal-0 probe when no in-memory handle exists
+        (conductor restart) — parity with TmuxHost's has-session."""
         handle = self._handles.get(name)
-        if handle is None:
-            return False
-        return handle.poll() is None
+        if handle is not None:
+            return handle.poll() is None
+        pid = self._persisted_pid(name)
+        return pid is not None and self._pid_alive(pid)
 
     def tail(self, name: str, lines: int = 40) -> str:
         """Read the last `lines` lines from the session log file.
@@ -254,12 +291,18 @@ class HeadlessHost:
         only for tests and the UI stop button.
         """
         handle = self._handles.get(name)
-        if handle is None:
-            return
-        try:
-            handle.terminate()
-        except Exception:
-            pass
+        if handle is not None:
+            try:
+                handle.terminate()
+            except Exception:
+                pass
+        else:
+            pid = self._persisted_pid(name)
+            if pid is not None and self._pid_alive(pid):
+                try:  # adopted session from a previous conductor
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
         # Close the associated log file handle so the OS flushes it and tests
         # do not emit ResourceWarning for unclosed files.
         self._close_log(name)
