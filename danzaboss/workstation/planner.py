@@ -201,7 +201,11 @@ def order_tasks(tasks: tuple[Task, ...]) -> tuple[Task, ...]:
     ties broken by numeric id. depends_on may target an internal node —
     that expands to every leaf under it. v1 flattens to a single linear
     order (one builder); `writes` stays on each task so wave planning
-    can parallelize later."""
+    can parallelize later.
+
+    Call after validate_plan: ids are assumed well-formed. Duplicate
+    leaf ids still fail closed here (never silently dropped) because
+    this function is also usable standalone (P3-M2)."""
     index: dict[str, Task] = {}
 
     def register(task: Task) -> None:
@@ -212,6 +216,11 @@ def order_tasks(tasks: tuple[Task, ...]) -> tuple[Task, ...]:
     for task in tasks:
         register(task)
     leaves = _leaves(tasks)
+    dupes = sorted({item.id for n, item in enumerate(leaves)
+                    if any(item.id == other.id for other in leaves[:n])},
+                   key=_id_key)
+    if dupes:
+        raise PlanningError("duplicate leaf ids: " + ", ".join(dupes))
     dep_sets: dict[str, set[str]] = {}
     for item in leaves:
         expanded: set[str] = set()
@@ -252,12 +261,47 @@ PLAN_JSON_RELPATH = Path(".danza") / "plan.json"
 PLAN_MD_RELPATH = Path(".danza") / "plan.md"
 
 
-def render_plan_md(plan: dict, ordered: tuple[Task, ...]) -> str:
+def _task_to_dict(task: Task) -> dict:
+    """Whitelist serialization of one validated Task. plan.json carries
+    only fields the validator guarantees — junk keys from the AI reply
+    never reach disk (P3-M1). Empty optionals are omitted."""
+    out: dict = {"id": task.id, "description": task.description}
+    if task.subtasks:
+        out["subtasks"] = [_task_to_dict(sub) for sub in task.subtasks]
+        return out
+    out["kind"] = task.kind
+    out["size_est"] = task.size_est
+    out["writes"] = list(task.writes)
+    out["verification"] = {"kind": task.verification.kind.value,
+                           "detail": task.verification.detail}
+    if task.depends_on:
+        out["depends_on"] = list(task.depends_on)
+    if task.flags:
+        out["flags"] = list(task.flags)
+    return out
+
+
+def plan_payload(spec_ref: str, tasks: tuple[Task, ...],
+                 ordered: tuple[Task, ...]) -> dict:
+    """The persistable plan: whitelist-serialized from the VALIDATED
+    task tree with the canonical spec_ref and the computed order — never
+    from the raw AI reply (P3-M1). Call after validate_plan: leaves are
+    assumed complete (kind, size_est, writes, concrete verification)."""
+    return {"spec_ref": spec_ref,
+            "tasks": [_task_to_dict(task) for task in tasks],
+            "order": [task.id for task in ordered]}
+
+
+def render_plan_md(spec_ref: str, ordered: tuple[Task, ...]) -> str:
     """Human-readable numbered build order (.danza/plan.md, the UI right
     panel). Hard-stop flags are called out so the user sees where the
-    build will pause (Rules 13-15) — no surprise mid-build stops."""
+    build will pause (Rules 13-15) — no surprise mid-build stops.
+
+    Call after validate_plan: every ordered task must be a validated
+    leaf (concrete verification, kind, size_est) or rendering derefs
+    None (P3-M2)."""
     features = feature_nodes(ordered)
-    lines = [f"# Plan — {plan['spec_ref']}", "",
+    lines = [f"# Plan — {spec_ref}", "",
              f"{len(ordered)} tasks across {len(features)} features "
              f"(Rule 3 counts feature nodes: {', '.join(features)})", ""]
     for n, task in enumerate(ordered, start=1):
@@ -274,21 +318,19 @@ def render_plan_md(plan: dict, ordered: tuple[Task, ...]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_plan(root: str | os.PathLike, plan: dict,
+def write_plan(root: str | os.PathLike, payload: dict,
                ordered: tuple[Task, ...]) -> tuple[Path, Path]:
-    """Persist .danza/plan.json and .danza/plan.md atomically. plan.json
-    carries the accepted plan plus the computed `order` so the scheduler
-    never re-derives it. Both are generated artifacts, regenerated whole
-    on each planning run — plain overwrite is correct here (same
-    reasoning as compiler.write_spec)."""
-    payload = dict(plan)
-    payload["order"] = [task.id for task in ordered]
+    """Persist .danza/plan.json and .danza/plan.md atomically. `payload`
+    comes from plan_payload() — whitelisted fields plus the computed
+    `order` so the scheduler never re-derives it. Both are generated
+    artifacts, regenerated whole on each planning run — plain overwrite
+    is correct here (same reasoning as compiler.write_spec)."""
     json_path = Path(root) / PLAN_JSON_RELPATH
     md_path = Path(root) / PLAN_MD_RELPATH
     json_path.parent.mkdir(parents=True, exist_ok=True)
     for path, text in (
             (json_path, json.dumps(payload, indent=2, sort_keys=True) + "\n"),
-            (md_path, render_plan_md(plan, ordered))):
+            (md_path, render_plan_md(payload["spec_ref"], ordered))):
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
@@ -350,7 +392,7 @@ def build_planning_prompt(spec_text: str, *,
 
 def run_planning(root: str | os.PathLike, command: list[str], *,
                  timeout: int = 600, max_rounds: int = MAX_ROUNDS,
-                 template_dir=templates_mod.DEFAULT_DIR) -> dict:
+                 template_dir: str | Path = templates_mod.DEFAULT_DIR) -> dict:
     """spec.md -> validated plan artifacts (design spec section 6).
 
     Calls the boss CLI headless (same injectable-argv seam as
@@ -359,12 +401,21 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
     never validates must not arm the button. There is deliberately no
     degraded mode — unlike checkpoints, nothing downstream can proceed
     without a valid plan."""
+    if max_rounds < 1:
+        raise PlanningError(f"max_rounds must be at least 1, got {max_rounds}")
     spec_path = Path(root) / compiler.SPEC_RELPATH
     if not spec_path.exists():
         raise PlanningError(f"no approved spec at {spec_path}; planning "
                             "runs only after final approval")
     spec_text = spec_path.read_text(encoding="utf-8")
-    answers = Wizard(root).answers
+    try:
+        answers = Wizard(root).answers
+    except PlanningError:
+        raise
+    except ValueError as exc:
+        # Corrupt answers.json (load_state) or wizard misuse surfaces as
+        # this module's failure mode, not a bare ValueError (P3-M3).
+        raise PlanningError(f"unusable onboarding state: {exc}") from exc
     testing_defaults = None
     chosen = answers.get("stack_template")
     if chosen:
@@ -402,8 +453,9 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
             violations = tuple(found)
             prior_plan = data
             continue
-        json_path, md_path = write_plan(root, data, ordered)
-        return {"plan": data, "order": [t.id for t in ordered],
+        payload = plan_payload(str(compiler.SPEC_RELPATH), tasks, ordered)
+        json_path, md_path = write_plan(root, payload, ordered)
+        return {"plan": payload, "order": payload["order"],
                 "rounds": round_num, "plan_json": str(json_path),
                 "plan_md": str(md_path)}
     raise PlanningError(

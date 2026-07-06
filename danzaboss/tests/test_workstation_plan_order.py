@@ -57,6 +57,14 @@ class Ordering(unittest.TestCase):
         with self.assertRaises(PlanningError):
             order_tasks(tasks)
 
+    def test_duplicate_leaf_ids_fail_closed(self):
+        # validate_plan catches this too, but order_tasks must not
+        # silently drop a duplicate when called standalone (P3-M2).
+        tasks = tree({"id": "1", "description": "a",
+                      "subtasks": [leaf("1.1"), leaf("1.1")]})
+        with self.assertRaisesRegex(PlanningError, "duplicate"):
+            order_tasks(tasks)
+
     def test_deterministic(self):
         tasks = tree(
             {"id": "1", "description": "a", "subtasks": [
