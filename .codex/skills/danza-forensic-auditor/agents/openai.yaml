@@ -1,0 +1,4 @@
+interface:
+  display_name: "DANZA Forensic Auditor"
+  short_description: "Read-only DANZA repository audit protocol"
+  default_prompt: "Use $danza-forensic-auditor to audit DANZA-OS repository reality without modifying files."
