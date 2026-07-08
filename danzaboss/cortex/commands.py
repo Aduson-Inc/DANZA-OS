@@ -46,6 +46,11 @@ def _hook_session_start(root: str, payload: dict) -> int:
     # block already reflects the store's learned state.
     store.age()
     learn(store)
+    # C4.5 profile gate: OS_DEV (Layer 0) keeps CORTEX silent — store
+    # housekeeping (age/learn) still runs, but no memory is injected into the
+    # dev session. Runtime profiles (OS_BOOT_TEST/APP_BUILD) inject as before.
+    if not active_profile(root).session_inject:
+        return 0
     block = build_context(store, _project(root), stats=log.stats(_project(root)))
     if block:
         print(json.dumps({"hookSpecificOutput": {
@@ -81,6 +86,12 @@ def _hook_stop(root: str, payload: dict) -> int:
     if sess is None:
         return 0  # nothing captured -> nothing to gate
     prof = active_profile(root)
+    # C4.5 profile gate: OS_DEV (Layer 0) does not nag for distillation — close
+    # the session clean without blocking or drafting. Runtime profiles enforce.
+    if not prof.distill_gate_active:
+        log.mark_processed(sid)
+        log.end_session(sid)
+        return 0
     pending = log.pending(sid)
     decision = distillation_gate(len(pending), sess["observations_written"],
                                  bool(sess["gate_blocked"]),

@@ -71,6 +71,8 @@ class TestPolicyInvariants(unittest.TestCase):
         self.assertTrue(p.claude_write_approval)
         self.assertEqual(p.memory_level, "lightweight")
         self.assertFalse(p.agents_may_spawn)
+        self.assertFalse(p.session_inject)        # CORTEX stays silent in Layer 0
+        self.assertFalse(p.distill_gate_active)   # no distillation nagging in dev
 
     def test_runtime_profiles_keep_full_governance(self):
         for name in ("OS_BOOT_TEST", "APP_BUILD"):
@@ -81,6 +83,8 @@ class TestPolicyInvariants(unittest.TestCase):
             self.assertFalse(p.claude_write_approval, name)
             self.assertTrue(p.agents_may_spawn, name)
             self.assertEqual(p.distill_min_events, 1, name)
+            self.assertTrue(p.session_inject, name)        # runtime injects memory
+            self.assertTrue(p.distill_gate_active, name)   # runtime enforces distill
 
 
 class TestMemoryDiet(unittest.TestCase):
@@ -164,6 +168,45 @@ class TestProfileAwareCortexHooks(unittest.TestCase):
         self.assertEqual(sess["gate_blocked"], 0)          # no block issued
         self.assertEqual(sess["status"], "completed")      # session closed clean
         self.assertEqual(self._events("s3"), [])           # processed, not drafted
+
+    def test_os_dev_session_start_injects_nothing(self):
+        # Layer 0: the session-start hook must NOT print a CORTEX context block.
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cortex_commands._hook_session_start(self.root, {"session_id": "sX"})
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(), "")       # nothing injected in OS_DEV
+
+    def test_os_dev_stop_does_not_block_above_floor(self):
+        # 4 events (>= floor of 3) but OS_DEV's gate is inactive -> no block.
+        log = CaptureLog(cortex_commands.db_path(self.root))
+        log.open_session("s4", "proj")
+        for i in range(4):
+            log.record_event("s4", "Edit", file_path=f"f{i}.py")
+        rc = cortex_commands._hook_stop(self.root, {"session_id": "s4"})
+        self.assertEqual(rc, 0)
+        sess = log.session("s4")
+        self.assertEqual(sess["gate_blocked"], 0)          # OS_DEV never blocks
+        self.assertEqual(sess["status"], "completed")
+
+    def test_app_build_stop_blocks_above_floor(self):
+        # runtime profile keeps the distillation gate active.
+        import contextlib
+        import io
+        os.environ[PROFILE_ENV_VAR] = "APP_BUILD"
+        try:
+            log = CaptureLog(cortex_commands.db_path(self.root))
+            log.open_session("s5", "proj")
+            for i in range(2):
+                log.record_event("s5", "Edit", file_path=f"g{i}.py")
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = cortex_commands._hook_stop(self.root, {"session_id": "s5"})
+            self.assertEqual(rc, 0)
+            self.assertEqual(log.session("s5")["gate_blocked"], 1)
+        finally:
+            del os.environ[PROFILE_ENV_VAR]
 
 
 if __name__ == "__main__":

@@ -56,6 +56,8 @@ class Profile:
     # -- memory policy ----------------------------------------------------------
     memory_level: str                 # none | lightweight | normal | critical
     distill_min_events: int           # stop-gate blocks only at/above this count
+    session_inject: bool              # session-start injects the CORTEX context block
+    distill_gate_active: bool         # stop-hook enforces distillation (blocks + drafts)
     # -- orchestration policy ---------------------------------------------------
     agents_may_spawn: bool            # may the full driver roster be dispatched?
     subagents_on_demand_only: bool    # spawn only when the task clearly benefits
@@ -75,6 +77,7 @@ PROFILES: dict[str, Profile] = {
         destructive_deny_active=True,
         turn_gates_active=False, reports_required=False,
         memory_level="lightweight", distill_min_events=3,
+        session_inject=False, distill_gate_active=False,
         agents_may_spawn=False, subagents_on_demand_only=True,
         research_requires_approval=True),
     "OS_BOOT_TEST": Profile(
@@ -85,6 +88,7 @@ PROFILES: dict[str, Profile] = {
         destructive_deny_active=True,
         turn_gates_active=True, reports_required=True,
         memory_level="normal", distill_min_events=1,
+        session_inject=True, distill_gate_active=True,
         agents_may_spawn=True, subagents_on_demand_only=False,
         research_requires_approval=True),
     "APP_BUILD": Profile(
@@ -95,6 +99,7 @@ PROFILES: dict[str, Profile] = {
         destructive_deny_active=True,
         turn_gates_active=True, reports_required=True,
         memory_level="normal", distill_min_events=1,
+        session_inject=True, distill_gate_active=True,
         agents_may_spawn=True, subagents_on_demand_only=False,
         research_requires_approval=True),
 }
