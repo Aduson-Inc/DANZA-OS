@@ -65,7 +65,7 @@ Each shipped with a `tests/test_*.py`. Initial suite: 56 tests.
 ## 7. Agent & constitution changes
 - **Renamed all agents** with role suffixes: `tony-d-orchestrator`, `jonathan-builder`, `samantha-mapper`, `angela-auditor`, `bonnie-qa`, `carmella-researcher`, `hank-designer`, `billy-security` — updated across files, spawn calls, tool grants, and the constitution roster.
 - **Retired `mona-historian`** (redundant): its function (history, patterns, build orders, learning) is now owned by CORTEX. Removed from Tony D's tool grants, constitution roster, onboarding template; left as a one-line pointer/tombstone (agents 9 → **8**).
-- **Overlap analysis + remedies** (`docs/overlap-analysis-and-remedies.md`) — 8 overlaps resolved to single owners; responsibility matrix.
+- **Overlap analysis + remedies** (`docs/DONE-overlap-analysis-and-remedies.md`) — 8 overlaps resolved to single owners; responsibility matrix.
 
 ## 8. Structural reorganization (one working set)
 - Promoted the tested brain out of the sandbox to a **root package**, twice-renamed for clarity: `danzaboss_v2` → `danza` → **`danzaboss/`** (all imports/tests updated each time; re-ran suite to prove parity).

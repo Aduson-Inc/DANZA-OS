@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+ stdlib only. `unittest` (auto-discovered by `danzaboss/run_tests.sh`).
 
-**Spec:** `docs/superpowers/specs/2026-07-05-workstation-onboarding-design.md` §7 (ignition & conductor), §8 (testing). Phase map: `docs/superpowers/plans/2026-07-05-workstation-w1-p1-engine-foundations.md` (this = P4). Implementers do NOT need to read either — every task below is self-contained.
+**Spec:** `docs/superpowers/specs/2026-07-05-workstation-onboarding-design.md` §7 (ignition & conductor), §8 (testing). Phase map: `docs/superpowers/plans/DONE-2026-07-05-workstation-w1-p1-engine-foundations.md` (this = P4). Implementers do NOT need to read either — every task below is self-contained.
 
 **Status-vocabulary decision (recorded here so nobody re-derives it):** the design
 spec narrates `ready_for_<runner>` / `awaiting_user`; the MACHINE vocabulary is

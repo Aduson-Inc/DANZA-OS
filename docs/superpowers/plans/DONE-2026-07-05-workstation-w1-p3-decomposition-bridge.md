@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+ stdlib only. `unittest` (auto-discovered by `danzaboss/run_tests.sh`).
 
-**Spec:** `docs/superpowers/specs/2026-07-05-workstation-onboarding-design.md` §6 (decomposition engine). Phase map: `docs/superpowers/plans/2026-07-05-workstation-w1-p1-engine-foundations.md` (this = P3). Implementers do NOT need to read either — every task below is self-contained.
+**Spec:** `docs/superpowers/specs/2026-07-05-workstation-onboarding-design.md` §6 (decomposition engine). Phase map: `docs/superpowers/plans/DONE-2026-07-05-workstation-w1-p1-engine-foundations.md` (this = P3). Implementers do NOT need to read either — every task below is self-contained.
 
 **Placement decision:** spec §6 says "extended decompose.py"; that is satisfied by extending the `Task` record there (shared vocabulary, gate unchanged). W1-specific *policy* (id shape, proxies, ordering, headless call) lives in `danzaboss/workstation/planner.py`, matching the P1/P2 precedent that W1 modules live under `workstation/`.
 

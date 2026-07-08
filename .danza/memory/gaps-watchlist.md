@@ -7,5 +7,5 @@
 - Single point of failure: orchestrator mediates everything -> now guarded by StateManager +
   capabilities, but structurally still one scheduler.
 - Doc-level overlap remedies (Jonathan/Bonnie, Carmella/Billy, dual onboarding) not yet
-  capability-enforced. See docs/overlap-analysis-and-remedies.md.
+  capability-enforced. See docs/DONE-overlap-analysis-and-remedies.md.
 - yt_search.py depends on unpinned yt_dlp; no requirements.txt.
