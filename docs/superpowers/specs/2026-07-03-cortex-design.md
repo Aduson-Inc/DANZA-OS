@@ -227,3 +227,23 @@ real accumulating data. Estimated total: ~10–14 sessions.
     global store, native transactions on Postgres, last-writer-wins at row level —
     safe because evolution history is append-only and merges are monotonic. No locking
     layer in C6; revisit only if real multi-agent write contention appears.
+
+## 11. Future feature — build-order / workflow memory (procedural layer)
+
+Not yet built; recorded here so it is not lost. Salvaged from the retired **Mona
+(Historian)** agent, whose hand-run job this was.
+
+**The gap:** CORTEX today stores *observations* (what happened, why). It does not yet
+store **best-practice build sequences** — the professional order-of-operations for
+building a kind of app. At onboarding, *something* has to decide what to build first
+(e.g. for a SaaS: auth → data model → billing → core feature → dashboard, not the
+reverse). Right now that judgment is re-derived every project.
+
+**The feature:** a procedural-memory capability that remembers, per app archetype
+(SaaS, marketplace, social, content, internal-tool…), the build order that worked best —
+what sequence shipped cleanly, what ordering caused rework — and improves it every build.
+Onboarding queries it to *recommend* a build order (with the reasoning), and the outcome
+of each build feeds back to refine the template. This is the "gets smarter every build"
+promise for the *how-to-build* dimension, complementing the *what-happened* observation
+store. Fits the existing L-layer + typed-observation model (a `procedural`/`build_order`
+type keyed by archetype); no new storage engine required.

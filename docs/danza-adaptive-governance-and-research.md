@@ -50,7 +50,7 @@ The "research team that grills you" loop, entirely profile-parameterized:
 - `squad.py` — **ResearchSquad**: per big feature → collect → summarize → propose → throttle → send.
   Deep research only for `is_big` features (cost control).
 
-## 4. Paid research tools — recommendation (see `danza-paid-research-tools.md`)
+## 4. Paid research tools — recommendation
 - **Pay for the summarizer:** make **Perplexity Sonar** (or Firecrawl deep-research) the default; it's an
   official cited-answer API — more reliable + better than NotebookLM automation, for single-digit $/mo.
 - **Start free on the collector:** **Tavily** free tier (1,000/mo), add **Exa** for big features.
