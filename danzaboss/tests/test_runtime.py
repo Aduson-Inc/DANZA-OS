@@ -63,6 +63,14 @@ class TestVerify(unittest.TestCase):
         r = run_verification("echo hello", cwd="/tmp")
         self.assertIn("hello", r.stdout_tail)
 
+    def test_missing_cwd_returns_failure_not_crash(self):
+        # The QA gate must fail closed on a bad target dir, never raise an
+        # uncaught exception that bricks the calling hook/session.
+        r = run_verification("echo hi", cwd="/nonexistent/dir/xyz")
+        self.assertFalse(r.passed)
+        self.assertNotEqual(r.exit_code, 0)
+        self.assertIn("xyz", r.stderr_tail)   # the OSError is reported, not swallowed
+
 
 class TestSession(unittest.TestCase):
     def test_session_learn_and_verify(self):

@@ -113,4 +113,50 @@ non-existent agent (a small least-privilege correctness win, not just cosmetics)
 
 _Status: DONE — verified._
 
+---
+
+## Increment #3 — QA gate fails closed on bad target dir + honest trust boundary (theme-3)
+
+`runtime/verify.py` (the real Bonnie/QA gate, WIRED via `danza verify`) caught only
+`TimeoutExpired`. A non-existent/invalid `cwd` raised an **uncaught `FileNotFoundError`**,
+crashing the caller instead of returning a pass/fail — a fail-*open*-by-crash in the
+integrity gate. Its docstring also falsely claimed "No shell-injection surprises" while
+running a free-text command through `shell=True`.
+
+**Fix:** catch `OSError` → structured `VerifyResult(passed=False, exit_code=-1)` with the
+error in `stderr_tail` (fails closed). Rewrote the docstring to state the real TRUST
+BOUNDARY (command runs through the shell so it must be a trusted configured test command,
+never untrusted free-text) — `shell=True` is kept intentionally because compound test
+commands (`pytest && ruff`) require it; removing it would regress legitimate usage.
+
+**Verified before/after:**
+
+| `run_verification("echo hi", "/nonexistent/dir/xyz")` | BEFORE | AFTER |
+|---|---|---|
+| result | **uncaught `FileNotFoundError`** (caller crashes) | `VerifyResult(passed=False, exit_code=-1, stderr_tail="[Errno 2] ...")` |
+
+Confirmed via `danza verify "echo hi" /nonexistent/dir/xyz` → structured JSON, cli exit 1.
+Tests **+1** (`test_missing_cwd_returns_failure_not_crash`); suite **703 → 704, OK (14 skipped)**.
+
+_Status: DONE — verified._
+
+---
+
+## Summary — verified improvements this session
+
+| # | Theme | Change | Evidence | Suite |
+|---|---|---|---|---|
+| 1 | 3 (integrity) + 1 (efficiency) | `context_budget_guard` wired into live CC hook (guards 2→3), gated on runtime profiles | `danza hook`: APP_BUILD oversized dispatch before=allow → after=deny; OS_DEV=allow | 694→703 |
+| 2 | 5 (hygiene) | Removed retired `mona-historian` from capability + context-routing rosters | `grep mona` → 0 refs; rosters match real 8-agent set | 703 |
+| 3 | 3 (integrity) | QA gate `verify.py` fails closed on bad cwd; honest trust-boundary docstring | `danza verify … /nonexistent` before=crash → after=structured fail | 703→704 |
+
+Audit deliverable: full hook/flow wiring map (file:line) + per-driver context baseline
+(≈6,150 tok, 98% fixed governance) recorded above. All work on `danza/os-selfimprove`,
+reversible, suite green every step (694 → 704).
+
+**Honest scope note (not yet done):** theme-1 `context/pipeline.py` and theme-4 CORTEX-in-OS
+inject remain unwired — their wins are *modeled*, not demonstrable on a fresh repo without a
+populated MemoryStore/state fixture (see baseline caveat). Increment #1 installs the
+*enforcement* half (budget cap) that those future increments' *production* half would satisfy.
+
 
