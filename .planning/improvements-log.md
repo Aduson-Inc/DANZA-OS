@@ -92,4 +92,25 @@ serialized Task/Agent input). `context_budget_guard` now runs when `prof.constit
 
 _Status: DONE — verified._
 
+---
+
+## Increment #2 — Remove retired `mona-historian` from driver rosters (theme-5 hygiene)
+
+`mona-historian` was retired (agent def is `mona-historian-RETIRED`, not in the
+CLAUDE.md 8-agent roster) but three tables still carried it as an active driver:
+- `security/capabilities.py:50` — a capability grant (`{Capability.READ}`)
+- `context/pipeline.py:98` — a `DRIVER_PROFILES` context-routing entry
+- `observability/trace.py:5` — docstring naming "Mona" as the consumer
+
+**Fix:** removed both driver-table entries (now match the real 8-agent roster) and
+generalized the trace docstring to "the memory layer (CORTEX)". No test asserted on
+`mona-historian` (grep clean), and both tables are read via `.get()`/membership so no
+lookup can KeyError.
+
+**Verified:** `grep -rin mona danzaboss/**/*.py` → **CLEAN, 0 refs**. Suite **703, OK
+(14 skipped)**, no regressions. This removes a dead capability grant to a
+non-existent agent (a small least-privilege correctness win, not just cosmetics).
+
+_Status: DONE — verified._
+
 

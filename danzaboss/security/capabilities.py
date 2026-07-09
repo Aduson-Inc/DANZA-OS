@@ -47,7 +47,6 @@ DEFAULT_GRANTS: dict[str, set[Capability]] = {
     "angela-auditor":      {Capability.READ},
     "bonnie-qa":           {Capability.READ, Capability.RUN_TESTS},
     "carmella-researcher": {Capability.READ, Capability.RESEARCH_NET},
-    "mona-historian":      {Capability.READ},
     "hank-designer":       {Capability.READ, Capability.WRITE_CODE},  # writes design tokens/templates
     "billy-security":      {Capability.READ, Capability.RUN_TESTS},
 }

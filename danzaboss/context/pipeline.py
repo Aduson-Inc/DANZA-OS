@@ -95,7 +95,6 @@ DRIVER_PROFILES: dict[str, dict] = {
     "angela-auditor":       {"scopes": ("episodic", "procedural"), "hint": "decisions alerts loops violations"},
     "bonnie-qa":            {"scopes": ("semantic", "episodic"),   "hint": "tests verification edge cases regressions"},
     "carmella-researcher":  {"scopes": ("semantic",),              "hint": "api external standards research"},
-    "mona-historian":       {"scopes": ("episodic", "procedural"), "hint": "build history patterns token efficiency"},
     "hank-designer":        {"scopes": ("semantic", "procedural"), "hint": "design tokens colors fonts templates"},
     "billy-security":       {"scopes": ("semantic", "procedural"), "hint": "owasp auth secrets dependency"},
 }

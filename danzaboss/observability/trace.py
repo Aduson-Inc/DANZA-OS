@@ -2,9 +2,9 @@
 
 Replaces prose run-logs with structured, queryable spans (JSONL). Every model
 call, tool call, verification, and decision becomes a span with a trace id,
-parent id, timing, and outcome. This gives Mona real data to learn from and
-gives the anti-theatre rules (42-43) machine-checkable evidence that a
-sub-agent actually ran.
+parent id, timing, and outcome. This gives the memory layer (CORTEX) real data
+to learn from and gives the anti-theatre rules (42-43) machine-checkable
+evidence that a sub-agent actually ran.
 
 Stdlib only. A span is a context manager so timing and error capture are automatic.
 """
