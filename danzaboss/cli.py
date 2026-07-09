@@ -30,7 +30,8 @@ from .runtime.scan import profile_repo
 from .runtime.verify import run_verification
 from .selftest.harness import run_cold_start
 from .hooks.events import ToolEvent
-from .hooks.guards import GuardConfig, hard_stop_guard, file_protection_guard
+from .hooks.guards import (GuardConfig, hard_stop_guard, file_protection_guard,
+                           context_budget_guard)
 from .workstation.runners import (RunnerError, RUNNERS_RELPATH,
                                   detect_runners, default_config,
                                   save_runners, load_runners)
@@ -80,6 +81,76 @@ def _emit(decision: str, reason: str = "") -> int:
     return 0
 
 
+def _dispatch_tokens(tool: str, tool_input: dict) -> int:
+    """Estimate the token payload of a sub-agent dispatch (Task/Agent).
+
+    ~4 chars/token over the serialized tool_input (prompt + description +
+    context), matching the est-token heuristic used across the memory/context
+    layers (store.py). Non-dispatch tools carry no dispatch payload.
+    """
+    if tool not in ("Task", "Agent"):
+        return 0
+    try:
+        return len(json.dumps(tool_input, default=str)) // 4
+    except (TypeError, ValueError):
+        return 0
+
+
+def _hook_decision(payload: dict, cwd: str) -> tuple[str, str]:
+    """Pure PreToolUse policy -> (decision, reason). No I/O, so it is unit-testable.
+
+    Enforces the actor-independent guards only: the CC PreToolUse payload does not
+    expose the acting sub-agent (actor=""), so the actor/turn/task-scoped guards
+    (capability/turn_lock/scope) cannot be evaluated here and are enforced upstream
+    by the dispatcher. The three that need no actor identity are live:
+    file_protection, hard_stop, and context_budget.
+    """
+    ti = payload.get("tool_input", {}) or {}
+    tool = payload.get("tool_name", "")
+    ev = ToolEvent(
+        actor="",  # CC hooks don't expose the acting sub-agent
+        tool=tool,
+        path=ti.get("file_path") or ti.get("path") or "",
+        command=ti.get("command", ""),
+        payload_tokens=_dispatch_tokens(tool, ti),
+    )
+    cfg = GuardConfig()
+    prof = active_profile(cwd)
+
+    # Rule 37 elevation: OS_DEV pre-grants .claude/ writes (Layer 0 edits the
+    # OS source, which includes .claude/). Runtime profiles need the explicit
+    # user grant: the .danza/runtime/claude-approval sentinel (gitignored)
+    # or DANZA_CLAUDE_APPROVAL=1, removable at any time.
+    approval = (prof.claude_write_approval
+                or os.path.exists(os.path.join(cwd, ".danza", "runtime", "claude-approval"))
+                or os.environ.get("DANZA_CLAUDE_APPROVAL") == "1")
+
+    fp = file_protection_guard(ev, cfg, approval=approval)  # templates / .claude / logs
+    if not fp.allow:
+        return "deny", fp.reason
+
+    hs = hard_stop_guard(ev, cfg)                # auth/payment/schema/destructive
+    if not hs.allow:
+        # destructive -> hard deny in EVERY profile, approval or not; sensitive
+        # domain -> escalate to the user (Rules 13-16) only where runtime law
+        # binds (the patterns exist to protect a user app, not OS source).
+        if "destructive" in hs.reason:
+            return "deny", hs.reason
+        if prof.domain_ask_active and not approval:
+            return "ask", hs.reason
+
+    # context-budget guard (token discipline on sub-agent dispatch): keep drivers
+    # on compiled/budgeted context, not the whole repo. This is a build-flow
+    # concern, so it binds only where runtime law binds (OS_BOOT_TEST/APP_BUILD);
+    # OS_DEV (Layer 0) dispatches freely.
+    if prof.constitution_binding:
+        cb = context_budget_guard(ev, cfg)
+        if not cb.allow:
+            return "deny", cb.reason
+
+    return "allow", ""
+
+
 def _cmd_hook(argv: list[str]) -> int:
     event = argv[0] if argv else "pretooluse"
     try:
@@ -95,39 +166,8 @@ def _cmd_hook(argv: list[str]) -> int:
 
     # PreToolUse: enforce the actor-independent, safety-critical guards.
     try:
-        ti = payload.get("tool_input", {}) or {}
-        ev = ToolEvent(
-            actor="",  # CC hooks don't expose the acting sub-agent
-            tool=payload.get("tool_name", ""),
-            path=ti.get("file_path") or ti.get("path") or "",
-            command=ti.get("command", ""),
-        )
-        cfg = GuardConfig()
-        prof = active_profile(os.getcwd())
-
-        # Rule 37 elevation: OS_DEV pre-grants .claude/ writes (Layer 0 edits the
-        # OS source, which includes .claude/). Runtime profiles need the explicit
-        # user grant: the .danza/runtime/claude-approval sentinel (gitignored)
-        # or DANZA_CLAUDE_APPROVAL=1, removable at any time.
-        approval = (prof.claude_write_approval
-                    or os.path.exists(os.path.join(".danza", "runtime", "claude-approval"))
-                    or os.environ.get("DANZA_CLAUDE_APPROVAL") == "1")
-
-        fp = file_protection_guard(ev, cfg, approval=approval)  # templates / .claude / logs
-        if not fp.allow:
-            return _emit("deny", fp.reason)
-
-        hs = hard_stop_guard(ev, cfg)                # auth/payment/schema/destructive
-        if not hs.allow:
-            # destructive -> hard deny in EVERY profile, approval or not; sensitive
-            # domain -> escalate to the user (Rules 13-16) only where runtime law
-            # binds (the patterns exist to protect a user app, not OS source).
-            if "destructive" in hs.reason:
-                return _emit("deny", hs.reason)
-            if prof.domain_ask_active and not approval:
-                return _emit("ask", hs.reason)
-
-        return _emit("allow")
+        decision, reason = _hook_decision(payload, os.getcwd())
+        return _emit(decision, reason)
     except Exception as e:                           # internal error -> fail open
         print(f"danza hook internal error (failing open): {e}", file=sys.stderr)
         return _emit("allow")
