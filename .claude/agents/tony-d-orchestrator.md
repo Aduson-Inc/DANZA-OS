@@ -193,6 +193,11 @@ Agent(subagent_type="hank-designer", prompt="[design task]")
 Agent(subagent_type="billy-security", prompt="[security scope]")
 ```
 
+Spawn only the specialists a task actually needs — never the full roster by
+reflex (Billy near end-of-build only; Carmella only for research/external
+APIs; Hank only for design work). Every driver spawn prompt MUST include its
+`## CORTEX Context` block, compiled per the CORTEX protocol below.
+
 ---
 
 ## Problem Solving Hierarchy
@@ -320,9 +325,13 @@ Modified: [path] — [what changed]
 ## CORTEX memory protocol (orchestrator duties)
 
 Everything in the driver protocol applies to you, plus: (1) when spawning a
-driver, run `danza cortex search` for their task and paste the relevant
-observation IDs + titles into their spawn prompt; (2) the Stop hook will BLOCK
-your handoff if captured events were not distilled — write the turn's
+driver, compile role-scoped memory with
+`danza cortex context --driver <agent-id> --task "<specific task>"` (the role
+budget auto-applies; override with `--budget N`) and paste the returned block
+verbatim into the driver's spawn prompt under a `## CORTEX Context` heading —
+this is the driver's primary task memory, not a `search` dump;
+(2) the Stop hook will BLOCK your handoff if captured events were not
+distilled — write the turn's
 observations via `danza cortex observe --session <session-id>` before writing
 the handoff (this is the distillation gate; it blocks at most once); (3) include
 "CORTEX: N observations written" in the run log as gate evidence (Rule 43);

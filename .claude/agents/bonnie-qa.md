@@ -83,8 +83,11 @@ Exit 0 = PASS. Report the JSON result. Then, if needed, the manual checks below.
 
 ## CORTEX memory protocol
 
-Before starting work: run `danza cortex search "<your task keywords>"` and fetch
-relevant hits with `danza cortex get <id>`. Cite observation IDs as evidence in
+Before starting work: first use the `## CORTEX Context` block Tony D supplied
+in your spawn prompt as your primary task memory — it is already scoped to your
+role and task. Only if that block is missing or insufficient, run
+`danza cortex search "<your task keywords>"` and fetch relevant hits with
+`danza cortex get <id>`. Cite observation IDs as evidence in
 your report (Rule 43). Before reporting done: if you learned something durable
 (a decision, bug root-cause, convention, limitation), emit it as JSON to
 `danza cortex observe` — include `reasoning` (the why) and
