@@ -16,7 +16,7 @@ import _bootstrap  # noqa
 
 from danzaboss.cortex import commands, driver_context
 from danzaboss.cortex.driver_context import (
-    DRIVER_CORTEX, DriverContext, compile_driver_context)
+    DRIVER_CORTEX, DriverContext, compile_driver_context, default_budget)
 from danzaboss.cortex.observation import Importance, Observation
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
@@ -196,6 +196,32 @@ class TestProfileInvariants(unittest.TestCase):
                          [i.observation.id for i in app.package.items])
 
 
+class TestDefaultBudgets(unittest.TestCase):
+    """Per-driver default context token budgets — the role default resolved
+    when the caller/CLI passes no explicit budget."""
+
+    def test_default_budget_jonathan_builder(self):
+        self.assertEqual(default_budget("jonathan-builder"), 900)
+
+    def test_default_budget_bonnie_qa(self):
+        self.assertEqual(default_budget("bonnie-qa"), 800)
+
+    def test_default_budget_unknown_driver_falls_back_to_generic_cap(self):
+        self.assertEqual(default_budget("nobody"), 1200)
+
+    def test_compile_driver_context_no_budget_resolves_role_default_jonathan(self):
+        ctx = compile_driver_context(app_build_store(), "jonathan-builder",
+                                     TASK, "userapp")
+        self.assertEqual(ctx.budget, 900)
+        self.assertLessEqual(ctx.used, 900)
+
+    def test_compile_driver_context_no_budget_resolves_role_default_bonnie(self):
+        ctx = compile_driver_context(app_build_store(), "bonnie-qa",
+                                     TASK, "userapp")
+        self.assertEqual(ctx.budget, 800)
+        self.assertLessEqual(ctx.used, 800)
+
+
 class TestDriverContextCLI(unittest.TestCase):
     """requirement 7: `danza cortex context --driver <id> --task <t> --budget N`.
     Runs under APP_BUILD (requirement 9) against an isolated project DB."""
@@ -249,6 +275,14 @@ class TestDriverContextCLI(unittest.TestCase):
         # additive: the legacy `danza cortex context` (no --driver) is unchanged.
         code, out = self._run(["context"])
         self.assertEqual(code, 0)
+
+    def test_cli_no_budget_resolves_role_default(self):
+        code, out = self._run(["context", "--driver", "bonnie-qa",
+                               "--task", TASK, "--json"])
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertEqual(data["budget"], 800)
+        self.assertLessEqual(data["used"], 800)
 
 
 if __name__ == "__main__":

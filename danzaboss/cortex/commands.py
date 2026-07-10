@@ -299,7 +299,8 @@ def _cmd_driver_context(argv: list[str], root: str) -> int:
 
     driver = take_opt("--driver")
     task = take_opt("--task")
-    budget = int(take_opt("--budget") or 1200)
+    budget_opt = take_opt("--budget")
+    budget = int(budget_opt) if budget_opt else None   # None -> role default
     as_json = "--json" in argv
     if not driver or not task:
         print("context --driver <agent-id> --task \"<task>\" [--budget N] [--json]",

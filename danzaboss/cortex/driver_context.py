@@ -57,6 +57,24 @@ DRIVER_CORTEX: dict[str, dict] = {
 # no type filter (every category is a candidate). Predictable, never a crash.
 _FALLBACK = {"intent": None, "types": None}
 
+# Per-driver default context token budgets (mission default). Applied when the
+# caller/CLI passes no explicit budget. Unknown drivers get the generic cap.
+DRIVER_BUDGETS: dict[str, int] = {
+    "jonathan-builder": 900,
+    "samantha-mapper": 900,
+    "angela-auditor": 900,
+    "bonnie-qa": 800,
+    "billy-security": 800,
+    "hank-designer": 800,
+    "carmella-researcher": 800,
+}
+_DEFAULT_BUDGET = 1200
+
+
+def default_budget(driver: str) -> int:
+    """The role's default context budget; unknown drivers -> generic cap."""
+    return DRIVER_BUDGETS.get(driver, _DEFAULT_BUDGET)
+
 
 @dataclass
 class DriverContext:
@@ -104,14 +122,17 @@ def driver_profile(driver: str) -> tuple[dict, str]:
 
 
 def compile_driver_context(store: ObservationStore, driver: str, task: str,
-                           project: str, budget: int = 1200, *,
+                           project: str, budget: Optional[int] = None, *,
                            workspace=None, graph=None) -> DriverContext:
     """Compile a budget-capped, role-specific CORTEX package for `driver`.
 
     A thin wrapper over the real read path: pick the driver profile, force its
     intent, narrow to its types, and let `build_package` do intent detection,
     hybrid retrieval, budgeted assembly and the single quality re-plan.
+    `budget=None` resolves the driver's role default via `default_budget`.
     """
+    if budget is None:
+        budget = default_budget(driver)
     prof, source = driver_profile(driver)
     bundle = build_package(store, task, project, budget=budget,
                            types=prof["types"],
