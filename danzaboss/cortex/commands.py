@@ -270,9 +270,51 @@ def _cmd_retrieve(argv: list[str], root: str, stdin: TextIO) -> int:
 
 
 def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
+    """danza cortex context [--driver <agent-id> --task "<task>" [--budget N]
+    [--json]]
+
+    Bare form prints the session-start injection block (unchanged). With
+    --driver it compiles a budget-capped, role-specific CORTEX package for that
+    driver — the APP_BUILD front-door for per-driver context.
+    """
+    if "--driver" in argv:
+        return _cmd_driver_context(argv, root)
     store = open_store(root)
     log = CaptureLog(db_path(root))
     print(build_context(store, _project(root), stats=log.stats(_project(root))))
+    return 0
+
+
+def _cmd_driver_context(argv: list[str], root: str) -> int:
+    from .driver_context import compile_driver_context  # local: optional path
+    from .graph import GraphStore
+
+    def take_opt(flag: str) -> Optional[str]:
+        if flag in argv:
+            i = argv.index(flag)
+            val = argv[i + 1] if i + 1 < len(argv) else None
+            del argv[i:i + 2]
+            return val
+        return None
+
+    driver = take_opt("--driver")
+    task = take_opt("--task")
+    budget = int(take_opt("--budget") or 1200)
+    as_json = "--json" in argv
+    if not driver or not task:
+        print("context --driver <agent-id> --task \"<task>\" [--budget N] [--json]",
+              file=sys.stderr)
+        return 2
+
+    store = open_store(root)
+    ctx = compile_driver_context(store, driver, task, _project(root),
+                                 budget=budget,
+                                 workspace=workspace_snapshot(root),
+                                 graph=GraphStore(db_path(root)))
+    for item in ctx.package.items:
+        store.record_use(item.observation.id, source="driver-context")
+    print(json.dumps(ctx.to_dict(), indent=2) if as_json
+          else (ctx.render() or "(no relevant observations)"))
     return 0
 
 
