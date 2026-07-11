@@ -300,5 +300,29 @@ class TestDashboardStatic(unittest.TestCase):
         self.assertNotIn(b"`/api/", js)
 
 
+class TestUiCliParsing(unittest.TestCase):
+    """danza ui arg parsing is pure so it tests without binding a socket."""
+
+    def test_defaults(self):
+        from danzaboss.cli import _parse_ui_args
+        self.assertEqual(_parse_ui_args([]), (".", None, True))
+
+    def test_all_flags(self):
+        from danzaboss.cli import _parse_ui_args
+        self.assertEqual(_parse_ui_args(["/repo", "--port", "4000", "--no-open"]),
+                         ("/repo", 4000, False))
+
+    def test_bad_port_and_unknown_flag_raise(self):
+        from danzaboss.cli import _parse_ui_args
+        with self.assertRaises(ValueError):
+            _parse_ui_args(["--port", "abc"])
+        with self.assertRaises(ValueError):
+            _parse_ui_args(["--bogus"])
+
+    def test_ui_is_a_registered_command(self):
+        from danzaboss.cli import _COMMANDS
+        self.assertIn("ui", _COMMANDS)
+
+
 if __name__ == "__main__":
     unittest.main()

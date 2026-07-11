@@ -16,6 +16,8 @@ Commands:
                                                 run the conductor relay loop against a project root
   danzaboss.cli init [dir]                      scaffold .claude/ + .danza/ into a repo (danza init)
   danzaboss.cli doctor [dir]                    env + activation health checks (danza doctor)
+  danzaboss.cli ui [dir] [--port N] [--no-open]  DANZA-OS product dashboard on 127.0.0.1:33100
+                                                (CORTEX UI mounted at /cortex/)
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
 """
@@ -316,6 +318,46 @@ def _cmd_conduct(argv: list[str]) -> int:
     return 0
 
 
+def _parse_ui_args(argv: list[str]) -> tuple[str, int | None, bool]:
+    """danza ui [dir] [--port N] [--no-open] -> (root, port, open_browser).
+
+    Pure so it is unit-testable; raises ValueError on bad input."""
+    root = "."
+    port: int | None = None
+    open_browser = True
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--port" and i + 1 < len(argv):
+            try:
+                port = int(argv[i + 1])
+            except ValueError:
+                raise ValueError("--port must be an integer") from None
+            i += 2
+        elif argv[i] == "--no-open":
+            open_browser = False
+            i += 1
+        elif not argv[i].startswith("-"):
+            root = argv[i]
+            i += 1
+        else:
+            raise ValueError(f"unknown argument: {argv[i]}")
+    return root, port, open_browser
+
+
+def _cmd_ui(argv: list[str]) -> int:
+    """danza ui [dir] [--port N] [--no-open] - serve the product dashboard."""
+    from .workstation.server import serve  # local import: UI is optional at runtime
+    try:
+        root, port, open_browser = _parse_ui_args(argv)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        print("usage: danzaboss.cli ui [dir] [--port N] [--no-open]",
+              file=sys.stderr)
+        return 2
+    serve(root, port=port, open_browser=open_browser)
+    return 0
+
+
 def _print_doctor(root: str) -> int:
     """Render a doctor Report as [PASS]/[FAIL] lines + verdict. 0 green, 1 red."""
     rep = run_doctor(root)
@@ -363,14 +405,14 @@ _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
              "cortex": _cmd_cortex, "profile": _cmd_profile,
              "tier": _cmd_tier, "runners": _cmd_runners,
              "conduct": _cmd_conduct, "init": _cmd_init,
-             "doctor": _cmd_doctor}
+             "doctor": _cmd_doctor, "ui": _cmd_ui}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in _COMMANDS:
         print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier"
-              "|runners|conduct|init|doctor> ...",
+              "|runners|conduct|init|doctor|ui> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:])
