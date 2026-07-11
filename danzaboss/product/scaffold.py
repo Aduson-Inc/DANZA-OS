@@ -127,6 +127,41 @@ def scaffold(target: str | os.PathLike) -> list[FileResult]:
     return results
 
 
+def _managed_block() -> str:
+    body = (files("danzaboss.product") / "templates"
+            / "claude-md-managed-block.md").read_text(encoding="utf-8").strip()
+    return f"{CLAUDE_MD_BEGIN}\n{body}\n{CLAUDE_MD_END}"
+
+
 def _merge_claude_md(root: Path) -> FileResult:
-    """Placeholder until Task 4: report CLAUDE.md untouched."""
-    return FileResult("CLAUDE.md", "skipped", "up-to-date")
+    """Create CLAUDE.md or maintain the DANZA managed block inside it.
+
+    Only the text between the BEGIN/END markers is ever rewritten - the
+    user's own CLAUDE.md content is untouchable (Rule 35). One marker
+    without the other means a hand-mangled block: fail closed rather than
+    guess where the user's content ends."""
+    path = root / "CLAUDE.md"
+    block = _managed_block()
+    if not path.exists():
+        path.write_text(block + "\n", encoding="utf-8")
+        return FileResult("CLAUDE.md", "created")
+
+    text = path.read_text(encoding="utf-8")
+    has_begin, has_end = CLAUDE_MD_BEGIN in text, CLAUDE_MD_END in text
+    if has_begin != has_end:
+        raise ScaffoldError(
+            "CLAUDE.md managed block markers are corrupt (found one of "
+            "BEGIN/END but not the other) - repair the block by hand, "
+            "then re-run danza init")
+    if has_begin:
+        pre, rest = text.split(CLAUDE_MD_BEGIN, 1)
+        _machine_owned, post = rest.split(CLAUDE_MD_END, 1)
+        merged = pre + block + post
+        if merged == text:
+            return FileResult("CLAUDE.md", "skipped", "up-to-date")
+        path.write_text(merged, encoding="utf-8")
+        return FileResult("CLAUDE.md", "merged")
+
+    appended = text.rstrip("\n") + "\n\n" + block + "\n"
+    path.write_text(appended, encoding="utf-8")
+    return FileResult("CLAUDE.md", "merged")
