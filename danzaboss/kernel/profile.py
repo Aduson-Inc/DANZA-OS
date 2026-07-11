@@ -76,7 +76,7 @@ PROFILES: dict[str, Profile] = {
         claude_write_approval=True, domain_ask_active=False,
         destructive_deny_active=True,
         turn_gates_active=False, reports_required=False,
-        memory_level="lightweight", distill_min_events=3,
+        memory_level="none", distill_min_events=3,   # dormant: claude-mem holds build memory
         session_inject=False, distill_gate_active=False,
         agents_may_spawn=False, subagents_on_demand_only=True,
         research_requires_approval=True),
@@ -132,6 +132,11 @@ def active_profile(root: str = ".", env: dict | None = None) -> Profile:
 
 
 # ---- memory significance (capture diet) ---------------------------------------
+# OS_DEV runs at "none": CORTEX captures nothing while the OS is being built, so
+# only one memory system (claude-mem) is live during OS-dev sessions. CORTEX
+# stays the canonical memory everywhere the product actually runs
+# (OS_BOOT_TEST/APP_BUILD). The "lightweight" level below is retained for any
+# profile that wants the diet rather than full silence.
 # In "lightweight" mode only events that could plausibly matter later are
 # captured: file mutations, and shell commands that change or prove state
 # (commits, pushes, test runs, danza CLI actions). Reads and trivial shell

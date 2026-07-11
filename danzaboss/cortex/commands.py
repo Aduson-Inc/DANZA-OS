@@ -64,7 +64,8 @@ def _hook_post_tool_use(root: str, payload: dict) -> int:
     tool = payload.get("tool_name", "")
     command = ti.get("command", "")
     # C4.5 memory diet: the profile decides what becomes memory pressure.
-    # OS_DEV (lightweight) captures only mutations + state-changing commands.
+    # OS_DEV (none) captures nothing — claude-mem holds build memory, so only one
+    # memory system runs during OS builds. Runtime profiles capture per level.
     if not capture_event(active_profile(root), tool, command):
         return 0
     resp = payload.get("tool_response", {}) or {}

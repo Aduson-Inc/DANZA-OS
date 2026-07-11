@@ -1,5 +1,6 @@
 """Tests for the execution-profile governor (C4.5) — resolution, policy
 invariants, memory-capture diet, and profile-aware hook behavior."""
+import dataclasses
 import json
 import os
 import tempfile
@@ -69,7 +70,7 @@ class TestPolicyInvariants(unittest.TestCase):
         self.assertFalse(p.turn_gates_active)
         self.assertFalse(p.domain_ask_active)
         self.assertTrue(p.claude_write_approval)
-        self.assertEqual(p.memory_level, "lightweight")
+        self.assertEqual(p.memory_level, "none")   # CORTEX dormant during OS builds
         self.assertFalse(p.agents_may_spawn)
         self.assertFalse(p.session_inject)        # CORTEX stays silent in Layer 0
         self.assertFalse(p.distill_gate_active)   # no distillation nagging in dev
@@ -103,9 +104,15 @@ class TestMemoryDiet(unittest.TestCase):
 
     def test_capture_levels(self):
         os_dev, app = PROFILES["OS_DEV"], PROFILES["APP_BUILD"]
-        self.assertFalse(capture_event(os_dev, "Bash", "ls"))       # lightweight drops noise
-        self.assertTrue(capture_event(os_dev, "Edit"))              # keeps mutations
+        # OS_DEV is dormant (memory_level="none"): CORTEX captures nothing during
+        # OS builds so claude-mem is the sole build-time memory system.
+        self.assertFalse(capture_event(os_dev, "Bash", "ls"))       # none -> nothing
+        self.assertFalse(capture_event(os_dev, "Edit"))             # not even mutations
         self.assertTrue(capture_event(app, "Bash", "ls"))           # normal keeps all
+        # the "lightweight" level still drops noise but keeps mutations
+        light = dataclasses.replace(os_dev, memory_level="lightweight")
+        self.assertFalse(capture_event(light, "Bash", "ls"))
+        self.assertTrue(capture_event(light, "Edit"))
 
 
 class TestDistillationNoiseFloor(unittest.TestCase):
@@ -136,17 +143,19 @@ class TestProfileAwareCortexHooks(unittest.TestCase):
         return log.pending(sid)
 
     def test_os_dev_capture_drops_trivial_bash(self):
-        # fresh tmp repo has no team-state.json -> OS_DEV -> lightweight
+        # fresh tmp repo has no team-state.json -> OS_DEV -> memory_level="none"
         cortex_commands._hook_post_tool_use(self.root, {
             "session_id": "s1", "tool_name": "Bash",
             "tool_input": {"command": "ls -la"}})
         self.assertEqual(self._events("s1"), [])
 
-    def test_os_dev_capture_keeps_edits(self):
+    def test_os_dev_capture_records_nothing(self):
+        # OS_DEV is dormant: even a mutation is NOT captured — claude-mem holds
+        # build memory so only one memory system runs during OS builds.
         cortex_commands._hook_post_tool_use(self.root, {
             "session_id": "s1", "tool_name": "Edit",
             "tool_input": {"file_path": "danzaboss/cli.py"}})
-        self.assertEqual(len(self._events("s1")), 1)
+        self.assertEqual(self._events("s1"), [])
 
     def test_app_build_capture_keeps_everything(self):
         os.environ[PROFILE_ENV_VAR] = "APP_BUILD"

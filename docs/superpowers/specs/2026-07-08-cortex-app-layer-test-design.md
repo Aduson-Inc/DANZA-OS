@@ -9,8 +9,8 @@
 DANZA-OS has two layers of interest here:
 
 - **OS layer (`OS_DEV`, Layer 0)** — an AI session improving DANZABOSS itself. CORTEX runs
-  *silent*: `memory_level=lightweight`, `session_inject=False`, `distill_gate_active=False`
-  (`danzaboss/kernel/profile.py:72-82`).
+  *dormant*: `memory_level=none` (captures nothing — claude-mem holds build memory),
+  `session_inject=False`, `distill_gate_active=False` (`danzaboss/kernel/profile.py:72-82`).
 - **User-app layer (`APP_BUILD`, Layer 2)** — activated DANZABOSS building a user's app. CORTEX
   runs *hot*: `memory_level=normal`, `session_inject=True`, `distill_gate_active=True`,
   `distill_min_events=1` (`danzaboss/kernel/profile.py:94-104`).

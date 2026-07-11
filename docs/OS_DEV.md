@@ -31,8 +31,8 @@ and how much ceremony is allowed. Source of truth: `danzaboss/kernel/profile.py`
 | Destructive-command deny (Rule 16) | **on** | **on** | **on** |
 | Turn gates (anti-theatre/verify/regression) | off | on | on |
 | Handoff/self-audit reports | not required | required | required |
-| Memory level | lightweight | normal | normal |
-| Distillation noise floor | 3 significant events | every session | every session |
+| Memory level | none (CORTEX dormant) | normal | normal |
+| Distillation noise floor | n/a (no capture) | every session | every session |
 | Agent roster may spawn | no (subagents only when the task clearly benefits) | yes | yes |
 | External research (Tavily etc.) | **explicit user approval** | **explicit user approval** | **explicit user approval** |
 
@@ -58,16 +58,22 @@ Inspect the active profile any time: `PYTHONPATH=. python3 -m danzaboss.cli prof
 | Log overwrite deny (Rule 36) | on | on | on | always needed (cheap) |
 | Capability / turn-lock / scope / context-budget guards (`HookDispatcher`) | not wired (no agents) | on | on | runtime only |
 | Turn gates: anti-theatre, verify-before-done, regression (Rules 5, 42–43) | off | on | on | runtime only — OS_DEV honesty is enforced by test tiers at commit instead |
-| CORTEX SessionStart inject | on | on | on | always needed (read-only, token-budgeted) |
-| CORTEX PostToolUse capture | significant events only | everything (redacted) | everything (redacted) | profile-tuned |
-| CORTEX Stop distillation gate | blocks only at ≥ 3 pending significant events | every session | every session | profile-tuned |
+| CORTEX SessionStart inject | off | on | on | OS_DEV is dormant (`session_inject=False`); store housekeeping (age/learn) still runs but nothing is injected |
+| CORTEX PostToolUse capture | off (dormant) | everything (redacted) | everything (redacted) | OS_DEV `memory_level="none"` — claude-mem holds build memory, so only one memory system runs during OS builds |
+| CORTEX Stop distillation gate | off (never blocks) | every session | every session | OS_DEV `distill_gate_active=False` — closes clean, never nags |
 
 ## Memory policy (CORTEX diet)
 
 Memory event levels: `none` · `lightweight` · `normal` · `critical`.
-OS_DEV defaults to **lightweight**: only file mutations and state-changing
-commands (`git commit/push/merge/revert/rebase`, test runs, `danzaboss.cli`
-invocations) are captured; reads and trivial shell never become memory pressure.
+OS_DEV runs at **none**: CORTEX captures nothing while the OS itself is being
+built. This is deliberate build hygiene — claude-mem is already the active
+memory system during OS-dev sessions, and we don't run two memory systems in
+parallel. It is **not** an architecture change: CORTEX remains the single
+canonical memory everywhere the product actually runs (`OS_BOOT_TEST`,
+`APP_BUILD`). The `lightweight` level (file mutations and state-changing
+commands only — `git commit/push/merge/revert/rebase`, test runs,
+`danzaboss.cli` invocations) remains available for any profile that wants the
+diet rather than full silence.
 
 Distill an observation only for: architectural decisions, bugs found/fixed,
 verified milestones, user preferences, conventions, regressions, accepted
