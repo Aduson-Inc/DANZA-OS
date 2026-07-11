@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "danza-os"
+description = "DANZA-OS: a multi-AI development operating system - AI agents build your app under a fixed constitution."
+requires-python = ">=3.10"
+dependencies = []
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/Aduson-Inc/DANZA-OS"
+
+[project.optional-dependencies]
+neon = ["psycopg[binary]"]
+
+[project.scripts]
+danza = "danzaboss.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "danzaboss.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["danzaboss*"]
+exclude = ["danzaboss.tests*"]
+
+[tool.setuptools.package-data]
+"danzaboss.product" = ["templates/**/*"]
+"danzaboss.cortex.ui" = ["static/*"]
+"danzaboss.planning" = ["plan_schema.json", "spec_template.md"]
+"danzaboss.workstation" = ["templates/stacks/*.json"]
+"danzaboss.kernel" = ["team_state.schema.json"]
