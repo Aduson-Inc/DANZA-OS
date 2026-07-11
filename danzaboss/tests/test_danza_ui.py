@@ -13,7 +13,8 @@ from danzaboss.cortex import commands
 from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
-from danzaboss.workstation.server import overview, serve_in_thread
+from danzaboss.workstation.server import (conductor_tail, overview,
+                                          serve_in_thread, snapshot_token)
 
 
 def get(port, path):
@@ -143,6 +144,48 @@ class TestOverview(unittest.TestCase):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 405)
             e.close()
+
+    def test_conductor_endpoint_serves_tail(self):
+        _, _, body = get(self.port, "/api/conductor?limit=1")
+        items = json.loads(body)["items"]
+        self.assertEqual(items[0]["event"], "session_end")
+
+
+class TestConductorTail(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        seed_activated_repo(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_tail_is_newest_first(self):
+        tail = conductor_tail(self.root)
+        self.assertEqual([e["event"] for e in tail["items"]],
+                         ["session_end", "ignite"])
+
+    def test_limit_keeps_the_newest(self):
+        tail = conductor_tail(self.root, limit=1)
+        self.assertEqual([e["event"] for e in tail["items"]], ["session_end"])
+
+    def test_missing_log_is_empty_not_an_error(self):
+        with tempfile.TemporaryDirectory() as bare:
+            self.assertEqual(conductor_tail(bare), {"items": []})
+
+    def test_unparseable_line_surfaces(self):
+        log = Path(self.root) / ".danza" / "runtime" / "conductor-log.jsonl"
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("{broken\n")
+        items = conductor_tail(self.root)["items"]
+        self.assertEqual(items[0]["event"], "unparseable")
+
+    def test_snapshot_token_moves_on_state_write(self):
+        t1 = snapshot_token(self.root)
+        state_path = Path(self.root) / ".danza" / "runtime" / "team-state.json"
+        updated = dict(TEAM_STATE, turn_number=4)
+        state_path.write_text(json.dumps(updated))
+        self.assertNotEqual(t1, snapshot_token(self.root))
 
 
 if __name__ == "__main__":

@@ -131,6 +131,41 @@ def overview(root: str) -> dict:
     return out
 
 
+def conductor_tail(root: str, limit: int = 100) -> dict:
+    """Last `limit` conductor JSONL events, newest first. Unparseable lines
+    surface as {"event": "unparseable"} — never dropped silently (Rule 33:
+    this log is the one surface the human gets)."""
+    path = Path(root) / LOG_RELPATH
+    if not path.exists():
+        return {"items": []}
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.readlines()[-limit:]
+    items = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            items.append(json.loads(line))
+        except json.JSONDecodeError:
+            items.append({"event": "unparseable", "raw": line[:200]})
+    items.reverse()
+    return {"items": items}
+
+
+def snapshot_token(root: str) -> str:
+    """Cheap change token for SSE: mtime+size of the product state files
+    (same role snapshot_version() plays for the CORTEX store)."""
+    parts = []
+    for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH):
+        try:
+            st = (Path(root) / rel).stat()
+            parts.append(f"{st.st_mtime_ns}:{st.st_size}")
+        except OSError:
+            parts.append("-")
+    return "|".join(parts)
+
+
 # -- handler -----------------------------------------------------------------
 
 class DanzaUIHandler(CortexUIHandler):
@@ -159,6 +194,11 @@ class DanzaUIHandler(CortexUIHandler):
                 self._static(route[len("/static/"):], static_dir=_STATIC_DIR)
             elif route == "/api/overview":
                 self._json(overview(self.root))
+            elif route == "/api/conductor":
+                limit = int((q.get("limit") or ["100"])[0])
+                self._json(conductor_tail(self.root, limit))
+            elif route == "/api/events":
+                self._danza_events()
             else:
                 self._json({"error": "not found"}, 404)
         except BrokenPipeError:
@@ -171,6 +211,28 @@ class DanzaUIHandler(CortexUIHandler):
 
     def do_POST(self):
         self._json({"error": "read-only: product state is CLI-governed"}, 405)
+
+    def _danza_events(self) -> None:
+        """SSE: refresh signal when any product state file changes."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        last = snapshot_token(self.root)
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while True:
+                time.sleep(2)
+                now = snapshot_token(self.root)
+                if now != last:
+                    last = now
+                    self.wfile.write(b'data: {"type": "refresh"}\n\n')
+                else:
+                    self.wfile.write(b": heartbeat\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
 
 # -- lifecycle ----------------------------------------------------------------
