@@ -10,3 +10,5 @@ nohup.out
 .claude/**/.danza/
 .danza/runtime/profile.json
 **/.danza/cortex/project.json
+build/
+*.egg-info/
