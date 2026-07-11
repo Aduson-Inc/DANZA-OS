@@ -188,7 +188,14 @@ class DanzaUIHandler(CortexUIHandler):
         route = parsed.path
         q = urllib.parse.parse_qs(parsed.query)
         try:
-            if route in ("/", "/index.html"):
+            if route == "/cortex":
+                query = f"?{parsed.query}" if parsed.query else ""
+                self._redirect(f"/cortex/{query}")
+            elif route.startswith("/cortex/"):
+                # the mount (D4): strip the prefix, let the parent class serve
+                self.path = self.path[len("/cortex"):]
+                CortexUIHandler.do_GET(self)
+            elif route in ("/", "/index.html"):
                 self._static("index.html", static_dir=_STATIC_DIR)
             elif route.startswith("/static/"):
                 self._static(route[len("/static/"):], static_dir=_STATIC_DIR)
@@ -210,6 +217,11 @@ class DanzaUIHandler(CortexUIHandler):
                 pass
 
     def do_POST(self):
+        route = urllib.parse.urlparse(self.path).path
+        if route.startswith("/cortex/"):
+            self.path = self.path[len("/cortex"):]
+            CortexUIHandler.do_POST(self)
+            return
         self._json({"error": "read-only: product state is CLI-governed"}, 405)
 
     def _danza_events(self) -> None:

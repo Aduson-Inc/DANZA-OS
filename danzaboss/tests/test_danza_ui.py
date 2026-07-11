@@ -188,5 +188,55 @@ class TestConductorTail(unittest.TestCase):
         self.assertNotEqual(t1, snapshot_token(self.root))
 
 
+class TestCortexMount(unittest.TestCase):
+    """D4: one process, one store — /cortex/* is the REAL CORTEX UI."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_profile = os.environ.pop("DANZA_PROFILE", None)
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = cls.tmp.name
+        seed_activated_repo(cls.root)
+        cls.server, cls.port = serve_in_thread(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+        if cls._saved_profile is not None:
+            os.environ["DANZA_PROFILE"] = cls._saved_profile
+
+    def test_bare_cortex_redirects_to_slash(self):
+        # urlopen follows the 302; the final URL proves the redirect happened
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.port}/cortex", timeout=5) as r:
+            self.assertTrue(r.geturl().endswith("/cortex/"))
+            self.assertIn(b"CORTEX", r.read())
+
+    def test_mounted_index_and_assets(self):
+        status, ctype, body = get(self.port, "/cortex/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", ctype)
+        self.assertIn(b"CORTEX", body)
+        for asset in ("/cortex/static/app.css", "/cortex/static/app.js"):
+            status, _, _ = get(self.port, asset)
+            self.assertEqual(status, 200, asset)
+
+    def test_mounted_api_reads_the_same_store(self):
+        _, _, body = get(self.port, "/cortex/api/observations")
+        data = json.loads(body)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["title"], "Dashboard seed fact")
+
+    def test_mounted_settings_write_still_works(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/cortex/api/settings",
+            data=json.dumps({"max_full": 7}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            self.assertEqual(json.loads(r.read())["max_full"], 7)
+
+
 if __name__ == "__main__":
     unittest.main()
