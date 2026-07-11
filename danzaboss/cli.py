@@ -6,6 +6,7 @@ Commands:
   danzaboss.cli selftest                        run the cold-start harness
   danzaboss.cli hook pretooluse                 Claude Code PreToolUse guard (reads CC JSON on stdin)
   danzaboss.cli hook stop                       Claude Code Stop hook
+  danzaboss.cli hook session-start              D8 auto-resume: CONTINUE-MODE context block
   danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|learn|stats|ui|index|graph|mcp>
                                                 CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
   danzaboss.cli profile                         print the active execution profile (OS_DEV|OS_BOOT_TEST|APP_BUILD)
@@ -37,6 +38,7 @@ from .workstation.runners import (RunnerError, RUNNERS_RELPATH,
                                   save_runners, load_runners)
 from .workstation.hosts import HostError, TmuxHost, HeadlessHost, pick_host
 from .workstation.conductor import Conductor, ConductorError, Action
+from .product.resume import session_start_context
 
 
 def _cmd_scan(argv: list[str]) -> int:
@@ -153,6 +155,21 @@ def _hook_decision(payload: dict, cwd: str) -> tuple[str, str]:
 
 def _cmd_hook(argv: list[str]) -> int:
     event = argv[0] if argv else "pretooluse"
+
+    if event in ("session-start", "SessionStart"):
+        # D8 auto-resume: read-only pointer at the in-flight relay. Needs no
+        # stdin payload, so it dispatches before the payload parse (whose
+        # fail-open path emits PreToolUse JSON that would corrupt this event).
+        # Fail open - a resume-hook bug must never block a session start.
+        try:
+            block = session_start_context(os.getcwd())
+        except Exception:
+            return 0
+        if block:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "SessionStart", "additionalContext": block}}))
+        return 0
+
     try:
         payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
     except Exception:
