@@ -212,6 +212,12 @@ class TestConductorTail(unittest.TestCase):
         state_path.write_text(json.dumps(updated))
         self.assertNotEqual(t1, snapshot_token(self.root))
 
+    def test_snapshot_token_moves_on_runners_write(self):
+        t1 = snapshot_token(self.root)
+        runners_path = Path(self.root) / ".danza" / "runtime" / "runners.json"
+        runners_path.write_text("{}")
+        self.assertNotEqual(t1, snapshot_token(self.root))
+
 
 class TestCortexMount(unittest.TestCase):
     """D4: one process, one store — /cortex/* is the REAL CORTEX UI."""
@@ -298,6 +304,8 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, js = get(self.port, "/static/app.js")
         self.assertNotIn(b'"/api/', js)
         self.assertNotIn(b"`/api/", js)
+        _, _, css = get(self.port, "/static/app.css")
+        self.assertNotIn(b'url("/static/', css)
 
 
 class TestUiCliParsing(unittest.TestCase):
@@ -322,6 +330,20 @@ class TestUiCliParsing(unittest.TestCase):
     def test_ui_is_a_registered_command(self):
         from danzaboss.cli import _COMMANDS
         self.assertIn("ui", _COMMANDS)
+
+    def test_ui_bind_failure_exits_2(self):
+        import socket
+
+        from danzaboss.cli import _cmd_ui
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        taken_port = sock.getsockname()[1]
+        try:
+            self.assertEqual(
+                _cmd_ui([".", "--port", str(taken_port), "--no-open"]), 2)
+        finally:
+            sock.close()
 
 
 if __name__ == "__main__":

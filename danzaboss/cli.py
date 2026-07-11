@@ -354,7 +354,11 @@ def _cmd_ui(argv: list[str]) -> int:
         print("usage: danzaboss.cli ui [dir] [--port N] [--no-open]",
               file=sys.stderr)
         return 2
-    serve(root, port=port, open_browser=open_browser)
+    try:
+        serve(root, port=port, open_browser=open_browser)
+    except OSError as exc:
+        print(f"danza ui: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

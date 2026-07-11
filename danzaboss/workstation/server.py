@@ -34,6 +34,7 @@ from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
                       parse_plan)
 from .runners import RUNNERS_RELPATH, RunnerError, load_runners
+from .state import STATE_RELPATH
 from .wizard import Wizard
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -193,7 +194,8 @@ def snapshot_token(root: str) -> str:
     """Cheap change token for SSE: mtime+size of the product state files
     (same role snapshot_version() plays for the CORTEX store)."""
     parts = []
-    for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH):
+    for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH,
+                RUNNERS_RELPATH, STATE_RELPATH):
         try:
             st = (Path(root) / rel).stat()
             parts.append(f"{st.st_mtime_ns}:{st.st_size}")
