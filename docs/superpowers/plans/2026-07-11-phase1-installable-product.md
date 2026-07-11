@@ -1,5 +1,12 @@
 # Phase 1 — Installable Product Implementation Plan
 
+> **STATUS: ✅ COMPLETED 2026-07-11** — all 9 tasks executed and verified.
+> Commits `3686561..603aa56` on `main` (pushed). Suite 733 → 792 tests green.
+> Acceptance proven live twice: pipx install from local clone AND from GitHub
+> via `install.sh` → `danza init` → `danza doctor` green 7/7 → re-init
+> all-skip → D8 hook fires. Checkpoint review (8 angles) after Task 5 fixed
+> 2 findings (@db057ef). Next: Phase 2 — dashboard (spec §6).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Spec:** `docs/superpowers/specs/2026-07-11-danza-os-product-completion-design.md` §5 (Phase 1), §11 (cross-cutting rules).
