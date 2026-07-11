@@ -246,5 +246,35 @@ class TestWorkflowEndpoint(unittest.TestCase):
         self.assertTrue(all(s != d for (s, d) in flows))  # no self-loops
 
 
+class TestFrontEndMountable(unittest.TestCase):
+    """Phase 2 (D4): the CORTEX front-end must be origin-relative so the
+    DANZA dashboard can mount it under /cortex/* unchanged."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.server, cls.port = serve_in_thread(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+
+    def test_no_absolute_static_or_api_references(self):
+        _, _, html = get(self.port, "/")
+        self.assertNotIn(b'"/static/', html)
+        _, _, js = get(self.port, "/static/app.js")
+        self.assertNotIn(b'"/api/', js)
+        self.assertNotIn(b"`/api/", js)
+        _, _, css = get(self.port, "/static/app.css")
+        self.assertNotIn(b'url("/static/', css)
+
+    def test_reciprocal_danza_link_ships_hidden(self):
+        _, _, html = get(self.port, "/")
+        self.assertIn(b'id="danza-link"', html)
+        self.assertIn(b"DANZA-OS", html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,7 +26,7 @@
 body {
   /* user-supplied artwork fills the stage; cards float above it on shadows.
      Missing image degrades silently to the void color. */
-  background: url("/static/background.png") center / cover fixed no-repeat, var(--void);
+  background: url("background.png") center / cover fixed no-repeat, var(--void);
   color: var(--text);
   font-family: var(--font-body);
   font-size: 14.5px;
@@ -475,3 +475,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, .chip:focus-vis
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* anchor rendered as a chip (the DANZA-OS backlink) */
+a.chip { text-decoration: none; display: inline-flex; align-items: center; }

@@ -38,6 +38,9 @@ async function api(path, opts) {
   return res.json();
 }
 
+/* Mounted under the DANZA dashboard (/cortex/*)? Reveal the way back (D4). */
+if (location.pathname.startsWith("/cortex")) $("#danza-link").hidden = false;
+
 /* ---------- navigation (top bar tabs) ---------- */
 $$(".tab").forEach((b) => b.addEventListener("click", () => {
   $$(".tab").forEach((x) => x.classList.toggle("active", x === b));
@@ -148,14 +151,14 @@ async function loadFeed() {
   if (state.q) params.set("q", state.q);
   if (state.type) params.set("type", state.type);
   if (state.project) params.set("project", state.project);
-  const data = await api(`/api/observations?${params}`);
+  const data = await api(`api/observations?${params}`);
   renderFeed(data.items);
 }
 
 /* ---------- top-bar dropdowns ---------- */
 async function loadMeta() {
   try {
-    const m = await api("/api/meta");
+    const m = await api("api/meta");
     const opt = (v, sel) => `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(v)}</option>`;
     $("#project-select").innerHTML = m.projects.map((p) => opt(p, m.project)).join("");
     $("#env-select").innerHTML = m.environments.map((e) => opt(e, state.env)).join("");
@@ -172,7 +175,7 @@ $("#env-select").addEventListener("change", (ev) => {
 
 /* ---------- drawer ---------- */
 async function openDrawer(id) {
-  const o = await api(`/api/observations/${id}`);
+  const o = await api(`api/observations/${id}`);
   const kv = (dt, dd) => dd ? `<dt>${dt}</dt><dd>${dd}</dd>` : "";
   const list = (arr, cls) => (arr && arr.length)
     ? `<ul class="${cls}">${arr.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
@@ -237,7 +240,7 @@ function consoleRow(r) {
 async function loadConsole() {
   if (state.consolePanel === "sessions") return loadSessions();
   if (state.consolePanel !== "events") return;
-  const data = await api("/api/console?limit=200");
+  const data = await api("api/console?limit=200");
   $("#console-log").innerHTML = data.items.map(consoleRow).join("") ||
     '<p class="dim">no events captured yet</p>';
 }
@@ -307,7 +310,7 @@ $("#explain-form").addEventListener("submit", async (ev) => {
   const budget = +$("#explain-budget").value || 1500;
   $("#explain-out").innerHTML = '<p class="dim">running the pipeline…</p>';
   try {
-    const t = await api(`/api/explain?${new URLSearchParams({ prompt, budget })}`);
+    const t = await api(`api/explain?${new URLSearchParams({ prompt, budget })}`);
     $("#explain-out").innerHTML = explainHTML(t);
   } catch (e) {
     $("#explain-out").innerHTML = `<p class="dim">explain failed: ${esc(e.message)}</p>`;
@@ -316,7 +319,7 @@ $("#explain-form").addEventListener("submit", async (ev) => {
 
 /* ---------- sessions (console › sessions) ---------- */
 async function loadSessions() {
-  const data = await api("/api/sessions");
+  const data = await api("api/sessions");
   const rows = state.env
     ? data.items.filter((s) => !s.environment || s.environment === state.env)
     : data.items;
@@ -342,7 +345,7 @@ function bars(el, counts, crimsonKeys = []) {
 }
 
 async function loadStats() {
-  const s = await api("/api/stats");
+  const s = await api("api/stats");
   const cards = [
     [s.observations_stored, "observations"],
     [s.sessions, "sessions"],
@@ -358,7 +361,7 @@ async function loadStats() {
 
 /* ---------- settings ---------- */
 async function loadSettings() {
-  const s = await api("/api/settings");
+  const s = await api("api/settings");
   const f = $("#settings-form");
   f.max_full.value = s.max_full;
   f.token_ceiling.value = s.token_ceiling;
@@ -368,7 +371,7 @@ async function loadSettings() {
 $("#settings-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const f = ev.target;
-  await api("/api/settings", {
+  await api("api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -477,7 +480,7 @@ function wfRender() {
 }
 
 async function loadWorkflow() {
-  if (!wf.data) wf.data = await api("/api/workflow");
+  if (!wf.data) wf.data = await api("api/workflow");
   wfRender();
 }
 
@@ -535,7 +538,7 @@ function pulse() {
 }
 
 function connectLive() {
-  const es = new EventSource("/api/events?stream=1");
+  const es = new EventSource("api/events?stream=1");
   es.onopen = () => $("#live-dot").classList.add("connected");
   es.onmessage = () => refresh();
   es.onerror = () => {
