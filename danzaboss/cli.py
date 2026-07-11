@@ -14,6 +14,8 @@ Commands:
   danzaboss.cli runners <root>                  detect/show the runner registry for a project root
   danzaboss.cli conduct <root> [--poll N] [--max-ticks N]
                                                 run the conductor relay loop against a project root
+  danzaboss.cli init [dir]                      scaffold .claude/ + .danza/ into a repo (danza init)
+  danzaboss.cli doctor [dir]                    env + activation health checks (danza doctor)
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
 """
@@ -38,7 +40,9 @@ from .workstation.runners import (RunnerError, RUNNERS_RELPATH,
                                   save_runners, load_runners)
 from .workstation.hosts import HostError, TmuxHost, HeadlessHost, pick_host
 from .workstation.conductor import Conductor, ConductorError, Action
+from .product.doctor import run_doctor
 from .product.resume import session_start_context
+from .product.scaffold import ScaffoldError, scaffold
 
 
 def _cmd_scan(argv: list[str]) -> int:
@@ -312,18 +316,61 @@ def _cmd_conduct(argv: list[str]) -> int:
     return 0
 
 
+def _print_doctor(root: str) -> int:
+    """Render a doctor Report as [PASS]/[FAIL] lines + verdict. 0 green, 1 red."""
+    rep = run_doctor(root)
+    for c in rep.checks:
+        mark = "PASS" if c.passed else "FAIL"
+        print(f"[{mark}] {c.name}: {c.detail}")
+    d = rep.to_dict()
+    print(f"doctor: {'green' if rep.ok else 'RED'} "
+          f"({d['passed']}/{d['total']} checks)")
+    return 0 if rep.ok else 1
+
+
+def _cmd_doctor(argv: list[str]) -> int:
+    """danza doctor [dir] - env + activation health checks."""
+    return _print_doctor(argv[0] if argv else ".")
+
+
+def _cmd_init(argv: list[str]) -> int:
+    """danza init [dir] - scaffold .claude/ + .danza/, then health-check.
+
+    Exit code: 2 on scaffold failure, otherwise the doctor's verdict - the
+    scaffold may be fine while the environment is not (e.g. no git repo),
+    and the user should see that immediately, not at first build."""
+    target = argv[0] if argv else "."
+    try:
+        results = scaffold(target)
+    except ScaffoldError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    for res in results:
+        suffix = f" ({res.reason})" if res.reason else ""
+        print(f"{res.status:<8} {res.path}{suffix}")
+    print()
+    rc = _print_doctor(target)
+    print()
+    print("Next steps:")
+    print("  1. cd into the repo and open your AI CLI (claude, codex, ...)")
+    print("  2. Say \"Who's the Boss?\" to activate the orchestrator")
+    print("  3. Re-check health any time with: danza doctor")
+    return rc
+
+
 _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
              "selftest": _cmd_selftest, "hook": _cmd_hook,
              "cortex": _cmd_cortex, "profile": _cmd_profile,
              "tier": _cmd_tier, "runners": _cmd_runners,
-             "conduct": _cmd_conduct}
+             "conduct": _cmd_conduct, "init": _cmd_init,
+             "doctor": _cmd_doctor}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in _COMMANDS:
         print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier"
-              "|runners|conduct> ...",
+              "|runners|conduct|init|doctor> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:])
