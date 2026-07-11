@@ -98,8 +98,8 @@ class CortexUIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _static(self, name: str) -> None:
-        path = os.path.join(_STATIC_DIR, os.path.basename(name))
+    def _static(self, name: str, static_dir: str = _STATIC_DIR) -> None:
+        path = os.path.join(static_dir, os.path.basename(name))
         ext = os.path.splitext(path)[1]
         if not os.path.exists(path) or ext not in _MIME:
             self._json({"error": "not found"}, 404)
