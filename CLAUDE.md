@@ -10,7 +10,7 @@ DANZABOSS is a **multi-AI development operating system**: a framework of prompts
 files that lets one or more AI environments build a *target application* under a fixed
 constitution. It is not an application itself. The only executable code that ships with the
 OS is the research pipeline (`tools/research-pipeline/`) and the promoted brain
-(`danzaboss/` — kernel, CORTEX, hooks, research, runtime, workstation; 733 tests).
+(`danzaboss/` — kernel, CORTEX, hooks, research, runtime, workstation; 792 tests).
 
 The **local repository is the single source of truth.** Never compare against GitHub or
 assume an online version is newer. Local files are authoritative.
@@ -39,18 +39,21 @@ assume an online version is newer. Local files are authoritative.
   logs/NNN.md                Per-run records (append-only, historical)
   *-template.md              Read-only templates (Rule 34)
   runtime/team-state.json    Machine-checkable turn state (Upgrade #2; created by kernel)
-danzaboss/                  THE BRAIN (promoted, authoritative) — Python, stdlib only, 733 tests
+danzaboss/                  THE BRAIN (promoted, authoritative) — Python, stdlib only, 792 tests
   kernel/ planning/ memory/ context/ security/ observability/ orchestration/ selftest/
   cortex/                    CORTEX cognitive memory (capture, store, FTS5, inject, extract, CLI)
   hooks/                     Governance guards + gates (capability, anti-theatre, verify, regression)
   research/                  Research squad: multisource collector, throttle, proposals, messaging
   runtime/                   scan (learn any repo) · verify (real tests) · runner
   workstation/               Onboarding + conductor relay: runner registry, session hosts, event loop (`danza runners` / `danza conduct`)
+  product/                   Packaging & lifecycle: `danza init` scaffold, `danza doctor`, bundled install payload
   cli.py                     `danza` command the agents + hooks call
-  tests/  run_tests.sh       733 unit tests + cold-start harness
+  tests/  run_tests.sh       792 unit tests + cold-start harness
 docs/                        Design docs (architecture, ADRs, research, lexicon)
 tools/research-pipeline/     YouTube -> NotebookLM research (the external senses)
 RUNBOOK.md                   How to try DANZA on a real app
+pyproject.toml               Package metadata — pipx install => `danza` CLI
+install.sh                   Hardened curl|bash installer (pipx wrapper)
 ```
 
 ## Agent roster (role-tagged names)
@@ -115,7 +118,7 @@ Each maps to one approved upgrade; all are unit-tested (`danzaboss/tests/`). Pat
 - **Start / take a turn:** trigger phrase **"Who's the Boss?"** → `SKILL.md` spawns
   `tony-d-orchestrator`, which runs the mandatory startup (mode detection, run log,
   turn lock, load constitution).
-- **Run the test suite:** `./danzaboss/run_tests.sh` (733 tests)
+- **Run the test suite:** `./danzaboss/run_tests.sh` (792 tests)
 - **CORTEX memory:** `PYTHONPATH=. python3 -m danzaboss.cli cortex <search|get|observe|retrieve|context|age|learn|stats|index|graph|ui|mcp>` —
   repo-scoped cognitive memory at `.danza/cortex/cortex.db`, federated with the
   L4/L5 global store (`~/.danza/cortex/global.db`, or Neon via
@@ -125,6 +128,8 @@ Each maps to one approved upgrade; all are unit-tested (`danzaboss/tests/`). Pat
   `## CORTEX Context` block into each specialist's spawn prompt
   (design: `docs/superpowers/specs/2026-07-03-cortex-design.md`)
 - **Health-check:** `PYTHONPATH=. python3 -m danzaboss.cli selftest`
+- **Install as a product:** `pipx install git+https://github.com/Aduson-Inc/DANZA-OS` (or `./install.sh`);
+  then `danza init <dir>` scaffolds an app repo and `danza doctor` health-checks it.
 - **Execution profile:** `PYTHONPATH=. python3 -m danzaboss.cli profile` — which mode is active
   (OS_DEV = Layer 0, ceremony off; OS_BOOT_TEST / APP_BUILD = runtime law binds). See `docs/OS_DEV.md`.
 - **Verification tier:** `PYTHONPATH=. python3 -m danzaboss.cli tier <paths...> [--commit]` —
