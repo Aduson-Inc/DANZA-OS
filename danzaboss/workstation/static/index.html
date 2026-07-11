@@ -1,5 +1,74 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>DANZA-OS — product dashboard</title></head>
-<body><h1>DANZA-OS</h1><p>Dashboard shell lands in Task 6.</p></body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DANZA-OS — product dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpolygon points='24,4 30,16 19,38 10,38' fill='%23c8102e'/%3E%3Cpolygon points='27,18 38,38 30,38 23,26' fill='%23c8102e'/%3E%3Cpolygon points='33,6 44,26 37,26 29,12' fill='%23e8354f'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<!-- TOP BAR — same chrome as CORTEX; product tabs instead of memory tabs. -->
+<header class="topbar">
+  <div class="brand">
+    <div class="mark" id="mark" title="DANZA-OS">
+      <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+        <polygon points="24,4 30,16 19,38 10,38" fill="var(--crimson)"/>
+        <polygon points="27,18 38,38 30,38 23,26" fill="var(--crimson)"/>
+        <polygon points="33,6 44,26 37,26 29,12" fill="var(--ember)"/>
+      </svg>
+    </div>
+    <h1 class="wordmark">DANZA-OS</h1>
+    <div class="live" id="live-dot" title="live — updates as state changes">
+      <span class="live-tri"></span><span class="live-label">live</span>
+    </div>
+  </div>
+
+  <nav class="tabs" aria-label="Views">
+    <button class="tab active" data-view="overview">Overview</button>
+    <button class="tab" data-view="onboard">Onboard</button>
+    <button class="tab" data-view="models">Models</button>
+    <button class="tab" data-view="build">Build</button>
+    <a class="tab" href="cortex/">CORTEX</a>
+  </nav>
+
+  <div class="topbar-right">
+    <span class="chip mono" id="profile-chip" title="Active execution profile"></span>
+  </div>
+</header>
+
+<main class="stage">
+
+  <!-- OVERVIEW — the home screen (spec section 6). -->
+  <section class="view" id="view-overview">
+    <div class="grid" id="overview-grid"></div>
+    <h2 class="section-label">Conductor log</h2>
+    <div class="console-log mono" id="conductor-log"></div>
+  </section>
+
+  <!-- ONBOARD — read-only window; interactive forms land in Phase 3. -->
+  <section class="view" id="view-onboard" hidden>
+    <h2 class="section-label">Onboarding wizard</h2>
+    <div class="panel" id="onboard-panel"></div>
+  </section>
+
+  <!-- MODELS — read-only window; lineup + routing land in Phase 4. -->
+  <section class="view" id="view-models" hidden>
+    <h2 class="section-label">Runner registry</h2>
+    <div class="panel" id="models-panel"></div>
+  </section>
+
+  <!-- BUILD — read-only window; relay controls land in Phase 4. -->
+  <section class="view" id="view-build" hidden>
+    <h2 class="section-label">Plan</h2>
+    <div class="panel" id="build-panel"></div>
+  </section>
+</main>
+
+<script src="static/app.js"></script>
+</body>
 </html>

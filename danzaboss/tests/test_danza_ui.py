@@ -263,5 +263,42 @@ class TestCortexMount(unittest.TestCase):
             self.assertEqual(json.loads(r.read())["max_full"], 7)
 
 
+class TestDashboardStatic(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.server, cls.port = serve_in_thread(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+
+    def test_index_and_assets_served(self):
+        status, ctype, body = get(self.port, "/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", ctype)
+        self.assertIn(b"DANZA-OS", body)
+        for asset in ("/static/app.css", "/static/app.js",
+                      "/static/background.png"):
+            status, _, _ = get(self.port, asset)
+            self.assertEqual(status, 200, asset)
+
+    def test_all_five_tabs_present(self):
+        _, _, html = get(self.port, "/")
+        for marker in (b'data-view="overview"', b'data-view="onboard"',
+                       b'data-view="models"', b'data-view="build"',
+                       b'href="cortex/"'):
+            self.assertIn(marker, html)
+
+    def test_front_end_is_origin_relative(self):
+        _, _, html = get(self.port, "/")
+        self.assertNotIn(b'"/static/', html)
+        _, _, js = get(self.port, "/static/app.js")
+        self.assertNotIn(b'"/api/', js)
+        self.assertNotIn(b"`/api/", js)
+
+
 if __name__ == "__main__":
     unittest.main()
