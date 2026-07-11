@@ -32,7 +32,7 @@ The repository currently uses stdlib `unittest` through:
 PYTHONPATH=. python3 -m danzaboss.cli selftest
 ```
 
-Recent audit result: `selftest` passed 8/8. The full unittest suite discovered 672 tests in this environment, with 4 UI socket errors caused by sandbox localhost restrictions and 14 optional skips. Treat exact test counts as current-run evidence, not a hardcoded product claim.
+Recent run: `selftest` passed 8/8. The full unittest suite runs **733 tests, green (14 optional skips)** in this environment. Treat exact test counts as current-run evidence, not a hardcoded product claim.
 
 ## Installation Reality
 

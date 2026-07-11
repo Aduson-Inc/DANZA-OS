@@ -37,4 +37,4 @@ Use:
 PYTHONPATH=. python3 -m danzaboss.cli selftest
 ```
 
-Do not rely on old hardcoded counts such as 124 or 401. The recent audit discovered 672 unittest cases in this environment; `selftest` passed 8/8. The full suite needs an environment that allows localhost socket binding for CORTEX UI endpoint tests.
+Do not rely on old hardcoded counts such as 124 or 401. The suite currently runs **733 tests, green (14 optional skips)** in this environment; `selftest` passed 8/8. Some CORTEX UI endpoint tests may skip where localhost socket binding is restricted.

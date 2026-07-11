@@ -28,7 +28,7 @@ DANZA-OS is currently a real Python-based agent governance and memory toolkit wi
 | Research lanes | SCAFFOLD | Live lanes require provider/API wiring |
 | Packaging | PARTIAL | No confirmed clean install story; commands rely on repo-root `PYTHONPATH=.` |
 | Production readiness | UNVERIFIED | No hardened deployment/install path, no proved unattended app build |
-| Test documentation | DOCUMENTATION DRIFT | Older docs mention 124/401 tests; recent audit discovered 672 unittest cases |
+| Test documentation | REAL | Current run `./danzaboss/run_tests.sh` → 733 tests, green (14 skips). Live docs cite 733; older counts (124/401/672/694) survive only in archived snapshots |
 | Mona historian | RETIRED/LEGACY | Mona prompt is retired; some docs still mention Mona as owner |
 | Duplicate memory surfaces | PARTIAL/LEGACY | CORTEX coexists with older `memory/store.py` JSONL model |
 
