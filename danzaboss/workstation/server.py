@@ -31,8 +31,10 @@ from ..cortex.sqlite_backend import SqliteBackend
 from ..cortex.ui.server import CortexUIHandler
 from ..kernel.profile import active_profile
 from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
-from .planner import PLAN_JSON_RELPATH, PlanningError, parse_plan
+from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
+                      parse_plan)
 from .runners import RUNNERS_RELPATH, RunnerError, load_runners
+from .wizard import Wizard
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 DEFAULT_PORT = 33100  # CORTEX keeps 33000 (D4)
@@ -153,6 +155,40 @@ def conductor_tail(root: str, limit: int = 100) -> dict:
     return {"items": items}
 
 
+def onboarding_summary(root: str) -> dict:
+    """Wizard progress, read-only — Phase 3 turns this into /onboard forms."""
+    wiz = Wizard(root)
+    current = wiz.current_step()
+    return {"project_type": wiz.project_type(),
+            "complete": wiz.is_complete(),
+            "current_step": current.id if current else None,
+            "answered": len(wiz.answers),
+            "steps": [{"id": s.id, "kind": s.kind, "title": s.title,
+                       "status": wiz.status(s.id),
+                       "questions": len(s.questions)}
+                      for s in wiz.flow()]}
+
+
+def plan_detail(root: str) -> dict:
+    """BUILD tab payload: the validated task tree plus the human plan.md."""
+    summary = _plan_summary(root)
+    md_path = Path(root) / PLAN_MD_RELPATH
+    md = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+    tree: list[dict] = []
+    if summary is not None and "error" not in summary:
+        data, _ = _read_json(Path(root) / PLAN_JSON_RELPATH)
+
+        def node(t) -> dict:
+            return {"id": t.id, "description": t.description, "kind": t.kind,
+                    "size_est": t.size_est, "writes": list(t.writes),
+                    "verified_by": (t.verification.detail
+                                    if t.verification else None),
+                    "subtasks": [node(s) for s in t.subtasks]}
+
+        tree = [node(t) for t in parse_plan(data)]
+    return {"plan": summary, "tree": tree, "plan_md": md}
+
+
 def snapshot_token(root: str) -> str:
     """Cheap change token for SSE: mtime+size of the product state files
     (same role snapshot_version() plays for the CORTEX store)."""
@@ -204,6 +240,12 @@ class DanzaUIHandler(CortexUIHandler):
             elif route == "/api/conductor":
                 limit = int((q.get("limit") or ["100"])[0])
                 self._json(conductor_tail(self.root, limit))
+            elif route == "/api/onboarding":
+                self._json(onboarding_summary(self.root))
+            elif route == "/api/plan":
+                self._json(plan_detail(self.root))
+            elif route == "/api/runners":
+                self._json({"runners": _runner_summary(self.root)})
             elif route == "/api/events":
                 self._danza_events()
             else:

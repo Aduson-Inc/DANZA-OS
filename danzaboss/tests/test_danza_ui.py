@@ -150,6 +150,31 @@ class TestOverview(unittest.TestCase):
         items = json.loads(body)["items"]
         self.assertEqual(items[0]["event"], "session_end")
 
+    def test_onboarding_summary_reflects_wizard_state(self):
+        _, _, body = get(self.port, "/api/onboarding")
+        o = json.loads(body)
+        self.assertFalse(o["complete"])          # nothing answered yet
+        self.assertIsNone(o["project_type"])
+        self.assertEqual(o["answered"], 0)
+        self.assertTrue(o["steps"])              # the wizard FLOW renders
+        first = o["steps"][0]
+        for key in ("id", "kind", "title", "status", "questions"):
+            self.assertIn(key, first)
+        self.assertEqual(first["status"], "pending")
+
+    def test_plan_detail_carries_tree_and_md(self):
+        _, _, body = get(self.port, "/api/plan")
+        p = json.loads(body)
+        self.assertEqual(p["plan"]["leaves"], 2)
+        self.assertIn("# Build order", p["plan_md"])
+        top = p["tree"][0]
+        self.assertEqual(top["id"], "1")
+        self.assertEqual(top["subtasks"][0]["verified_by"], "pytest -k health")
+
+    def test_runners_endpoint_reports_absence(self):
+        _, _, body = get(self.port, "/api/runners")
+        self.assertIsNone(json.loads(body)["runners"])
+
 
 class TestConductorTail(unittest.TestCase):
     def setUp(self):
