@@ -147,13 +147,16 @@ def _merge_claude_md(root: Path) -> FileResult:
         return FileResult("CLAUDE.md", "created")
 
     text = path.read_text(encoding="utf-8")
-    has_begin, has_end = CLAUDE_MD_BEGIN in text, CLAUDE_MD_END in text
-    if has_begin != has_end:
+    n_begin, n_end = text.count(CLAUDE_MD_BEGIN), text.count(CLAUDE_MD_END)
+    if (n_begin, n_end) not in ((0, 0), (1, 1)):
+        # A lone or duplicated marker means a hand-mangled block; splitting
+        # on the first occurrence would silently eat user content or leave a
+        # dangling marker that corrupts every later merge. Fail closed.
         raise ScaffoldError(
-            "CLAUDE.md managed block markers are corrupt (found one of "
-            "BEGIN/END but not the other) - repair the block by hand, "
-            "then re-run danza init")
-    if has_begin:
+            f"CLAUDE.md managed block markers are corrupt "
+            f"({n_begin}x BEGIN, {n_end}x END; expected exactly one pair or "
+            f"none) - repair the block by hand, then re-run danza init")
+    if n_begin:
         pre, rest = text.split(CLAUDE_MD_BEGIN, 1)
         _machine_owned, post = rest.split(CLAUDE_MD_END, 1)
         merged = pre + block + post

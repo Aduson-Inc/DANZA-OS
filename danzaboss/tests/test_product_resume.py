@@ -37,6 +37,13 @@ class SessionStartContext(unittest.TestCase):
         self._write_handoff("   \n\n")
         self.assertIsNone(session_start_context(self.root))
 
+    def test_non_utf8_handoff_is_silent_not_crash(self):
+        d = self.root / ".danza"
+        d.mkdir(exist_ok=True)
+        (d / "handoff.md").write_bytes(b"\xff\xfe garbage \x80")
+        self.assertIsNone(session_start_context(self.root),
+                          "corrupt handoff must degrade to silence")
+
     def test_real_handoff_emits_continue_block(self):
         self._write_handoff("# Handoff\n\nTurn 4: claude -> codex. "
                             "Features 7+8 next.\n")

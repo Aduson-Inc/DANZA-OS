@@ -29,8 +29,8 @@ def session_start_context(root: str | os.PathLike = ".") -> str | None:
     (missing/unreadable handoff, blank file, or the bootstrap marker)."""
     try:
         text = (Path(root) / HANDOFF_RELPATH).read_text(encoding="utf-8")
-    except OSError:
-        return None  # not an activated repo -> stay silent
+    except (OSError, UnicodeDecodeError):
+        return None  # missing or unreadable handoff -> stay silent
     if not text.strip() or _BOOTSTRAP_MARKER in text:
         return None
     return _CONTINUE_BLOCK

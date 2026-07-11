@@ -135,6 +135,16 @@ class ClaudeMdManagedBlock(unittest.TestCase):
         with self.assertRaises(ScaffoldError):
             scaffold(self.root)
 
+    def test_duplicated_block_fails_closed(self):
+        scaffold(self.root)
+        text = self.claude_md.read_text(encoding="utf-8")
+        self.claude_md.write_text(text + "\n" + text, encoding="utf-8")
+        with self.assertRaises(ScaffoldError):
+            scaffold(self.root)
+        self.assertEqual(self.claude_md.read_text(encoding="utf-8"),
+                         text + "\n" + text,
+                         "a mangled CLAUDE.md must be left untouched")
+
 
 class ScaffoldErrors(unittest.TestCase):
     def test_missing_target_raises(self):
