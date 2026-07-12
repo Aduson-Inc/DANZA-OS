@@ -198,7 +198,7 @@ def run_interview_round(root: str | os.PathLike, step_id: str,
                                     memory=checkpoints.read_memory(root))
     try:
         reply = call_interview(command, prompt, timeout=timeout)
-    except checkpoints.CheckpointError as exc:
+    except (checkpoints.CheckpointError, InterviewError) as exc:
         record["degraded"] = True
         record["degraded_reason"] = str(exc)
         save_interview(root, data)

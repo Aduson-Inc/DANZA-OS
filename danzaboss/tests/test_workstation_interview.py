@@ -103,7 +103,6 @@ class CallTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
 
     def test_call_returns_normalized_reply(self):
-        import json as _json
         command = make_stub(self.tmp,
                             f"import json\nprint(json.dumps({UNCLEAR!r}))\n")
         out = interview.call_interview(command, "grill this")
@@ -136,7 +135,6 @@ class ControllerTests(unittest.TestCase):
         interview.begin_phase(self.root, "p1")
 
     def stub(self, payload) -> list[str]:
-        import json as _json
         return make_stub(self.root,
                          f"import json\nprint(json.dumps({payload!r}))\n")
 
@@ -194,6 +192,19 @@ class ControllerTests(unittest.TestCase):
         record = interview.run_interview_round(self.root, "p1", None)
         self.assertTrue(record["degraded"])
         self.assertIn("no headless boss", record["degraded_reason"])
+
+    def test_double_garbage_reply_degrades_and_continues(self):
+        # boss returns unparseable prose on both the first call and the
+        # retry -> call_interview's retry-path parse failure raises
+        # InterviewError, not CheckpointError; the round must still
+        # degrade instead of raising out (P3-D2: "one retry, then
+        # degraded").
+        always_garbage = make_stub(
+            self.root, "print('no json here')\n")
+        record = interview.run_interview_round(
+            self.root, "p1", always_garbage)
+        self.assertTrue(record["degraded"])
+        self.assertTrue(interview.phase_clear(record))
 
     def test_begin_phase_resets_the_grill(self):
         interview.run_interview_round(self.root, "p1", self.stub(UNCLEAR))
