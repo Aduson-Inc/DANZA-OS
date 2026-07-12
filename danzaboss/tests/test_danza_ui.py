@@ -135,14 +135,16 @@ class TestOverview(unittest.TestCase):
         self.assertEqual(status, 404)
 
     def test_post_outside_the_mount_is_rejected(self):
+        # read-only product-state guarantee is now carried by the POST
+        # route allowlist: an unrecognized POST route is a plain 404.
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/api/overview", data=b"{}",
             method="POST")
         try:
             urllib.request.urlopen(req, timeout=5)
-            self.fail("expected 405")
+            self.fail("expected 404")
         except urllib.error.HTTPError as e:
-            self.assertEqual(e.code, 405)
+            self.assertEqual(e.code, 404)
             e.close()
 
     def test_conductor_endpoint_serves_tail(self):

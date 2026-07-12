@@ -32,7 +32,9 @@ from ..cortex.sqlite_backend import SqliteBackend
 from ..cortex.ui.server import CortexUIHandler
 from ..kernel.profile import active_profile
 from ..kernel.state import StateError, TeamState
+from . import checkpoints as checkpoints_mod
 from . import interview as interview_mod
+from . import research as research_mod
 from .compiler import SPEC_RELPATH
 from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
@@ -41,7 +43,7 @@ from .runners import (RUNNERS_RELPATH, RunnerError, headless_argv,
                       load_runners)
 from .state import STATE_RELPATH
 from .tree import APP_PROJECT_TYPES
-from .wizard import Wizard
+from .wizard import Wizard, WizardError
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 DEFAULT_PORT = 33100  # CORTEX keeps 33000 (D4)
@@ -255,6 +257,103 @@ def snapshot_token(root: str) -> str:
     return "|".join(parts)
 
 
+# -- write-side actions (pure functions of root+body, unit-testable) --------
+
+class GateConflict(Exception):
+    """A write that must wait: open grill, missing verdict, wrong order."""
+
+
+def _require(body: dict, key: str, kind: type):
+    value = body.get(key)
+    if not isinstance(value, kind):
+        raise ValueError(f"body.{key} must be {kind.__name__}")
+    return value
+
+
+def post_submit(root: str, body: dict) -> dict:
+    """Phase answers in, grill round out. The submit itself is the wizard's
+    (validation + stale-downstream unchanged); the grill starts fresh on
+    every (re)submission (P3-D8)."""
+    step_id = _require(body, "step_id", str)
+    answers = _require(body, "answers", dict)
+    wiz = Wizard(root)
+    blocking = interview_mod.blocking_phase(root, wiz)
+    if blocking and blocking != step_id:
+        raise GateConflict(
+            f"phase {blocking} has open ambiguities — settle the grill first")
+    wiz.submit(step_id, answers)
+    interview_mod.begin_phase(root, step_id)
+    record = interview_mod.run_interview_round(
+        root, step_id, _headless_command(root))
+    return {"ok": True, "interview": record,
+            "onboarding": onboarding_summary(root)}
+
+
+def post_followup(root: str, body: dict) -> dict:
+    step_id = _require(body, "step_id", str)
+    answers = _require(body, "answers", dict)
+    interview_mod.record_followup_answers(root, step_id, answers)
+    record = interview_mod.run_interview_round(
+        root, step_id, _headless_command(root))
+    return {"ok": True, "interview": record,
+            "onboarding": onboarding_summary(root)}
+
+
+def post_resolve(root: str, body: dict) -> dict:
+    step_id = _require(body, "step_id", str)
+    decision = _require(body, "decision", str)
+    record = interview_mod.resolve(root, step_id, decision)
+    return {"ok": True, "interview": record,
+            "onboarding": onboarding_summary(root)}
+
+
+def post_research(root: str, body: dict) -> dict:
+    """The POST is the click, and the click IS the user approval external
+    research requires in every profile (research.py contract)."""
+    command = _headless_command(root)
+    provider = None
+    if command is not None:
+        provider = (research_mod.tavily_from_env(command)
+                    or research_mod.BossWebProvider(command))
+    digest = research_mod.run_reality_check(root, provider)
+    return {"ok": True, "digest": digest,
+            "onboarding": onboarding_summary(root)}
+
+
+def post_checkpoint(root: str, body: dict) -> dict:
+    step_id = _require(body, "step_id", str)
+    verdict = checkpoints_mod.run_checkpoint(
+        root, step_id, _headless_command(root))
+    return {"ok": True, "verdict": verdict,
+            "onboarding": onboarding_summary(root)}
+
+
+def post_approve(root: str, body: dict) -> dict:
+    """Approval stays a user act (W1 law); the grill gate holds it until
+    every submitted phase is clear (spec section 7 clarity gate)."""
+    step_id = _require(body, "step_id", str)
+    wiz = Wizard(root)
+    blocking = interview_mod.blocking_phase(root, wiz)
+    if blocking:
+        raise GateConflict(
+            f"cannot approve {step_id}: phase {blocking} has open ambiguities")
+    result = wiz.result(step_id)
+    if result is None:
+        raise GateConflict(f"cannot approve {step_id}: run the review first")
+    wiz.record_result(step_id, result, approved=True)
+    return {"ok": True, "onboarding": onboarding_summary(root)}
+
+
+_POST_ROUTES = {
+    "/api/onboard/submit": post_submit,
+    "/api/onboard/followup": post_followup,
+    "/api/onboard/resolve": post_resolve,
+    "/api/onboard/research": post_research,
+    "/api/onboard/checkpoint": post_checkpoint,
+    "/api/onboard/approve": post_approve,
+}
+
+
 # -- handler -----------------------------------------------------------------
 
 class DanzaUIHandler(CortexUIHandler):
@@ -311,13 +410,45 @@ class DanzaUIHandler(CortexUIHandler):
             except Exception:
                 pass
 
+    def _post_body(self) -> dict:
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"body is not valid JSON: {e}")
+        if not isinstance(data, dict):
+            raise ValueError("body must be a JSON object")
+        return data
+
     def do_POST(self):
         route = urllib.parse.urlparse(self.path).path
         if route.startswith("/cortex/"):
             self.path = self.path[len("/cortex"):]
             CortexUIHandler.do_POST(self)
             return
-        self._json({"error": "read-only: product state is CLI-governed"}, 405)
+        handler = _POST_ROUTES.get(route)
+        if handler is None:
+            self._json({"error": "not found"}, 404)
+            return
+        try:
+            self._json(handler(self.root, self._post_body()))
+        except GateConflict as e:
+            self._json({"error": str(e)}, 409)
+        except ValueError as e:
+            # WizardError / InterviewError / CheckpointError / ResearchError
+            # / RunnerError / PlanningError are ValueError subclasses — one
+            # honest 400 with the reason.
+            self._json({"error": str(e)}, 400)
+        except BrokenPipeError:
+            pass
+        except Exception as e:  # noqa: BLE001 — surface as JSON, never crash
+            try:
+                self._json({"error": str(e)}, 500)
+            except Exception:
+                pass
 
     def _danza_events(self) -> None:
         """SSE: refresh signal when any product state file changes."""
