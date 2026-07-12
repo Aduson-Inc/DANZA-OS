@@ -161,6 +161,7 @@ class TestOverview(unittest.TestCase):
         for key in ("id", "kind", "title", "status", "questions"):
             self.assertIn(key, first)
         self.assertEqual(first["status"], "pending")
+        self.assertIsInstance(first["questions"], list)
 
     def test_plan_detail_carries_tree_and_md(self):
         _, _, body = get(self.port, "/api/plan")
@@ -174,6 +175,64 @@ class TestOverview(unittest.TestCase):
     def test_runners_endpoint_reports_absence(self):
         _, _, body = get(self.port, "/api/runners")
         self.assertIsNone(json.loads(body)["runners"])
+
+
+class TestOnboardingDetail(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_questions_carry_render_contract(self):
+        from danzaboss.workstation.server import onboarding_summary
+        o = onboarding_summary(self.root)
+        p0 = next(s for s in o["steps"] if s["id"] == "p0")
+        q = p0["questions"][0]
+        for key in ("id", "prompt", "kind", "options", "required",
+                    "default", "value", "show_if"):
+            self.assertIn(key, q)
+        self.assertEqual(q["id"], "project_type")
+        self.assertIn("saas", q["options"])
+
+    def test_answers_show_as_values_and_interview_rides_along(self):
+        from danzaboss.workstation import interview
+        from danzaboss.workstation.server import onboarding_summary
+        from danzaboss.workstation.wizard import Wizard
+        Wizard(self.root).submit("p0", {"project_type": "saas"})
+        interview.begin_phase(self.root, "p0")
+        interview.run_interview_round(self.root, "p0", None)  # degraded
+        o = onboarding_summary(self.root)
+        p0 = next(s for s in o["steps"] if s["id"] == "p0")
+        self.assertEqual(p0["questions"][0]["value"], "saas")
+        self.assertTrue(p0["interview"]["degraded"])
+        self.assertTrue(o["app_project"])
+        self.assertFalse(o["boss_available"])
+        self.assertIsNone(o["blocking_phase"])  # degraded passes the gate
+
+    def test_snapshot_token_moves_on_interview_write(self):
+        from danzaboss.workstation import interview
+        from danzaboss.workstation.server import snapshot_token
+        before = snapshot_token(self.root)
+        interview.save_interview(self.root, {"phases": {}})
+        self.assertNotEqual(before, snapshot_token(self.root))
+
+    def test_team_state_rule45_violation_surfaces(self):
+        from danzaboss.workstation.server import _team_state
+        runtime = Path(self.root) / ".danza" / "runtime"
+        runtime.mkdir(parents=True)
+        bad = dict(TEAM_STATE, status="partying")
+        (runtime / "team-state.json").write_text(json.dumps(bad))
+        data, err = _team_state(self.root)
+        self.assertEqual(data["status"], "partying")  # still rendered
+        self.assertIn("Rule 45", err)
+
+    def test_valid_team_state_has_no_error(self):
+        from danzaboss.workstation.server import _team_state
+        runtime = Path(self.root) / ".danza" / "runtime"
+        runtime.mkdir(parents=True)
+        (runtime / "team-state.json").write_text(json.dumps(TEAM_STATE))
+        _, err = _team_state(self.root)
+        self.assertEqual(err, "")
 
 
 class TestConductorTail(unittest.TestCase):

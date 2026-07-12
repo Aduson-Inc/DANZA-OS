@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.parse
 import webbrowser
+from dataclasses import fields as dataclass_fields
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -30,11 +31,16 @@ from ..cortex.inject import est_tokens
 from ..cortex.sqlite_backend import SqliteBackend
 from ..cortex.ui.server import CortexUIHandler
 from ..kernel.profile import active_profile
+from ..kernel.state import StateError, TeamState
+from . import interview as interview_mod
+from .compiler import SPEC_RELPATH
 from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
                       parse_plan)
-from .runners import RUNNERS_RELPATH, RunnerError, load_runners
+from .runners import (RUNNERS_RELPATH, RunnerError, headless_argv,
+                      load_runners)
 from .state import STATE_RELPATH
+from .tree import APP_PROJECT_TYPES
 from .wizard import Wizard
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -61,6 +67,15 @@ def _team_state(root: str) -> tuple[Optional[dict], str]:
     data, err = _read_json(Path(root) / TEAM_STATE_RELPATH)
     if data is not None and not isinstance(data, dict):
         return None, "team-state.json is not a JSON object"
+    if isinstance(data, dict) and not err:
+        # Rule 45: the schema is machine-checkable — violations surface as
+        # a warning while the raw document still renders (read-side honesty).
+        known = {f.name for f in dataclass_fields(TeamState)}
+        try:
+            TeamState(**{k: v for k, v in data.items()
+                         if k in known}).validate()
+        except (StateError, TypeError) as e:
+            err = f"team-state schema (Rule 45): {e}"
     return data, err
 
 
@@ -156,18 +171,53 @@ def conductor_tail(root: str, limit: int = 100) -> dict:
     return {"items": items}
 
 
+def _headless_command(root: str) -> Optional[list]:
+    """Boss argv for dashboard-triggered AI calls, or None when no runner
+    is configured/headless-capable — callers degrade honestly (P3-D4)."""
+    try:
+        return headless_argv(load_runners(root))
+    except RunnerError:
+        return None
+
+
+def _question_dict(q, answers: dict) -> dict:
+    """One Question as the form-render contract: declaration + current
+    value + show_if clauses so the client can mirror branch visibility
+    (the server re-validates on submit — wizard stays authoritative)."""
+    return {"id": q.id, "prompt": q.prompt, "kind": q.kind,
+            "options": list(q.options), "required": q.required,
+            "default": q.default, "value": answers.get(q.id),
+            "show_if": [[qid, list(accepted)] for qid, accepted in q.show_if]}
+
+
 def onboarding_summary(root: str) -> dict:
-    """Wizard progress, read-only — Phase 3 turns this into /onboard forms."""
+    """Everything the ONBOARD tab needs to render forms, the grill, and
+    inline research/checkpoint results (Phase 3)."""
     wiz = Wizard(root)
+    answers = wiz.answers
+    records = interview_mod.load_interview(root)["phases"]
     current = wiz.current_step()
-    return {"project_type": wiz.project_type(),
+    steps = []
+    for s in wiz.flow():
+        entry = {"id": s.id, "kind": s.kind, "title": s.title,
+                 "status": wiz.status(s.id),
+                 "questions": [_question_dict(q, answers)
+                               for q in s.questions]}
+        if s.kind != "phase":
+            entry["result"] = wiz.result(s.id)
+        record = records.get(s.id)
+        if record is not None:
+            entry["interview"] = record
+        steps.append(entry)
+    project_type = wiz.project_type()
+    return {"project_type": project_type,
             "complete": wiz.is_complete(),
             "current_step": current.id if current else None,
-            "answered": len(wiz.answers),
-            "steps": [{"id": s.id, "kind": s.kind, "title": s.title,
-                       "status": wiz.status(s.id),
-                       "questions": len(s.questions)}
-                      for s in wiz.flow()]}
+            "answered": len(answers),
+            "blocking_phase": interview_mod.blocking_phase(root, wiz),
+            "boss_available": _headless_command(root) is not None,
+            "app_project": project_type in APP_PROJECT_TYPES,
+            "steps": steps}
 
 
 def plan_detail(root: str) -> dict:
@@ -195,7 +245,8 @@ def snapshot_token(root: str) -> str:
     (same role snapshot_version() plays for the CORTEX store)."""
     parts = []
     for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH,
-                RUNNERS_RELPATH, STATE_RELPATH):
+                RUNNERS_RELPATH, STATE_RELPATH,
+                interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH):
         try:
             st = (Path(root) / rel).stat()
             parts.append(f"{st.st_mtime_ns}:{st.st_size}")
