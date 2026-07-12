@@ -527,3 +527,25 @@ a.tab { text-decoration: none; display: inline-flex; align-items: center; }
   padding: 14px 16px;
   font-size: 12.5px;
 }
+
+/* ---------- Phase 3: onboarding forms ---------- */
+.field { margin: 12px 0; }
+.field label {
+  display: block; margin-bottom: 4px;
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--silver);
+}
+.field input[type="text"], .field textarea, .field select {
+  width: 100%; padding: 8px 10px;
+  background: var(--carbon); color: var(--text);
+  border: 1px solid var(--gunmetal); border-radius: 2px;
+  font-family: "IBM Plex Sans", sans-serif; font-size: 14px;
+}
+.field input[type="text"]:focus, .field textarea:focus, .field select:focus {
+  outline: none; border-color: var(--crimson);
+}
+.field .check { display: inline-flex; align-items: center; gap: 6px;
+  margin-right: 14px; color: var(--text); }
+button.chip { cursor: pointer; }
+.chip.warn-chip { border-color: var(--ember); color: var(--ember); }

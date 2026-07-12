@@ -368,6 +368,20 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, css = get(self.port, "/static/app.css")
         self.assertNotIn(b'url("/static/', css)
 
+    def test_onboard_form_wiring_present(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in ("api/onboard/submit", "api/onboard/followup",
+                       "api/onboard/resolve", "api/onboard/research",
+                       "api/onboard/checkpoint", "api/onboard/approve",
+                       "api/onboard/finish", "showIfMet", "collectAnswers"):
+            self.assertIn(marker, js)
+        self.assertNotIn("Read-only view — dashboard onboarding forms", js)
+
+    def test_onboard_css_form_tokens(self):
+        _, _, body = get(self.port, "/static/app.css")
+        self.assertIn(".field", body.decode())
+
 
 class TestUiCliParsing(unittest.TestCase):
     """danza ui arg parsing is pure so it tests without binding a socket."""
