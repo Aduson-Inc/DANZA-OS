@@ -196,13 +196,31 @@ def build_prompt(step_id: str, answers: dict, *,
     return "\n".join(lines)
 
 
-def run_checkpoint(root, step_id: str, command: list[str], *,
+def _degraded_verdict(concerns: list[str], reason: str) -> dict:
+    """The wizard-only-continuation verdict (spec section 4): recorded,
+    flagged, never silent."""
+    return {
+        "summary": ("checkpoint degraded: boss CLI unreachable or "
+                    "returned unusable output"),
+        "concerns": list(concerns),
+        "follow_up_questions": [],
+        "recommendation": ("wizard-only continuation; re-run this "
+                           "checkpoint when the CLI is available"),
+        "verdict": "revise",
+        "degraded": True,
+        "degraded_reason": reason,
+    }
+
+
+def run_checkpoint(root, step_id: str, command: list[str] | None, *,
                    timeout: int = 180,
                    template_dir=templates_mod.DEFAULT_DIR) -> dict:
     """Build context from the target repo, call the boss CLI, record the
     verdict on the wizard. Never passes approved=True — approval is the
     user's click (P5). An unreachable CLI records a degraded verdict so
-    onboarding can continue wizard-only, flagged (spec section 4)."""
+    onboarding can continue wizard-only, flagged (spec section 4).
+    If command is None, records the degraded verdict without attempting
+    a subprocess call."""
     wizard = Wizard(root)
     answers = wizard.answers
     concerns: list[str] = []
@@ -227,20 +245,15 @@ def run_checkpoint(root, step_id: str, command: list[str], *,
                           stack_options=stack_options,
                           memory=read_memory(root),
                           concerns=tuple(concerns))
-    try:
-        verdict = dict(call_checkpoint(command, prompt, timeout=timeout))
-        verdict["degraded"] = False
-    except CheckpointError as exc:
-        verdict = {
-            "summary": ("checkpoint degraded: boss CLI unreachable or "
-                        "returned unusable output"),
-            "concerns": list(concerns),
-            "follow_up_questions": [],
-            "recommendation": ("wizard-only continuation; re-run this "
-                               "checkpoint when the CLI is available"),
-            "verdict": "revise",
-            "degraded": True,
-            "degraded_reason": str(exc),
-        }
+    if command is None:
+        verdict = _degraded_verdict(
+            concerns, "no headless boss runner configured "
+                      "(open MODELS or run 'danza runners')")
+    else:
+        try:
+            verdict = dict(call_checkpoint(command, prompt, timeout=timeout))
+            verdict["degraded"] = False
+        except CheckpointError as exc:
+            verdict = _degraded_verdict(concerns, str(exc))
     wizard.record_result(step_id, verdict)
     return verdict
