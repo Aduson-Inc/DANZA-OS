@@ -186,8 +186,7 @@ def run_interview_round(root: str | os.PathLike, step_id: str,
         return record
     if command is None:
         record["degraded"] = True
-        record["degraded_reason"] = ("no headless boss runner configured "
-                                     "(open MODELS or run 'danza runners')")
+        record["degraded_reason"] = checkpoints.NO_BOSS_REASON
         save_interview(root, data)
         return record
     answers = wizard.answers
@@ -238,7 +237,8 @@ def record_followup_answers(root: str | os.PathLike, step_id: str,
 def resolve(root: str | os.PathLike, step_id: str, decision: str) -> dict:
     """The user's final word on escalated ambiguities. No drift beyond the
     user's stated intent — the decision is recorded verbatim and closes
-    the grill (spec section 7)."""
+    the grill (spec section 7). Deliberately callable before escalation:
+    the user may cut any open grill short with a final decision."""
     if not isinstance(decision, str) or not decision.strip():
         raise InterviewError("resolution must be non-empty text")
     data = load_interview(root)

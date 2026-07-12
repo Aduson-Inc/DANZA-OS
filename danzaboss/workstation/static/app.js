@@ -205,9 +205,14 @@ function interviewPanel(step) {
         it verbatim)</label><textarea name="decision" rows="3"></textarea></div>
         <button type="submit" class="chip">Decide</button></form>`);
   }
-  const qs = last.follow_up_questions.map((q) => `
-    <div class="field"><label>${esc(q)}</label>
-    <textarea data-fq="${esc(q)}" rows="2"></textarea></div>`).join("");
+  // a round can list ambiguities without follow-up questions — offer a
+  // generic response field so the grill never dead-ends
+  const qs = last.follow_up_questions.length
+    ? last.follow_up_questions.map((q) => `
+      <div class="field"><label>${esc(q)}</label>
+      <textarea data-fq="${esc(q)}" rows="2"></textarea></div>`).join("")
+    : `<div class="field"><label>Your response to the ambiguities above</label>
+      <textarea data-fq="response" rows="2"></textarea></div>`;
   return panel(`The grill — ${step.title} (round ${rec.rounds.length}/3)`, `
     ${ambis ? `<p class="dim">Ambiguities found:</p><ul>${ambis}</ul>` : ""}
     <form id="followup-form" data-step="${esc(step.id)}">${qs}

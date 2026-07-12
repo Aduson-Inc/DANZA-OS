@@ -29,7 +29,7 @@ from ..cortex.events import CaptureLog
 from ..cortex.identity import resolve_project
 from ..cortex.inject import est_tokens
 from ..cortex.sqlite_backend import SqliteBackend
-from ..cortex.ui.server import CortexUIHandler
+from ..cortex.ui.server import CortexUIHandler, cross_origin_reason
 from ..kernel.profile import active_profile
 from ..kernel.state import StateError, TeamState
 from . import checkpoints as checkpoints_mod
@@ -48,6 +48,12 @@ from .wizard import Wizard, WizardError
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 DEFAULT_PORT = 33100  # CORTEX keeps 33000 (D4)
+MAX_POST_BYTES = 1_048_576  # nothing the onboarding forms send comes close
+
+# Every onboarding write is a load -> mutate -> save over shared state files
+# (interview.json, answers.json); one lock serializes concurrent POSTs so a
+# curl user racing the browser cannot interleave inside a mutation.
+_POST_LOCK = threading.Lock()
 
 
 # -- read-side assemblers (pure functions of root, unit-testable) -----------
@@ -364,8 +370,7 @@ def finish_onboarding(root: str, command: Optional[list]) -> dict:
             f"phase {blocking} has open ambiguities — settle the grill first")
     if command is None:
         raise PlanningUnavailable(
-            "no headless boss runner configured — planning needs one "
-            "(open MODELS or run 'danza runners')")
+            f"{checkpoints_mod.NO_BOSS_REASON} — planning needs one")
     answers = wiz.answers
     template = None
     chosen = answers.get("stack_template")
@@ -463,6 +468,8 @@ class DanzaUIHandler(CortexUIHandler):
 
     def _post_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
+        if not 0 <= length <= MAX_POST_BYTES:
+            raise ValueError(f"body exceeds {MAX_POST_BYTES} bytes")
         raw = self.rfile.read(length) if length else b""
         if not raw:
             return {}
@@ -475,6 +482,14 @@ class DanzaUIHandler(CortexUIHandler):
         return data
 
     def do_POST(self):
+        # CSRF guard (P3 final review #2) — before routing, so the CORTEX
+        # /api/settings passthrough is covered too.
+        reason = cross_origin_reason(self.headers.get("Origin"),
+                                     self.headers.get("Host"),
+                                     self.server.server_address[1])
+        if reason:
+            self._json({"error": reason}, 403)
+            return
         route = urllib.parse.urlparse(self.path).path
         if route.startswith("/cortex/"):
             self.path = self.path[len("/cortex"):]
@@ -485,7 +500,10 @@ class DanzaUIHandler(CortexUIHandler):
             self._json({"error": "not found"}, 404)
             return
         try:
-            self._json(handler(self.root, self._post_body()))
+            body = self._post_body()
+            with _POST_LOCK:
+                result = handler(self.root, body)
+            self._json(result)
         except GateConflict as e:
             self._json({"error": str(e)}, 409)
         except ValueError as e:

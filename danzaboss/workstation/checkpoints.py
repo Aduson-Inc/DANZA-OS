@@ -27,6 +27,11 @@ JSON_CONTRACT = (
     '"recommendation": str, "verdict": "approve"|"revise"}'
 )
 
+# The one degraded-reason string for "no boss configured" — checkpoints,
+# the interview, and the finish flow all report the same absence.
+NO_BOSS_REASON = ("no headless boss runner configured "
+                  "(open MODELS or run 'danza runners')")
+
 
 class CheckpointError(ValueError):
     """The CLI answered, but not with a usable verdict (after one retry)."""
@@ -246,9 +251,7 @@ def run_checkpoint(root, step_id: str, command: list[str] | None, *,
                           memory=read_memory(root),
                           concerns=tuple(concerns))
     if command is None:
-        verdict = _degraded_verdict(
-            concerns, "no headless boss runner configured "
-                      "(open MODELS or run 'danza runners')")
+        verdict = _degraded_verdict(concerns, NO_BOSS_REASON)
     else:
         try:
             verdict = dict(call_checkpoint(command, prompt, timeout=timeout))

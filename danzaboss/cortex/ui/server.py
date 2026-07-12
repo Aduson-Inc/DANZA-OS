@@ -33,6 +33,36 @@ _MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
 DEFAULT_SETTINGS = {"port": 33000, "max_full": 5, "token_ceiling": 2000,
                     "show_economics": True}
 
+_LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+
+
+def _is_local_authority(url: str, port: int) -> bool:
+    """True when a URL's authority names this server: loopback hostname,
+    and any explicit port matches the bound one. Malformed input fails
+    closed."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return (parts.hostname in _LOCAL_HOSTNAMES
+                and parts.port in (None, port))
+    except ValueError:
+        return False
+
+
+def cross_origin_reason(origin: Optional[str], host: Optional[str],
+                        port: int) -> Optional[str]:
+    """Reason to reject a state-changing request, or None when it is local.
+
+    The 127.0.0.1 bind is the transport boundary, but a browser pokes a
+    CSRF hole through it: any web page can POST to localhost, and the
+    browser attaches an Origin header identifying the foreign page.
+    Local tools (curl, urllib) send no Origin and a loopback Host, so
+    absent headers pass."""
+    if origin is not None and not _is_local_authority(origin, port):
+        return f"cross-origin POST rejected (Origin: {origin[:100]!r})"
+    if host is not None and not _is_local_authority(f"//{host}", port):
+        return f"cross-origin POST rejected (Host: {host[:100]!r})"
+    return None
+
 
 def settings_path(root: str) -> str:
     return os.path.join(root, ".danza", "cortex", "ui-settings.json")
@@ -158,6 +188,12 @@ class CortexUIHandler(BaseHTTPRequestHandler):
                 pass
 
     def do_POST(self):
+        reason = cross_origin_reason(self.headers.get("Origin"),
+                                     self.headers.get("Host"),
+                                     self.server.server_address[1])
+        if reason:
+            self._json({"error": reason}, 403)
+            return
         if urllib.parse.urlparse(self.path).path != "/api/settings":
             self._json({"error": "read-only: memory is agent-governed"}, 405)
             return

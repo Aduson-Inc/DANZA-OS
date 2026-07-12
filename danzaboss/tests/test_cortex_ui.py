@@ -86,6 +86,23 @@ class TestCortexUI(unittest.TestCase):
         self.assertNotIn("bogus_key", saved)
         self.assertEqual(load_settings(self.root)["max_full"], 9)
 
+    def test_cross_origin_settings_write_is_rejected(self):
+        # CSRF guard: a foreign web page POSTing at the loopback server
+        # identifies itself via the browser's Origin header -> 403
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/settings",
+            data=json.dumps({"max_full": 3}).encode(),
+            headers={"Content-Type": "application/json",
+                     "Origin": "http://evil.example"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                status = r.status
+        except urllib.error.HTTPError as e:
+            status = e.code
+            e.close()
+        self.assertEqual(status, 403)
+        self.assertNotEqual(load_settings(self.root)["max_full"], 3)
+
     def test_mutation_rejected_everywhere_else(self):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/api/observations",

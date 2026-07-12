@@ -236,6 +236,18 @@ class TestOnboardingDetail(unittest.TestCase):
         _, err = _team_state(self.root)
         self.assertEqual(err, "")
 
+    def test_team_state_typeerror_surfaces_as_rule45(self):
+        # an unhashable mode raises TypeError (not StateError) inside
+        # validate() — the except must catch both (Rule 45 read-side honesty)
+        from danzaboss.workstation.server import _team_state
+        runtime = Path(self.root) / ".danza" / "runtime"
+        runtime.mkdir(parents=True)
+        bad = dict(TEAM_STATE, mode=["relay"])
+        (runtime / "team-state.json").write_text(json.dumps(bad))
+        data, err = _team_state(self.root)
+        self.assertEqual(data["mode"], ["relay"])  # still rendered
+        self.assertIn("Rule 45", err)
+
 
 class TestConductorTail(unittest.TestCase):
     def setUp(self):
@@ -328,6 +340,77 @@ class TestCortexMount(unittest.TestCase):
             headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=5) as r:
             self.assertEqual(json.loads(r.read())["max_full"], 7)
+
+
+class TestPostGuards(unittest.TestCase):
+    """CSRF Origin/Host guard + body-size cap on every POST surface."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = cls.tmp.name
+        cls.server, cls.port = serve_in_thread(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+
+    def _post(self, path, body=b"{}", headers=None):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}", data=body,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            payload = json.loads(e.read())
+            e.close()
+            return e.code, payload
+
+    def test_foreign_origin_is_rejected(self):
+        status, out = self._post("/api/onboard/submit",
+                                 headers={"Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertIn("cross-origin", out["error"])
+
+    def test_foreign_origin_rejected_on_cortex_passthrough(self):
+        status, out = self._post("/cortex/api/settings",
+                                 body=json.dumps({"max_full": 9}).encode(),
+                                 headers={"Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertIn("cross-origin", out["error"])
+
+    def test_foreign_host_is_rejected(self):
+        status, out = self._post("/api/onboard/submit",
+                                 headers={"Host": "evil.example"})
+        self.assertEqual(status, 403)
+        self.assertIn("cross-origin", out["error"])
+
+    def test_local_origin_passes_the_guard(self):
+        # reaches the route handler: {} is missing step_id, an honest 400 —
+        # proof the 403 guard let the same-origin request through
+        for origin in (f"http://127.0.0.1:{self.port}",
+                       f"http://localhost:{self.port}"):
+            status, out = self._post("/api/onboard/submit",
+                                     headers={"Origin": origin})
+            self.assertEqual(status, 400, origin)
+            self.assertIn("step_id", out["error"])
+
+    def test_absent_origin_local_host_passes(self):
+        # curl/urllib shape: no Origin, loopback Host (urllib adds it)
+        status, out = self._post("/api/onboard/submit")
+        self.assertEqual(status, 400)
+        self.assertIn("step_id", out["error"])
+
+    def test_oversized_content_length_is_400(self):
+        status, out = self._post(
+            "/api/onboard/submit",
+            headers={"Content-Length": str(2_000_000)})
+        self.assertEqual(status, 400)
+        self.assertIn("exceeds", out["error"])
 
 
 class TestDashboardStatic(unittest.TestCase):
