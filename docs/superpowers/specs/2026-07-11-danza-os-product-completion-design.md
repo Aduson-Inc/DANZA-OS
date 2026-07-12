@@ -147,6 +147,11 @@ compiles per-driver context → dashboard streams progress via SSE.
 
 ## 7. Phase 3 — Onboarding that grills
 
+> **STATUS: COMPLETE 2026-07-12 @89e29dc** (plan:
+> `docs/superpowers/plans/2026-07-12-phase3-grilling-onboarding.md`). All
+> acceptance criteria met; suite 868 green (14 skipped). Deferred-minors
+> triage recorded in `.superpowers/sdd/progress.md` under "Phase 3".
+
 - `/onboard` routes render the existing wizard flow (`tree.py` P0–P6 +
   research + checkpoints) as forms; `wizard.submit()` unchanged; revision
   rule (editing an approved phase stales downstream) surfaces in the UI.
