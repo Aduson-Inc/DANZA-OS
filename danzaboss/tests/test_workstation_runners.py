@@ -6,9 +6,11 @@ import _bootstrap  # noqa
 import copy
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from danzaboss.workstation.runners import (
     KNOWN_RUNNERS,
@@ -16,11 +18,13 @@ from danzaboss.workstation.runners import (
     SCHEMA_VERSION,
     RunnerError,
     boss_runner,
+    build_registry,
     default_config,
     detect_runners,
     headless_argv,
     interactive_argv,
     load_runners,
+    probe_auth,
     save_runners,
     validate_config,
 )
@@ -288,6 +292,87 @@ class TestCatalogV2(unittest.TestCase):
     def test_bad_activation_rejected(self):
         cfg = default_config(detect_runners(which=lambda _: None))
         cfg["runners"]["claude"]["activation"] = "telepathy"
+        with self.assertRaises(RunnerError):
+            validate_config(cfg)
+
+
+class TestProbeAuth(unittest.TestCase):
+    """P4 T2 — probe_auth with an injectable run double (never real CLIs)."""
+
+    PROMPT = "Reply with the single word: pong"
+
+    def _entry(self, detected=True, headless=None):
+        entry = copy.deepcopy(KNOWN_RUNNERS["claude"])
+        entry["detected"] = detected
+        if headless is not None:
+            entry["headless"] = headless
+        return entry
+
+    def test_probe_ok_on_zero_exit(self):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0)
+
+        entry = self._entry()
+        self.assertEqual(probe_auth(entry, run=fake_run), "ok")
+        argv, kwargs = calls[0]
+        self.assertEqual(argv, entry["headless"] + [self.PROMPT])
+        self.assertTrue(kwargs["capture_output"])
+        self.assertTrue(kwargs["text"])
+        self.assertEqual(kwargs["timeout"], 30)
+
+    def test_probe_unauthenticated_on_failure_timeout_oserror(self):
+        def nonzero(argv, **kwargs):
+            return SimpleNamespace(returncode=1)
+
+        def timeout(argv, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
+
+        def oserror(argv, **kwargs):
+            raise OSError("binary vanished between detect and probe")
+
+        for double in (nonzero, timeout, oserror):
+            with self.subTest(double=double.__name__):
+                self.assertEqual(
+                    probe_auth(self._entry(), run=double), "unauthenticated")
+
+    def test_unprobed_when_headless_empty_or_undetected(self):
+        def explode(argv, **kwargs):
+            raise AssertionError("probe must not invoke run for unprobed entries")
+
+        self.assertEqual(
+            probe_auth(self._entry(headless=[]), run=explode), "unprobed")
+        self.assertEqual(
+            probe_auth(self._entry(detected=False), run=explode), "unprobed")
+
+    def test_build_registry_stamps_auth(self):
+        def which(binary):
+            return "/usr/bin/x" if binary in ("claude", "codex") else None
+
+        def fake_run(argv, **kwargs):
+            return SimpleNamespace(returncode=0)
+
+        cfg = build_registry(which=which, run=fake_run)
+        # detected + headless-capable → probed ok
+        self.assertEqual(cfg["runners"]["claude"]["auth"], "ok")
+        # detected but headless-less → unprobed (no call made)
+        self.assertEqual(cfg["runners"]["codex"]["auth"], "unprobed")
+        # undetected → unprobed
+        self.assertEqual(cfg["runners"]["gemini"]["auth"], "unprobed")
+        # a build_registry result is a valid config as-is
+        self.assertEqual(validate_config(cfg), cfg)
+
+    def test_default_config_stamps_unprobed(self):
+        cfg = default_config({"claude": True})
+        for name, entry in cfg["runners"].items():
+            self.assertEqual(entry["auth"], "unprobed", name)
+
+    def test_unauthenticated_boss_rejected(self):
+        cfg = default_config({"claude": True})
+        self.assertEqual(cfg["boss"], "claude")
+        cfg["runners"]["claude"]["auth"] = "unauthenticated"
         with self.assertRaises(RunnerError):
             validate_config(cfg)
 

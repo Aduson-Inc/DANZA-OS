@@ -6,11 +6,12 @@ which AI CLI runners are available on the host, which one is the current boss,
 and what argv to pass for each invocation mode. This is the single source of
 truth; every other module imports from here rather than hard-coding runner names.
 
-Presence vs. auth: detect_runners checks binary presence via shutil.which.
-Confirmed authentication (e.g., a live /models ping) is deferred to the P5
-auth-probe step — it requires a network call and real credentials. Presence is
-the v1 signal; treat a detected runner as "potentially usable" until the P5
-probe confirms it is actually authed.
+Presence vs. auth: detect_runners checks binary presence via shutil.which;
+probe_auth confirms authentication by running one cheap headless no-op through
+the runner's own CLI. build_registry combines both: detect → default_config →
+probe, stamping every entry with auth ∈ ("ok", "unauthenticated", "unprobed").
+Runners without a headless argv cannot be probed and stay "unprobed" —
+potentially usable, but unconfirmed.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import copy
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Callable
 
@@ -110,6 +112,13 @@ KNOWN_RUNNERS: dict[str, dict] = {
 
 _VALID_SESSION_HOSTS = ("tmux", "headless")
 _VALID_ACTIVATIONS = ("argv", "typed")
+
+# Auth-probe prompt: a one-word reply is the cheapest possible round trip that
+# still proves the CLI can reach its backend with live credentials. Exit code
+# is the only signal read — output content is deliberately ignored so vendor
+# formatting changes cannot break the probe.
+_PROBE_PROMPT = "Reply with the single word: pong"
+_PROBE_TIMEOUT_SECONDS = 30
 _REQUIRED_RUNNER_KEYS = ("kind", "binary", "display_name", "strengths",
                          "suggested_seats", "activation",
                          "full_power_extra_argv", "interactive", "headless")
@@ -134,14 +143,35 @@ def detect_runners(
     name.  Uses *which* to locate each runner's binary — injectable so tests
     never hit the real filesystem.
 
-    Only binary presence is checked here; authenticated usability requires a
-    live /models probe (P5, out of scope for this module).
+    Only binary presence is checked here; authenticated usability is
+    probe_auth's job (it needs a real subprocess call).
 
     Entries with an empty binary (the "generic" copy-me template) are skipped
     entirely — there is nothing to look up, so they never appear as detected."""
     return {name: which(entry["binary"]) is not None
             for name, entry in KNOWN_RUNNERS.items()
             if entry["binary"]}
+
+
+def probe_auth(entry: dict, run: Callable = subprocess.run) -> str:
+    """Probe whether a runner entry is actually authenticated by running one
+    cheap headless no-op. Returns "ok", "unauthenticated", or "unprobed".
+
+    Injectable *run* mirrors detect_runners' injectable *which* — tests pass a
+    double; production uses subprocess.run. Entries that are undetected or
+    have no headless argv cannot be probed: they return "unprobed" without any
+    subprocess call. Exit 0 → "ok"; a nonzero exit, a timeout, or an OSError
+    (binary vanished between detect and probe) → "unauthenticated" — fail
+    closed rather than assuming credentials exist."""
+    if not entry.get("detected", False) or not entry["headless"]:
+        return "unprobed"
+    argv = list(entry["headless"]) + [_PROBE_PROMPT]
+    try:
+        result = run(argv, capture_output=True, text=True,
+                     timeout=_PROBE_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        return "unauthenticated"
+    return "ok" if result.returncode == 0 else "unauthenticated"
 
 
 # ---------------------------------------------------------------------------
@@ -157,13 +187,17 @@ def default_config(detected: dict[str, bool]) -> dict:
 
     Each runner entry is a deep copy of the KNOWN_RUNNERS template with a
     'detected' flag appended so callers that mutate the returned config cannot
-    corrupt the module-level constant."""
+    corrupt the module-level constant. Every entry is also stamped
+    auth="unprobed" so a default config is always a complete, valid shape —
+    build_registry upgrades the stamp for entries it can actually probe."""
     boss = next(
         (name for name in KNOWN_RUNNERS if detected.get(name, False)),
         None,
     )
     runners = {
-        name: {**copy.deepcopy(entry), "detected": detected.get(name, False)}
+        name: {**copy.deepcopy(entry),
+               "detected": detected.get(name, False),
+               "auth": "unprobed"}
         for name, entry in KNOWN_RUNNERS.items()
     }
     return {
@@ -173,6 +207,19 @@ def default_config(detected: dict[str, bool]) -> dict:
         "permission_mode": None,
         "runners": runners,
     }
+
+
+def build_registry(which: Callable = shutil.which,
+                   run: Callable = subprocess.run) -> dict:
+    """Detect runners, build a default config, then auth-probe every entry:
+    the one-call path from "empty machine" to a fully stamped registry.
+
+    probe_auth itself skips undetected or headless-less entries (they keep
+    "unprobed"), so the probe pass is safe to run over the whole table."""
+    config = default_config(detect_runners(which=which))
+    for entry in config["runners"].values():
+        entry["auth"] = probe_auth(entry, run=run)
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +294,15 @@ def validate_config(config: object) -> dict:
                     f"runner {name!r}.{argv_key} must be a list of strings; "
                     f"found non-string element"
                 )
+
+    # An unauthenticated boss can never take a turn — reject at validation
+    # time so the bad state is caught at save/load, not mid-relay. (Lineup
+    # membership checks are routing.json's job, not this file's.)
+    if boss is not None and runners[boss].get("auth") == "unauthenticated":
+        raise RunnerError(
+            f"boss {boss!r} is not logged in — open the dashboard SETUP tab "
+            f"to reconnect your agents"
+        )
 
     return config
 
