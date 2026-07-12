@@ -43,7 +43,7 @@ if "DANZA planner" in prompt:
     print(json.dumps({"spec_ref": ".danza/spec.md", "tasks": [
         {"id": "1", "description": "Walking skeleton", "subtasks": [
             {"id": "1.1", "description": "Health endpoint returns ok",
-             "kind": "build", "size_est": 20, "writes": ["app.py"],
+             "kind": "backend", "size_est": 20, "writes": ["app.py"],
              "verification": {"kind": "automated_test",
                               "detail": "pytest -k health"}}]}]}))
 elif "onboarding reviewer" in prompt:
@@ -220,6 +220,125 @@ class OnboardPostTests(unittest.TestCase):
              {"step_id": "p0", "answers": {"project_type": "saas"}})
         post(self.port, "/api/onboard/submit",
              {"step_id": "p1", "answers": P1_ANSWERS})
+
+
+ALWAYS_UNCLEAR_STUB = (
+    "import json\n"
+    "print(json.dumps({'ambiguities': ['which currency?'],"
+    " 'follow_up_questions': ['Which currency?'], 'clear': False}))\n")
+
+
+class FinishTests(unittest.TestCase):
+    """Spec section 7 acceptance: full hermetic run compiles spec + plan."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        # a real key in the environment would route research to Tavily's API
+        saved = os.environ.pop("TAVILY_API_KEY", None)
+        self.addCleanup(lambda: saved and os.environ.__setitem__(
+            "TAVILY_API_KEY", saved))
+        self.server, self.port = serve_in_thread(str(self.root))
+        self.addCleanup(self.server.shutdown)
+        self.script = install_stub_boss(self.root, SWITCHING_STUB)
+
+    def _onboard_everything(self):
+        """Drive the whole wizard over HTTP: p0 grill unclear once
+        (follow-up answered), everything else clear; research; three
+        checkpoints run + approved; p2..p5 submitted."""
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p0", "answers": {"project_type": "saas"}})
+        # first interview call was unclear -> answer and clear it
+        post(self.port, "/api/onboard/followup",
+             {"step_id": "p0", "answers": {"Which currency?": "USD"}})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p1", "answers": P1_ANSWERS})
+        post(self.port, "/api/onboard/research", {})
+        post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_concept"})
+        post(self.port, "/api/onboard/approve", {"step_id": "cp_concept"})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p2", "answers": {"capabilities": ["payments"]}})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p3", "answers": {"stack_choice": "no_preference"}})
+        post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_stack"})
+        post(self.port, "/api/onboard/approve", {"step_id": "cp_stack"})
+        post(self.port, "/api/onboard/submit", {"step_id": "p4", "answers": {}})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p5", "answers": {"repo_mode": "fresh"}})
+        post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_final"})
+        post(self.port, "/api/onboard/approve", {"step_id": "cp_final"})
+
+    def test_full_run_compiles_spec_and_plan(self):
+        self._onboard_everything()
+        status, out = post(self.port, "/api/onboard/finish", {})
+        self.assertEqual(status, 200, out)
+        spec = (self.root / ".danza" / "spec.md").read_text(encoding="utf-8")
+        self.assertIn("# Spec — Dogly", spec)
+        self.assertTrue((self.root / ".danza" / "plan.json").exists())
+        self.assertTrue((self.root / ".danza" / "plan.md").exists())
+        status, _ = post(self.port, "/api/onboard/finish", {})
+        self.assertEqual(status, 200)  # regeneration is idempotent
+
+    def test_finish_before_complete_is_409(self):
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p0", "answers": {"project_type": "saas"}})
+        status, out = post(self.port, "/api/onboard/finish", {})
+        self.assertEqual(status, 409)
+
+    def test_seed_project_cannot_finish(self):
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p0", "answers": {"project_type": "workflow"}})
+        post(self.port, "/api/onboard/followup",
+             {"step_id": "p0", "answers": {"Which currency?": "n/a"}})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p_seed", "answers": {
+                 "seed_name": "idea", "seed_intent": "a workflow thing"}})
+        status, out = post(self.port, "/api/onboard/finish", {})
+        self.assertEqual(status, 400)
+        self.assertIn("seed", out["error"].lower())
+
+    def test_escalated_resolution_reaches_spec_appendix(self):
+        # p0 clears normally through the SWITCHING_STUB's grill (unclear
+        # once, then clear after the follow-up is answered).
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p0", "answers": {"project_type": "saas"}})
+        post(self.port, "/api/onboard/followup",
+             {"step_id": "p0", "answers": {"Which currency?": "USD"}})
+        # Force cap escalation on p1: swap in a stub that is NEVER clear,
+        # so three rounds (submit + two follow-ups) exhaust MAX_ROUNDS and
+        # the interview escalates to needs_user_decision.
+        self.script.write_text(ALWAYS_UNCLEAR_STUB, encoding="utf-8")
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p1", "answers": P1_ANSWERS})
+        for _ in range(2):
+            post(self.port, "/api/onboard/followup",
+                 {"step_id": "p1", "answers": {"Which currency?": "still unsure"}})
+        status, out = post(self.port, "/api/onboard/resolve",
+                           {"step_id": "p1", "decision": "USD only"})
+        self.assertEqual(status, 200)
+        self.assertEqual(out["interview"]["resolution"], "USD only")
+        # Swap back to the well-behaved stub and complete the rest of the
+        # run exactly as _onboard_everything does from p1 onward.
+        self.script.write_text(SWITCHING_STUB, encoding="utf-8")
+        post(self.port, "/api/onboard/research", {})
+        post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_concept"})
+        post(self.port, "/api/onboard/approve", {"step_id": "cp_concept"})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p2", "answers": {"capabilities": ["payments"]}})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p3", "answers": {"stack_choice": "no_preference"}})
+        post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_stack"})
+        post(self.port, "/api/onboard/approve", {"step_id": "cp_stack"})
+        post(self.port, "/api/onboard/submit", {"step_id": "p4", "answers": {}})
+        post(self.port, "/api/onboard/submit",
+             {"step_id": "p5", "answers": {"repo_mode": "fresh"}})
+        post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_final"})
+        post(self.port, "/api/onboard/approve", {"step_id": "cp_final"})
+        status, out = post(self.port, "/api/onboard/finish", {})
+        self.assertEqual(status, 200, out)
+        spec = (self.root / ".danza" / "spec.md").read_text(encoding="utf-8")
+        self.assertIn("user decision (final): USD only", spec)
 
 
 if __name__ == "__main__":

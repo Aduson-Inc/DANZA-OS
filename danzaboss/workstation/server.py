@@ -35,10 +35,11 @@ from ..kernel.state import StateError, TeamState
 from . import checkpoints as checkpoints_mod
 from . import interview as interview_mod
 from . import research as research_mod
-from .compiler import SPEC_RELPATH
+from . import templates as templates_mod
+from .compiler import SPEC_RELPATH, compile_spec, write_spec
 from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
-                      parse_plan)
+                      PlanningUnavailable, parse_plan, run_planning)
 from .runners import (RUNNERS_RELPATH, RunnerError, headless_argv,
                       load_runners)
 from .state import STATE_RELPATH
@@ -344,6 +345,55 @@ def post_approve(root: str, body: dict) -> dict:
     return {"ok": True, "onboarding": onboarding_summary(root)}
 
 
+def finish_onboarding(root: str, command: Optional[list]) -> dict:
+    """Compile spec.md from approved answers, then run validated planning
+    (spec section 7 'Finish'). Deliberately gate-checked, fail-closed:
+    planning has no degraded mode — nothing downstream can proceed
+    without a valid plan."""
+    wiz = Wizard(root)
+    if wiz.project_type() not in APP_PROJECT_TYPES:
+        raise WizardError("seed projects capture an idea; only app "
+                          "projects (website/saas) compile a build spec")
+    if not wiz.is_complete():
+        raise GateConflict(
+            "onboarding is not complete — finish every "
+            "step (checkpoints need approval) first")
+    blocking = interview_mod.blocking_phase(root, wiz)
+    if blocking:
+        raise GateConflict(
+            f"phase {blocking} has open ambiguities — settle the grill first")
+    if command is None:
+        raise PlanningUnavailable(
+            "no headless boss runner configured — planning needs one "
+            "(open MODELS or run 'danza runners')")
+    answers = wiz.answers
+    template = None
+    chosen = answers.get("stack_template")
+    if chosen:
+        library = {t.key: t for t in templates_mod.load_templates()}
+        template = library.get(chosen)
+    research_result = (wiz.result("r_reality")
+                       if wiz.status("r_reality") == "complete" else None)
+    verdicts = {}
+    for cp_id in checkpoints_mod.CHECKPOINT_IDS:
+        result = wiz.result(cp_id)
+        if result:
+            verdicts[cp_id] = result.get("summary", "")
+    text = compile_spec(answers=answers, template=template,
+                        research=research_result, checkpoints=verdicts,
+                        open_questions=interview_mod.open_questions(root, wiz))
+    spec_path = write_spec(root, text)
+    out = run_planning(root, command)
+    out["spec"] = str(spec_path)
+    return out
+
+
+def post_finish(root: str, body: dict) -> dict:
+    out = finish_onboarding(root, _headless_command(root))
+    out.update({"ok": True, "onboarding": onboarding_summary(root)})
+    return out
+
+
 _POST_ROUTES = {
     "/api/onboard/submit": post_submit,
     "/api/onboard/followup": post_followup,
@@ -351,6 +401,7 @@ _POST_ROUTES = {
     "/api/onboard/research": post_research,
     "/api/onboard/checkpoint": post_checkpoint,
     "/api/onboard/approve": post_approve,
+    "/api/onboard/finish": post_finish,
 }
 
 
