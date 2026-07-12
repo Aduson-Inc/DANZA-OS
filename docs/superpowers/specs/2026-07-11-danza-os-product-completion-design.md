@@ -112,6 +112,18 @@ compiles per-driver context → dashboard streams progress via SSE.
 
 ## 6. Phase 2 — DANZA-OS dashboard
 
+> **STATUS: COMPLETE 2026-07-11 @20b02de** (plan:
+> `docs/superpowers/plans/2026-07-11-phase2-danza-dashboard.md`). All
+> acceptance criteria met; suite 821 green; final whole-branch review
+> READY-TO-MERGE (0 Critical; the 1 Important — SSE change token missing
+> runners.json/wizard state — fixed @0e77395). Deferred-minors triage
+> recorded in `.superpowers/sdd/progress.md` under "Phase 2": fix-later =
+> Rule-45 schema validation once the dashboard gains writes (P3/P4),
+> conductor `limit` clamp+400, reverse-seek log tail if P4 telemetry grows
+> the log, single-parse `/api/plan`, topbar overflow below ~930px; ignored
+> (with reasons) = mount-snippet duplication, taskHTML esc pattern, Google
+> Fonts CDN, positional-dir parse permutation, hidden-attr assertion.
+
 - `danza ui [--port N] [--no-open]` → `workstation/server.py`, same
   construction as `cortex/ui/server.py`: ThreadingHTTPServer, static assets
   beside the module, JSON API, SSE heartbeat. Binds `127.0.0.1` only;
