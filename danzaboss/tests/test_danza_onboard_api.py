@@ -26,6 +26,11 @@ def install_stub_boss(root: Path, body: str) -> Path:
         "version": SCHEMA_VERSION, "boss": "stub", "session_host": "headless",
         "permission_mode": None,
         "runners": {"stub": {"kind": "cli", "binary": sys.executable,
+                             "display_name": "Stub",
+                             "strengths": "",
+                             "suggested_seats": [],
+                             "activation": "argv",
+                             "full_power_extra_argv": [],
                              "interactive": [sys.executable, str(script)],
                              "headless": [sys.executable, str(script)],
                              "detected": True}}}

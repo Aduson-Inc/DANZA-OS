@@ -25,33 +25,94 @@ from typing import Callable
 # Constants
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 RUNNERS_RELPATH: Path = Path(".danza") / "runtime" / "runners.json"
 
 # Insertion order is significant: detect_runners returns results in this order,
-# and default_config picks the first detected runner as boss.
+# default_config picks the first detected runner as boss, and seat suggestion
+# (workstation.routing) resolves ties in this order.
+#
+# v2 fields: display_name/strengths feed the SETUP tab's plain-English agent
+# cards; suggested_seats drives seat auto-suggestion; activation says how an
+# ignited session receives its kickoff phrase ("argv" = appended to the command,
+# "typed" = typed into the session after launch); full_power_extra_argv is the
+# Full-Power dial's per-runner extra flags — shipped empty until each vendor
+# flag is verified safe (Decision 6, Phase 4 grilling).
 KNOWN_RUNNERS: dict[str, dict] = {
     "claude": {
-        "kind": "cli",
-        "binary": "claude",
+        "kind": "cli", "binary": "claude",
+        "display_name": "Claude Code",
+        "strengths": "Deep reasoning, complex building, careful review",
+        "suggested_seats": ["plan", "build", "review", "security"],
+        "activation": "argv",
+        "full_power_extra_argv": [],
         "interactive": ["claude"],
         "headless": ["claude", "-p", "--output-format", "json"],
     },
     "codex": {
-        # Detect-only placeholder. Headless mode is not yet supported for codex
-        # (empty list signals this). headless_argv will raise RunnerError rather
-        # than returning an empty command — callers must not attempt headless
-        # dispatch for codex until this is filled in.
-        "kind": "cli",
-        "binary": "codex",
+        # Headless mode is not yet supported for codex (empty list signals
+        # this). headless_argv will raise RunnerError rather than returning an
+        # empty command — callers must not attempt headless dispatch for codex
+        # until this is filled in.
+        "kind": "cli", "binary": "codex",
+        "display_name": "Codex",
+        "strengths": "Fast, focused code edits",
+        "suggested_seats": ["build", "qa"],
+        "activation": "argv",
+        "full_power_extra_argv": [],
         "interactive": ["codex"],
+        "headless": [],
+    },
+    "gemini": {
+        "kind": "cli", "binary": "gemini",
+        "display_name": "Gemini CLI",
+        "strengths": "Long-context research and summarizing",
+        "suggested_seats": ["research", "map"],
+        "activation": "argv",
+        "full_power_extra_argv": [],
+        "interactive": ["gemini"],
+        "headless": [],
+    },
+    "grok": {
+        "kind": "cli", "binary": "grok",
+        "display_name": "Grok CLI",
+        "strengths": "Quick answers and fast iteration",
+        "suggested_seats": ["qa", "research"],
+        "activation": "argv",
+        "full_power_extra_argv": [],
+        "interactive": ["grok"],
+        "headless": [],
+    },
+    "opencode": {
+        "kind": "cli", "binary": "opencode",
+        "display_name": "OpenCode",
+        "strengths": "Flexible open-source coding",
+        "suggested_seats": ["build", "design"],
+        "activation": "argv",
+        "full_power_extra_argv": [],
+        "interactive": ["opencode"],
+        "headless": [],
+    },
+    # Copy-me template for any other CLI. Empty binary => never detected;
+    # excluded from detect_runners results and from lineups.
+    "generic": {
+        "kind": "cli", "binary": "",
+        "display_name": "Custom agent",
+        "strengths": "",
+        "suggested_seats": [],
+        "activation": "argv",
+        "full_power_extra_argv": [],
+        "interactive": [],
         "headless": [],
     },
 }
 
 _VALID_SESSION_HOSTS = ("tmux", "headless")
-_REQUIRED_RUNNER_KEYS = ("kind", "binary", "interactive", "headless")
+_VALID_ACTIVATIONS = ("argv", "typed")
+_REQUIRED_RUNNER_KEYS = ("kind", "binary", "display_name", "strengths",
+                         "suggested_seats", "activation",
+                         "full_power_extra_argv", "interactive", "headless")
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +135,13 @@ def detect_runners(
     never hit the real filesystem.
 
     Only binary presence is checked here; authenticated usability requires a
-    live /models probe (P5, out of scope for this module)."""
+    live /models probe (P5, out of scope for this module).
+
+    Entries with an empty binary (the "generic" copy-me template) are skipped
+    entirely — there is nothing to look up, so they never appear as detected."""
     return {name: which(entry["binary"]) is not None
-            for name, entry in KNOWN_RUNNERS.items()}
+            for name, entry in KNOWN_RUNNERS.items()
+            if entry["binary"]}
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +196,8 @@ def validate_config(config: object) -> dict:
         raise RunnerError("runner config missing 'version' key")
     if version != SCHEMA_VERSION:
         raise RunnerError(
-            f"runner config version {version!r} != expected {SCHEMA_VERSION}"
+            f"runner config version {version!r} != expected {SCHEMA_VERSION} "
+            f"— open the dashboard SETUP tab to reconnect your agents"
         )
 
     runners = config.get("runners")
@@ -163,7 +229,13 @@ def validate_config(config: object) -> dict:
                 raise RunnerError(
                     f"runner {name!r} entry missing required key {key!r}"
                 )
-        for argv_key in ("interactive", "headless"):
+        if entry["activation"] not in _VALID_ACTIVATIONS:
+            raise RunnerError(
+                f"runner {name!r}.activation {entry['activation']!r} not in "
+                f"{_VALID_ACTIVATIONS!r}"
+            )
+        for argv_key in ("interactive", "headless",
+                         "suggested_seats", "full_power_extra_argv"):
             argv = entry[argv_key]
             if not isinstance(argv, list):
                 raise RunnerError(

@@ -29,20 +29,23 @@ from danzaboss.workstation.runners import (
 class TestDetectRunners(unittest.TestCase):
     """Test 1 — detect_runners with injectable which."""
 
+    DETECTABLE = ["claude", "codex", "gemini", "grok", "opencode"]
+
     def test_detect_only_claude(self):
         def stub_which(binary):
             return "/usr/bin/claude" if binary == "claude" else None
 
         result = detect_runners(which=stub_which)
-        self.assertEqual(result, {"claude": True, "codex": False})
+        self.assertEqual(
+            result, {name: name == "claude" for name in self.DETECTABLE})
 
     def test_detect_none(self):
         result = detect_runners(which=lambda _: None)
-        self.assertEqual(result, {"claude": False, "codex": False})
+        self.assertEqual(result, {name: False for name in self.DETECTABLE})
 
     def test_detect_all(self):
         result = detect_runners(which=lambda _: "/usr/bin/x")
-        self.assertEqual(result, {"claude": True, "codex": True})
+        self.assertEqual(result, {name: True for name in self.DETECTABLE})
 
 
 class TestDefaultConfig(unittest.TestCase):
@@ -240,6 +243,55 @@ class TestArgvHelpers(unittest.TestCase):
         self.assertEqual(interactive_argv(cfg), ["claude"])
 
 
+class TestCatalogV2(unittest.TestCase):
+    """P4 T1 — catalog v2: five real CLIs + generic template, v2 fields,
+    schema version bump fails closed on stale configs."""
+
+    V2_KEYS = ("display_name", "strengths", "suggested_seats",
+               "activation", "full_power_extra_argv")
+
+    def test_catalog_has_five_real_runners_plus_generic(self):
+        self.assertEqual(
+            list(KNOWN_RUNNERS),
+            ["claude", "codex", "gemini", "grok", "opencode", "generic"],
+        )
+        for name in ("claude", "codex", "gemini", "grok", "opencode"):
+            self.assertEqual(KNOWN_RUNNERS[name]["binary"], name)
+        self.assertEqual(KNOWN_RUNNERS["generic"]["binary"], "")
+
+    def test_every_entry_carries_v2_fields(self):
+        for name, entry in KNOWN_RUNNERS.items():
+            for key in self.V2_KEYS:
+                self.assertIn(key, entry, f"{name} missing {key}")
+            self.assertIsInstance(entry["display_name"], str)
+            self.assertIsInstance(entry["strengths"], str)
+            self.assertIn(entry["activation"], ("argv", "typed"))
+            for list_key in ("suggested_seats", "full_power_extra_argv"):
+                self.assertIsInstance(entry[list_key], list)
+                self.assertTrue(
+                    all(isinstance(s, str) for s in entry[list_key]),
+                    f"{name}.{list_key} must be list of str",
+                )
+
+    def test_generic_is_never_detected(self):
+        result = detect_runners(which=lambda _: "/usr/bin/x")
+        self.assertNotIn("generic", result)
+        self.assertTrue(all(result.values()))
+
+    def test_v1_config_rejected_with_setup_hint(self):
+        cfg = default_config(detect_runners(which=lambda _: None))
+        cfg["version"] = 1
+        with self.assertRaises(RunnerError) as ctx:
+            validate_config(cfg)
+        self.assertIn("SETUP", str(ctx.exception))
+
+    def test_bad_activation_rejected(self):
+        cfg = default_config(detect_runners(which=lambda _: None))
+        cfg["runners"]["claude"]["activation"] = "telepathy"
+        with self.assertRaises(RunnerError):
+            validate_config(cfg)
+
+
 class TestKnownRunners(unittest.TestCase):
     """Sanity-checks on the KNOWN_RUNNERS constant."""
 
@@ -257,8 +309,8 @@ class TestKnownRunners(unittest.TestCase):
         self.assertEqual(c["interactive"], ["codex"])
         self.assertEqual(c["headless"], [])
 
-    def test_schema_version_is_1(self):
-        self.assertEqual(SCHEMA_VERSION, 1)
+    def test_schema_version_is_2(self):
+        self.assertEqual(SCHEMA_VERSION, 2)
 
 
 if __name__ == "__main__":
