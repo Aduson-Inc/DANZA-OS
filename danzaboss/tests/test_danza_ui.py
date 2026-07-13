@@ -2,6 +2,8 @@
 real CORTEX UI under /cortex/*, and stays read-only outside the mount."""
 import json
 import os
+import signal
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -15,6 +17,8 @@ from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
 from danzaboss.workstation import server as server_mod
+from danzaboss.workstation.conductor import (PIDFILE_RELPATH as
+                                             CONDUCTOR_PIDFILE, session_name)
 from danzaboss.workstation.routing import ROUTING_RELPATH, SEAT_WORK_TYPES
 from danzaboss.workstation.runners import (KNOWN_RUNNERS, RUNNERS_RELPATH,
                                            SCHEMA_VERSION, default_config)
@@ -714,6 +718,139 @@ class TestSetupApi(unittest.TestCase):
         self.assertNotEqual(t0, t1)
         (Path(self.root) / BUDGETS_RELPATH).write_text("{}")
         self.assertNotEqual(t1, snapshot_token(self.root))
+
+
+class TestBuildApi(unittest.TestCase):
+    """Phase 4 T9: /api/build — managed relay start/stop + live state.
+
+    The seam tests call the handlers directly (popen/kill/alive keyword
+    seams) so no test ever spawns or signals a real process; the HTTP
+    tests double the module-level _SESSION_HOST factory the same way
+    TestSetupApi doubles _BUILD_REGISTRY."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def _pidfile(self, pid):
+        path = Path(self.root) / CONDUCTOR_PIDFILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{pid}\n")
+
+    def _get(self, port, path):
+        try:
+            return get(port, path)[0]
+        except urllib.error.HTTPError as e:
+            e.close()
+            return e.code
+
+    def test_start_spawns_the_managed_conduct_subprocess(self):
+        calls = {}
+
+        class Proc:
+            pid = 4242
+
+        def fake_popen(argv, **kwargs):
+            calls["argv"] = argv
+            calls["kwargs"] = kwargs
+            return Proc()
+
+        out = server_mod.post_build_start(self.root, {}, popen=fake_popen)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["pid"], 4242)
+        self.assertEqual(calls["argv"], [sys.executable, "-m",
+                                         "danzaboss.cli", "conduct",
+                                         self.root])
+        self.assertTrue(calls["kwargs"]["start_new_session"])
+        # the detached conductor's output lands in a tailable log file
+        log = Path(self.root) / ".danza" / "runtime" / "conduct-ui.log"
+        self.assertTrue(log.exists())
+
+    def test_double_start_is_a_conflict(self):
+        self._pidfile(1234)
+
+        def exploding_popen(*a, **k):
+            raise AssertionError("must not spawn a second conductor")
+
+        with self.assertRaises(server_mod.GateConflict):
+            server_mod.post_build_start(self.root, {},
+                                        popen=exploding_popen,
+                                        alive=lambda pid: True)
+
+    def test_stale_pidfile_does_not_block_start(self):
+        self._pidfile(1234)
+
+        class Proc:
+            pid = 4242
+
+        out = server_mod.post_build_start(self.root, {},
+                                          popen=lambda *a, **k: Proc(),
+                                          alive=lambda pid: False)
+        self.assertTrue(out["ok"])
+
+    def test_stop_sigterms_the_recorded_pid(self):
+        self._pidfile(4242)
+        killed = []
+        out = server_mod.post_build_stop(
+            self.root, {}, kill=lambda pid, sig: killed.append((pid, sig)),
+            alive=lambda pid: True)
+        self.assertTrue(out["ok"])
+        self.assertEqual(killed, [(4242, signal.SIGTERM)])
+
+    def test_stop_when_not_running_is_a_conflict(self):
+        with self.assertRaises(server_mod.GateConflict):  # no pidfile at all
+            server_mod.post_build_stop(self.root, {})
+        self._pidfile(4242)  # pidfile holding a dead pid
+        with self.assertRaises(server_mod.GateConflict):
+            server_mod.post_build_stop(self.root, {},
+                                       alive=lambda pid: False)
+
+    def test_build_endpoint_reports_running_state_and_tails(self):
+        seed_activated_repo(self.root)
+        self._pidfile(os.getpid())  # a live pid: the relay reads as running
+
+        class FakeHost:
+            def alive(self, name):
+                return True
+
+            def tail(self, name, lines=40):
+                return "boss output"
+
+        saved = server_mod._SESSION_HOST
+        server_mod._SESSION_HOST = lambda root: FakeHost()
+        self.addCleanup(lambda: setattr(server_mod, "_SESSION_HOST", saved))
+        server, port = serve_in_thread(self.root)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        status, _, raw = get(port, "/api/build")
+        self.assertEqual(status, 200)
+        o = json.loads(raw)
+        self.assertTrue(o["running"])
+        self.assertEqual(o["team_state"]["current_boss"], "claude")
+        self.assertEqual(o["session"]["name"], session_name(self.root))
+        self.assertTrue(o["session"]["alive"])
+        self.assertEqual(o["session"]["tail"], "boss output")
+        self.assertEqual(o["conductor"][0]["event"], "session_end")
+
+    def test_build_summary_degrades_without_a_host(self):
+        # no runners.json -> no resolvable host; every piece renders as
+        # honest absence, never a crash
+        o = server_mod.build_summary(self.root)
+        self.assertFalse(o["running"])
+        self.assertEqual(o["session"], {"name": session_name(self.root),
+                                        "alive": False, "tail": ""})
+        self.assertIsNone(o["team_state"])
+        self.assertEqual(o["conductor"], [])
+
+    def test_conductor_limit_rejects_out_of_range(self):
+        server, port = serve_in_thread(self.root)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        for bad in ("0", "5000", "abc", "-3"):
+            self.assertEqual(self._get(port, f"/api/conductor?limit={bad}"),
+                             400, bad)
+        self.assertEqual(self._get(port, "/api/conductor?limit=5"), 200)
 
 
 class TestUiCliParsing(unittest.TestCase):

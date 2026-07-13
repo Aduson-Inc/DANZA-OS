@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -22,7 +25,7 @@ import webbrowser
 from dataclasses import fields as dataclass_fields
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from ..cortex import budgets as budgets_mod
 from ..cortex import commands as cortex_commands
@@ -39,7 +42,9 @@ from . import research as research_mod
 from . import routing as routing_mod
 from . import templates as templates_mod
 from .compiler import SPEC_RELPATH, compile_spec, write_spec
-from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
+from .conductor import (LOG_RELPATH, PIDFILE_RELPATH, TEAM_STATE_RELPATH,
+                        _pid_alive, session_name)
+from .hosts import HeadlessHost, HostError, TmuxHost, pick_host
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
                       PlanningUnavailable, parse_plan, run_planning)
 from .runners import (RUNNERS_RELPATH, RunnerError, build_registry,
@@ -224,6 +229,58 @@ def conductor_tail(root: str, limit: int = 100) -> dict:
             items.append({"event": "unparseable", "raw": line[:200]})
     items.reverse()
     return {"items": items}
+
+
+def _conductor_pid(root: str) -> Optional[int]:
+    """The pid recorded by the conductor's own pidfile, or None. The
+    conductor's acquire_pidfile stays the single-instance authority —
+    dashboard reads are a fast-path courtesy, never a second lock."""
+    path = Path(root) / PIDFILE_RELPATH
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    return int(text) if text.isdigit() else None
+
+
+def _session_host(root: str):
+    """The configured session host, or None when no registry exists yet —
+    the BUILD tab degrades honestly instead of guessing tmux."""
+    try:
+        host_type = pick_host(load_runners(root)["session_host"])
+    except (RunnerError, HostError):
+        return None
+    if host_type == "tmux":
+        return TmuxHost()
+    return HeadlessHost(log_dir=Path(root) / ".danza" / "runtime")
+
+
+# module-level seam (the detect_runners(which=...) idiom) so HTTP tests
+# can double the host without a tmux on the box
+_SESSION_HOST = _session_host
+
+
+def build_summary(root: str,
+                  alive: Callable[[int], bool] = _pid_alive) -> dict:
+    """Everything the BUILD tab's live strip needs: relay running-state,
+    team-state, boss session tail, recent conductor events."""
+    name = session_name(root)
+    session = {"name": name, "alive": False, "tail": ""}
+    host = _SESSION_HOST(root)
+    if host is not None:
+        try:
+            session["alive"] = bool(host.alive(name))
+            session["tail"] = host.tail(name)
+        except (HostError, OSError):
+            pass  # a missing tmux reads as a dead session, not a crash
+    pid = _conductor_pid(root)
+    team, team_err = _team_state(root)
+    out = {"running": pid is not None and alive(pid),
+           "team_state": team,
+           "session": session,
+           "conductor": conductor_tail(root, 50)["items"]}
+    if team_err:
+        out["team_state_error"] = team_err
+    return out
 
 
 def _headless_command(root: str) -> Optional[list]:
@@ -554,8 +611,46 @@ def post_finish(root: str, body: dict) -> dict:
     return out
 
 
+CONDUCT_LOG_RELPATH = Path(".danza") / "runtime" / "conduct-ui.log"
+
+
+def post_build_start(root: str, body: dict,
+                     popen: Callable = subprocess.Popen,
+                     alive: Callable[[int], bool] = _pid_alive) -> dict:
+    """Start the relay: spawn `danza conduct` detached, output to a
+    tailable log. A live pidfile refuses fast here, but the conductor's
+    own acquire_pidfile remains the single-instance authority — this
+    check is a courtesy, not a second lock."""
+    pid = _conductor_pid(root)
+    if pid is not None and alive(pid):
+        raise GateConflict("the build crew is already running")
+    log_path = Path(root) / CONDUCT_LOG_RELPATH
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    # append mode: a restarted relay extends the evidence, never truncates
+    with open(log_path, "ab") as log:
+        proc = popen([sys.executable, "-m", "danzaboss.cli",
+                      "conduct", root],
+                     stdout=log, stderr=subprocess.STDOUT,
+                     start_new_session=True)
+    return {"ok": True, "pid": proc.pid}
+
+
+def post_build_stop(root: str, body: dict,
+                    kill: Callable = os.kill,
+                    alive: Callable[[int], bool] = _pid_alive) -> dict:
+    """Stop the relay with SIGTERM only — the conductor's `finally`
+    releases its own pidfile, so a clean shutdown leaves no stale lock."""
+    pid = _conductor_pid(root)
+    if pid is None or not alive(pid):
+        raise GateConflict("the build crew is not running")
+    kill(pid, signal.SIGTERM)
+    return {"ok": True, "pid": pid}
+
+
 _POST_ROUTES = {
     "/api/setup": post_setup,
+    "/api/build/start": post_build_start,
+    "/api/build/stop": post_build_stop,
     "/api/onboard/submit": post_submit,
     "/api/onboard/followup": post_followup,
     "/api/onboard/resolve": post_resolve,
@@ -602,8 +697,18 @@ class DanzaUIHandler(CortexUIHandler):
             elif route == "/api/overview":
                 self._json(overview(self.root))
             elif route == "/api/conductor":
-                limit = int((q.get("limit") or ["100"])[0])
-                self._json(conductor_tail(self.root, limit))
+                raw = (q.get("limit") or ["100"])[0]
+                try:
+                    limit = int(raw)
+                except ValueError:
+                    limit = 0  # non-integers fall into the range rejection
+                if not 1 <= limit <= 1000:
+                    self._json({"error": "limit must be an integer "
+                                         "between 1 and 1000"}, 400)
+                else:
+                    self._json(conductor_tail(self.root, limit))
+            elif route == "/api/build":
+                self._json(build_summary(self.root))
             elif route == "/api/setup":
                 self._json(setup_summary(self.root))
             elif route == "/api/onboarding":
