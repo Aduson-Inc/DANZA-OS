@@ -9,17 +9,22 @@ import urllib.request
 from pathlib import Path
 
 import _bootstrap  # noqa
+from danzaboss.workstation.routing import ROUTING_RELPATH, SEAT_WORK_TYPES
 from danzaboss.workstation.runners import RUNNERS_RELPATH, SCHEMA_VERSION
 from danzaboss.workstation.server import serve_in_thread
 from danzaboss.workstation.wizard import Wizard
 
 
-def install_stub_boss(root: Path, body: str) -> Path:
-    """Register a stub python script as the repo's headless boss runner.
+def install_stub_boss(root: Path, body: str, headless: bool = True) -> Path:
+    """Register a stub python script as the repo's headless boss runner and
+    confirm it as the whole team (routing.json) so the Phase 4 setup-first
+    gate lets onboarding POSTs through.
 
     validate_config accepts arbitrary runner names, so tests point the
     'boss' at a local script — the same injectable-argv seam
-    checkpoints.run_headless was designed around."""
+    checkpoints.run_headless was designed around. headless=False registers
+    the stub with no headless argv: setup is complete but every AI call
+    degrades honestly (boss_available False)."""
     script = root / "stub_boss.py"
     script.write_text(body, encoding="utf-8")
     config = {
@@ -32,11 +37,16 @@ def install_stub_boss(root: Path, body: str) -> Path:
                              "activation": "argv",
                              "full_power_extra_argv": [],
                              "interactive": [sys.executable, str(script)],
-                             "headless": [sys.executable, str(script)],
+                             "headless": ([sys.executable, str(script)]
+                                          if headless else []),
                              "detected": True}}}
     path = root / RUNNERS_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config), encoding="utf-8")
+    routing = {"version": 1, "lineup": ["stub"],
+               "seats": {"conductor": "builtin",
+                         **{wt: "stub" for wt in SEAT_WORK_TYPES}}}
+    (root / ROUTING_RELPATH).write_text(json.dumps(routing), encoding="utf-8")
     return script
 
 
@@ -154,8 +164,10 @@ class OnboardPostTests(unittest.TestCase):
         self.assertIsNone(out["onboarding"]["blocking_phase"])
 
     def test_research_without_provider_records_skip(self):
-        # NO runners.json and no TAVILY key: the grill degrades (gate
-        # passes) and research honestly records the skipped digest
+        # headless-less boss and no TAVILY key: setup is confirmed (the
+        # Phase 4 gate passes) but the grill degrades and research honestly
+        # records the skipped digest
+        install_stub_boss(self.root, CLEAR_BODY, headless=False)
         saved = os.environ.pop("TAVILY_API_KEY", None)
         self.addCleanup(lambda: saved and os.environ.__setitem__(
             "TAVILY_API_KEY", saved))

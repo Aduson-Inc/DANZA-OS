@@ -10,9 +10,14 @@ from pathlib import Path
 
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
+from danzaboss.cortex.budgets import BUDGETS_RELPATH
 from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
+from danzaboss.workstation import server as server_mod
+from danzaboss.workstation.routing import ROUTING_RELPATH, SEAT_WORK_TYPES
+from danzaboss.workstation.runners import (KNOWN_RUNNERS, RUNNERS_RELPATH,
+                                           SCHEMA_VERSION, default_config)
 from danzaboss.workstation.server import (conductor_tail, overview,
                                           serve_in_thread, snapshot_token)
 
@@ -20,6 +25,20 @@ from danzaboss.workstation.server import (conductor_tail, overview,
 def get(port, path):
     with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as r:
         return r.status, r.headers.get("Content-Type", ""), r.read()
+
+
+def post(port, path, body):
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        payload = json.loads(e.read())
+        e.close()
+        return e.code, payload
 
 
 TEAM_STATE = {
@@ -390,20 +409,21 @@ class TestPostGuards(unittest.TestCase):
         self.assertIn("cross-origin", out["error"])
 
     def test_local_origin_passes_the_guard(self):
-        # reaches the route handler: {} is missing step_id, an honest 400 —
-        # proof the 403 guard let the same-origin request through
+        # reaches the route handler: this root has no confirmed setup, so
+        # the Phase 4 gate answers 409 — proof the 403 guard let the
+        # same-origin request through (a rejected origin never routes)
         for origin in (f"http://127.0.0.1:{self.port}",
                        f"http://localhost:{self.port}"):
             status, out = self._post("/api/onboard/submit",
                                      headers={"Origin": origin})
-            self.assertEqual(status, 400, origin)
-            self.assertIn("step_id", out["error"])
+            self.assertEqual(status, 409, origin)
+            self.assertIn("Setup", out["error"])
 
     def test_absent_origin_local_host_passes(self):
         # curl/urllib shape: no Origin, loopback Host (urllib adds it)
         status, out = self._post("/api/onboard/submit")
-        self.assertEqual(status, 400)
-        self.assertIn("step_id", out["error"])
+        self.assertEqual(status, 409)
+        self.assertIn("Setup", out["error"])
 
     def test_oversized_content_length_is_400(self):
         status, out = self._post(
@@ -464,6 +484,208 @@ class TestDashboardStatic(unittest.TestCase):
     def test_onboard_css_form_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         self.assertIn(".field", body.decode())
+
+
+def fake_registry(auth=None, detected=("claude", "gemini")):
+    """A build_registry double: no shutil.which, no subprocess, controlled
+    detected/auth stamps."""
+    config = default_config({name: name in detected for name in KNOWN_RUNNERS})
+    for entry in config["runners"].values():
+        if entry["detected"]:
+            entry["auth"] = "ok"
+    for name, value in (auth or {}).items():
+        config["runners"][name]["auth"] = value
+    return config
+
+
+def team_seats(runner="claude", **assign):
+    """All nine seats: built-in conductor, *runner* everywhere unless
+    overridden per work type."""
+    seats = {"conductor": "builtin"}
+    for work_type in SEAT_WORK_TYPES:
+        seats[work_type] = assign.get(work_type, runner)
+    return seats
+
+
+def seed_confirmed_setup(root):
+    """runners.json + routing.json for a repo whose team is already
+    confirmed — a stub runner with NO headless argv, so nothing the
+    onboarding routes do afterwards can spawn a real subprocess."""
+    runtime = Path(root) / ".danza" / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    config = {"version": SCHEMA_VERSION, "boss": "stub",
+              "session_host": "headless", "permission_mode": None,
+              "runners": {"stub": {
+                  "kind": "cli", "binary": "stub",
+                  "display_name": "Stub", "strengths": "",
+                  "suggested_seats": [], "activation": "argv",
+                  "full_power_extra_argv": [], "interactive": ["stub"],
+                  "headless": [], "detected": True, "auth": "unprobed"}}}
+    (Path(root) / RUNNERS_RELPATH).write_text(json.dumps(config))
+    routing = {"version": 1, "lineup": ["stub"], "seats": team_seats("stub")}
+    (Path(root) / ROUTING_RELPATH).write_text(json.dumps(routing))
+
+
+class TestSetupApi(unittest.TestCase):
+    """Phase 4 T5: /api/setup + the hard setup-first gate (Decisions 1, 7)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+        # module-level seams (the detect_runners(which=...) idiom): tests
+        # must never probe the host's real CLIs
+        self._saved = (server_mod._BUILD_REGISTRY, server_mod._REGISTRY_CLOCK)
+        server_mod._BUILD_REGISTRY = fake_registry
+        server_mod._reset_registry_cache()
+        self.addCleanup(self._restore_seams)
+        self.server, self.port = serve_in_thread(self.root)
+        self.addCleanup(self.server.shutdown)
+
+    def _restore_seams(self):
+        server_mod._BUILD_REGISTRY, server_mod._REGISTRY_CLOCK = self._saved
+        server_mod._reset_registry_cache()
+
+    def test_get_setup_reports_agents_and_suggested_seats(self):
+        status, _, raw = get(self.port, "/api/setup")
+        self.assertEqual(status, 200)
+        o = json.loads(raw)
+        names = [a["name"] for a in o["agents"]]
+        # five real catalog entries; the generic copy-me template is no card
+        self.assertEqual(names, ["claude", "codex", "gemini", "grok",
+                                 "opencode"])
+        claude = o["agents"][0]
+        self.assertEqual(claude["display_name"], "Claude Code")
+        self.assertTrue(claude["detected"])
+        self.assertEqual(claude["auth"], "ok")
+        codex = o["agents"][1]
+        self.assertFalse(codex["detected"])
+        self.assertEqual(codex["auth"], "unprobed")
+        # routing.json absent -> strengths-based suggestion fills the seats
+        self.assertEqual(o["lineup"], ["claude", "gemini"])
+        self.assertEqual(o["seats"]["conductor"], "builtin")
+        self.assertEqual(o["seats"]["build"], "claude")
+        self.assertEqual(o["seats"]["research"], "gemini")
+        self.assertEqual(o["seats"]["map"], "gemini")
+        self.assertEqual(o["dial"], "normal")
+        self.assertEqual(o["conductor"], "builtin")
+        self.assertEqual(o["overrides"], {})
+        self.assertEqual(o["floors"]["jonathan-builder"], 600)
+        self.assertEqual(o["floors"]["bonnie-qa"], 400)
+        self.assertFalse(o["setup_complete"])
+
+    def test_post_setup_writes_all_three_files(self):
+        body = {"lineup": ["claude", "gemini"],
+                "seats": team_seats("claude", research="gemini",
+                                    map="gemini"),
+                "dial": "full_power", "overrides": {"bonnie-qa": 1000}}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 200, out)
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["setup"]["setup_complete"])
+        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH, BUDGETS_RELPATH):
+            self.assertTrue((Path(self.root) / rel).exists(), rel)
+        saved = json.loads((Path(self.root) / RUNNERS_RELPATH).read_text())
+        self.assertEqual(saved["boss"], "claude")  # boss = lineup[0]
+
+    def test_persisted_seats_win_over_suggestion(self):
+        body = {"lineup": ["claude", "gemini"],
+                "seats": team_seats("gemini", plan="claude"),
+                "dial": "normal"}
+        status, _ = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 200)
+        _, _, raw = get(self.port, "/api/setup")
+        o = json.loads(raw)
+        self.assertEqual(o["seats"], body["seats"])
+        self.assertEqual(o["lineup"], ["claude", "gemini"])
+        self.assertTrue(o["setup_complete"])
+
+    def test_post_rejects_six_runner_lineup(self):
+        body = {"lineup": ["claude", "codex", "gemini", "grok", "opencode",
+                           "generic"],
+                "seats": team_seats("claude"), "dial": "normal"}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 400)
+        self.assertIn("1-5", out["error"])
+
+    def test_post_rejects_unauthenticated_seat(self):
+        server_mod._BUILD_REGISTRY = \
+            lambda: fake_registry(auth={"claude": "unauthenticated"})
+        server_mod._reset_registry_cache()
+        body = {"lineup": ["claude"], "seats": team_seats("claude"),
+                "dial": "normal"}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 400)
+        self.assertIn("not logged in", out["error"])
+
+    def test_post_rejects_sub_floor_override_and_writes_nothing(self):
+        body = {"lineup": ["claude"], "seats": team_seats("claude"),
+                "dial": "normal", "overrides": {"bonnie-qa": 100}}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 400)
+        self.assertIn("floor", out["error"])
+        # every payload validates BEFORE anything is written: a rejected
+        # confirm must leave no torn multi-file state
+        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH, BUDGETS_RELPATH):
+            self.assertFalse((Path(self.root) / rel).exists(), rel)
+
+    def test_registry_cache_ttl_and_post_reprobes(self):
+        calls = []
+        clock = {"now": 1000.0}
+
+        def counting_build():
+            calls.append(1)
+            return fake_registry()
+
+        server_mod._BUILD_REGISTRY = counting_build
+        server_mod._REGISTRY_CLOCK = lambda: clock["now"]
+        server_mod._reset_registry_cache()
+        server_mod.setup_summary(self.root)
+        server_mod.setup_summary(self.root)
+        self.assertEqual(len(calls), 1)   # second read inside the TTL: cached
+        clock["now"] += 61.0
+        server_mod.setup_summary(self.root)
+        self.assertEqual(len(calls), 2)   # TTL expired: rebuilt
+        server_mod.post_setup(self.root, {
+            "lineup": ["claude"], "seats": team_seats("claude"),
+            "dial": "normal"})
+        self.assertEqual(len(calls), 3)   # POST always re-probes fresh
+
+    def test_onboarding_posts_409_until_setup_confirmed(self):
+        status, out = post(self.port, "/api/onboard/submit",
+                           {"step_id": "p0",
+                            "answers": {"project_type": "saas"}})
+        self.assertEqual(status, 409)
+        self.assertIn("Setup", out["error"])
+        seed_confirmed_setup(self.root)
+        status, out = post(self.port, "/api/onboard/submit",
+                           {"step_id": "p0",
+                            "answers": {"project_type": "saas"}})
+        self.assertEqual(status, 200, out)  # degraded grill: no headless argv
+
+    def test_onboarding_summary_carries_setup_complete(self):
+        _, _, raw = get(self.port, "/api/onboarding")
+        self.assertFalse(json.loads(raw)["setup_complete"])
+        seed_confirmed_setup(self.root)
+        _, _, raw = get(self.port, "/api/onboarding")
+        self.assertTrue(json.loads(raw)["setup_complete"])
+
+    def test_overview_runners_block_carries_team(self):
+        seed_confirmed_setup(self.root)
+        runners = overview(self.root)["runners"]
+        self.assertEqual(runners["lineup"], ["stub"])
+        self.assertEqual(runners["seats"]["build"], "stub")
+        self.assertEqual(runners["dial"], "normal")
+
+    def test_snapshot_token_moves_on_routing_and_budgets_writes(self):
+        t0 = snapshot_token(self.root)
+        runtime = Path(self.root) / ".danza" / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        (Path(self.root) / ROUTING_RELPATH).write_text("{}")
+        t1 = snapshot_token(self.root)
+        self.assertNotEqual(t0, t1)
+        (Path(self.root) / BUDGETS_RELPATH).write_text("{}")
+        self.assertNotEqual(t1, snapshot_token(self.root))
 
 
 class TestUiCliParsing(unittest.TestCase):

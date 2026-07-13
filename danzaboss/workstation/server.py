@@ -24,6 +24,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
 
+from ..cortex import budgets as budgets_mod
 from ..cortex import commands as cortex_commands
 from ..cortex.events import CaptureLog
 from ..cortex.identity import resolve_project
@@ -35,13 +36,14 @@ from ..kernel.state import StateError, TeamState
 from . import checkpoints as checkpoints_mod
 from . import interview as interview_mod
 from . import research as research_mod
+from . import routing as routing_mod
 from . import templates as templates_mod
 from .compiler import SPEC_RELPATH, compile_spec, write_spec
 from .conductor import LOG_RELPATH, TEAM_STATE_RELPATH
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
                       PlanningUnavailable, parse_plan, run_planning)
-from .runners import (RUNNERS_RELPATH, RunnerError, headless_argv,
-                      load_runners)
+from .runners import (RUNNERS_RELPATH, RunnerError, build_registry,
+                      headless_argv, load_runners, save_runners)
 from .state import STATE_RELPATH
 from .tree import APP_PROJECT_TYPES
 from .wizard import Wizard, WizardError
@@ -54,6 +56,36 @@ MAX_POST_BYTES = 1_048_576  # nothing the onboarding forms send comes close
 # (interview.json, answers.json); one lock serializes concurrent POSTs so a
 # curl user racing the browser cannot interleave inside a mutation.
 _POST_LOCK = threading.Lock()
+
+# GET /api/setup must not block the dashboard behind five auth-probe
+# subprocesses on every poll, so the live registry is cached for a short TTL.
+# Builder and clock are module-level seams (the detect_runners(which=...)
+# idiom) so tests double them without ever touching the host's real CLIs.
+_BUILD_REGISTRY = build_registry
+_REGISTRY_CLOCK = time.monotonic
+_REGISTRY_TTL_SECONDS = 60.0
+_registry_cache: dict = {"at": 0.0, "config": None}
+
+
+def _reset_registry_cache() -> None:
+    _registry_cache.update(at=0.0, config=None)
+
+
+def _live_registry(fresh: bool = False) -> dict:
+    """The auth-probed runner registry, cached for _REGISTRY_TTL_SECONDS.
+
+    fresh=True (POST /api/setup) rebuilds unconditionally — a team confirm
+    must never validate seats against stale auth. The fresh result still
+    lands in the cache so the summary rendered from the POST response
+    agrees with it."""
+    now = _REGISTRY_CLOCK()
+    cached = _registry_cache["config"]
+    if (not fresh and cached is not None
+            and now - _registry_cache["at"] < _REGISTRY_TTL_SECONDS):
+        return cached
+    config = _BUILD_REGISTRY()
+    _registry_cache.update(at=now, config=config)
+    return config
 
 
 # -- read-side assemblers (pure functions of root, unit-testable) -----------
@@ -122,10 +154,24 @@ def _runner_summary(root: str) -> Optional[dict]:
         config = load_runners(root)
     except RunnerError as e:
         return {"error": str(e)}
-    return {"boss": config.get("boss"),
-            "session_host": config.get("session_host"),
-            "detected": sorted(n for n, e in config.get("runners", {}).items()
-                               if e.get("detected"))}
+    summary = {"boss": config.get("boss"),
+               "session_host": config.get("session_host"),
+               "detected": sorted(n for n, e in config.get("runners", {}).items()
+                                  if e.get("detected"))}
+    # Phase 4: OVERVIEW's runners block covers the whole confirmed team.
+    # Absent or invalid routing/budgets just omit the keys here — the SETUP
+    # tab (setup_summary) is where the reasons surface.
+    try:
+        routing = routing_mod.load_routing(root)
+        summary["lineup"] = routing["lineup"]
+        summary["seats"] = routing["seats"]
+    except (RunnerError, routing_mod.RoutingError):
+        pass
+    try:
+        summary["dial"] = budgets_mod.load_budgets(root)["dial"]
+    except budgets_mod.BudgetError:
+        pass
+    return summary
 
 
 def _cortex_stats(root: str) -> dict:
@@ -189,6 +235,64 @@ def _headless_command(root: str) -> Optional[list]:
         return None
 
 
+def setup_complete(root: str) -> bool:
+    """The hard setup-first gate's condition (Phase 4 Decision 1/7):
+    runners.json and routing.json both load valid and the lineup is
+    non-empty. budgets.json may be absent — defaults are a valid power
+    setting, so it is deliberately not part of the gate."""
+    try:
+        # load_routing validates runners.json too (it re-checks the lineup
+        # against the current registry), so one call covers both files
+        routing = routing_mod.load_routing(root)
+    except (RunnerError, routing_mod.RoutingError):
+        return False
+    return bool(routing["lineup"])
+
+
+def setup_summary(root: str) -> dict:
+    """Everything the SETUP tab needs: live agent registry, persisted (or
+    suggested) seats, dial + overrides, floors, and the gate state."""
+    config = _live_registry()
+    agents = [{"name": name, "display_name": entry["display_name"],
+               "strengths": entry["strengths"],
+               "detected": entry["detected"], "auth": entry["auth"]}
+              for name, entry in config["runners"].items()
+              if entry["binary"]]  # the generic copy-me template is no card
+    lineup: list = []
+    seats: dict = {}
+    routing_error = ""
+    try:
+        persisted = routing_mod.load_routing(root)
+        lineup, seats = persisted["lineup"], persisted["seats"]
+    except (RunnerError, routing_mod.RoutingError) as e:
+        # a routing file that EXISTS but can't be trusted is reported, never
+        # hidden; plain absence silently falls through to the suggestion
+        if (Path(root) / routing_mod.ROUTING_RELPATH).exists():
+            routing_error = str(e)
+        try:
+            seats = routing_mod.suggest_seats(config)
+            lineup = [name for name in config["runners"]
+                      if name in set(seats.values())]
+        except routing_mod.RoutingError:
+            pass  # nothing connected: no team to suggest — honest emptiness
+    dial, overrides = "normal", {}
+    budgets_error = ""
+    try:
+        budgets = budgets_mod.load_budgets(root)
+        dial, overrides = budgets["dial"], budgets["overrides"]
+    except budgets_mod.BudgetError as e:
+        budgets_error = str(e)
+    out = {"agents": agents, "lineup": lineup, "seats": seats, "dial": dial,
+           "conductor": seats.get("conductor", routing_mod.BUILTIN_CONDUCTOR),
+           "floors": dict(budgets_mod.DRIVER_FLOORS), "overrides": overrides,
+           "setup_complete": setup_complete(root)}
+    if routing_error:
+        out["routing_error"] = routing_error
+    if budgets_error:
+        out["budgets_error"] = budgets_error
+    return out
+
+
 def _question_dict(q, answers: dict) -> dict:
     """One Question as the form-render contract: declaration + current
     value + show_if clauses so the client can mirror branch visibility
@@ -220,6 +324,7 @@ def onboarding_summary(root: str) -> dict:
         steps.append(entry)
     project_type = wiz.project_type()
     return {"project_type": project_type,
+            "setup_complete": setup_complete(root),
             "complete": wiz.is_complete(),
             "current_step": current.id if current else None,
             "answered": len(answers),
@@ -254,7 +359,8 @@ def snapshot_token(root: str) -> str:
     (same role snapshot_version() plays for the CORTEX store)."""
     parts = []
     for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH,
-                RUNNERS_RELPATH, STATE_RELPATH,
+                RUNNERS_RELPATH, routing_mod.ROUTING_RELPATH,
+                budgets_mod.BUDGETS_RELPATH, STATE_RELPATH,
                 interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH):
         try:
             st = (Path(root) / rel).stat()
@@ -277,10 +383,53 @@ def _require(body: dict, key: str, kind: type):
     return value
 
 
+def _require_setup(root: str) -> None:
+    """The hard setup-first gate (Phase 4 Decision 1): no onboarding write
+    happens before the AI team is confirmed. Checked before anything else —
+    fail closed, whatever the body says."""
+    if not setup_complete(root):
+        raise GateConflict(
+            "finish Setup first — your AI team is not confirmed yet")
+
+
+def post_setup(root: str, body: dict) -> dict:
+    """Confirm the team: one validated write of runners.json + routing.json
+    + budgets.json (Decision 7). Always re-probes fresh — a confirm must
+    never validate seats against stale auth. All three payloads validate
+    BEFORE anything is written, so a rejected confirm leaves no torn
+    multi-file state."""
+    lineup = _require(body, "lineup", list)
+    seats = _require(body, "seats", dict)
+    dial = _require(body, "dial", str)
+    overrides = body.get("overrides", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("body.overrides must be dict")
+    config = _live_registry(fresh=True)
+    try:
+        # keep host settings the user already chose; absence means defaults
+        existing = load_runners(root)
+        config["session_host"] = existing["session_host"]
+        config["permission_mode"] = existing.get("permission_mode")
+    except RunnerError:
+        pass
+    config["boss"] = lineup[0] if lineup else None
+    routing = {"version": routing_mod.SCHEMA_VERSION,
+               "lineup": lineup, "seats": seats}
+    budgets = {"version": budgets_mod.SCHEMA_VERSION,
+               "dial": dial, "overrides": overrides}
+    routing_mod.validate_routing(routing, config)
+    budgets_mod.validate_budgets(budgets)
+    save_runners(root, config)
+    routing_mod.save_routing(root, routing, config)
+    budgets_mod.save_budgets(root, budgets)
+    return {"ok": True, "setup": setup_summary(root)}
+
+
 def post_submit(root: str, body: dict) -> dict:
     """Phase answers in, grill round out. The submit itself is the wizard's
     (validation + stale-downstream unchanged); the grill starts fresh on
     every (re)submission (P3-D8)."""
+    _require_setup(root)
     step_id = _require(body, "step_id", str)
     answers = _require(body, "answers", dict)
     wiz = Wizard(root)
@@ -297,6 +446,7 @@ def post_submit(root: str, body: dict) -> dict:
 
 
 def post_followup(root: str, body: dict) -> dict:
+    _require_setup(root)
     step_id = _require(body, "step_id", str)
     answers = _require(body, "answers", dict)
     interview_mod.record_followup_answers(root, step_id, answers)
@@ -307,6 +457,7 @@ def post_followup(root: str, body: dict) -> dict:
 
 
 def post_resolve(root: str, body: dict) -> dict:
+    _require_setup(root)
     step_id = _require(body, "step_id", str)
     decision = _require(body, "decision", str)
     record = interview_mod.resolve(root, step_id, decision)
@@ -317,6 +468,7 @@ def post_resolve(root: str, body: dict) -> dict:
 def post_research(root: str, body: dict) -> dict:
     """The POST is the click, and the click IS the user approval external
     research requires in every profile (research.py contract)."""
+    _require_setup(root)
     command = _headless_command(root)
     provider = None
     if command is not None:
@@ -328,6 +480,7 @@ def post_research(root: str, body: dict) -> dict:
 
 
 def post_checkpoint(root: str, body: dict) -> dict:
+    _require_setup(root)
     step_id = _require(body, "step_id", str)
     verdict = checkpoints_mod.run_checkpoint(
         root, step_id, _headless_command(root))
@@ -338,6 +491,7 @@ def post_checkpoint(root: str, body: dict) -> dict:
 def post_approve(root: str, body: dict) -> dict:
     """Approval stays a user act (W1 law); the grill gate holds it until
     every submitted phase is clear (spec section 7 clarity gate)."""
+    _require_setup(root)
     step_id = _require(body, "step_id", str)
     wiz = Wizard(root)
     blocking = interview_mod.blocking_phase(root, wiz)
@@ -394,12 +548,14 @@ def finish_onboarding(root: str, command: Optional[list]) -> dict:
 
 
 def post_finish(root: str, body: dict) -> dict:
+    _require_setup(root)
     out = finish_onboarding(root, _headless_command(root))
     out.update({"ok": True, "onboarding": onboarding_summary(root)})
     return out
 
 
 _POST_ROUTES = {
+    "/api/setup": post_setup,
     "/api/onboard/submit": post_submit,
     "/api/onboard/followup": post_followup,
     "/api/onboard/resolve": post_resolve,
@@ -448,6 +604,8 @@ class DanzaUIHandler(CortexUIHandler):
             elif route == "/api/conductor":
                 limit = int((q.get("limit") or ["100"])[0])
                 self._json(conductor_tail(self.root, limit))
+            elif route == "/api/setup":
+                self._json(setup_summary(self.root))
             elif route == "/api/onboarding":
                 self._json(onboarding_summary(self.root))
             elif route == "/api/plan":
