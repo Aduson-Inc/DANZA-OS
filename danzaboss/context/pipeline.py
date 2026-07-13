@@ -14,6 +14,11 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from danzaboss.memory.store import MemoryStore, MemoryRecord
+# Table data only (not the store) — the single budget home since P4 T4, so the
+# per-driver retrieval profile can never diverge from cortex/ again. A
+# module-level import is acceptable here for plain dicts; context/ still has
+# no hard import edge onto the cortex store itself.
+from danzaboss.cortex.budgets import DRIVER_CORTEX
 
 
 @dataclass
@@ -67,28 +72,6 @@ def isolate(records: list[MemoryRecord], budget: int) -> list[MemoryRecord]:
 
 # Per-driver relevance profiles: which scopes and default queries matter to each
 # specialist. Keeps each driver's context tight and on-topic.
-# Per-driver CORTEX retrieval profiles (C3): each specialist gets a purpose-built,
-# budget-capped observation slice — Jonathan sees conventions/decisions scoped to
-# his task, Bonnie sees failure history, Billy sees the security trail. The intent
-# is forced (the driver's job IS the intent); types narrow the candidate pool.
-DRIVER_CORTEX: dict[str, dict] = {
-    "jonathan-builder":    {"intent": "write_code",
-                            "types": ["convention", "decision", "impl_detail", "api_behavior"]},
-    "samantha-mapper":     {"intent": "architecture",
-                            "types": ["decision", "impl_detail", "milestone", "convention"]},
-    "angela-auditor":      {"intent": "planning",
-                            "types": ["decision", "milestone", "lesson"]},
-    "bonnie-qa":           {"intent": "testing",
-                            "types": ["bug_fix", "root_cause", "limitation"]},
-    "carmella-researcher": {"intent": "learning",
-                            "types": ["lesson", "api_behavior", "dependency"]},
-    "hank-designer":       {"intent": "write_code",
-                            "types": ["convention", "decision"]},
-    "billy-security":      {"intent": "security",
-                            "types": ["security", "dependency", "decision"]},
-    "tony-d-orchestrator": {"intent": "planning", "types": None},
-}
-
 DRIVER_PROFILES: dict[str, dict] = {
     "jonathan-builder":     {"scopes": ("semantic", "procedural"), "hint": "code style patterns build order"},
     "samantha-mapper":      {"scopes": ("semantic", "episodic"),   "hint": "structure dependencies routes schema"},

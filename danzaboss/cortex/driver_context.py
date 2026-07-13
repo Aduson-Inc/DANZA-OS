@@ -8,8 +8,9 @@ filter, then hands the real work to the existing CORTEX read path
 gate). No new memory substrate, no scoring of its own — the assembler already
 guarantees the package never exceeds the requested budget.
 
-The `DRIVER_CORTEX` table is salvaged from the retired context/pipeline.py: it is
-the one genuinely useful artifact from that module — the per-specialist retrieval
+The `DRIVER_CORTEX` table (salvaged from the retired context/pipeline.py) now
+lives in `cortex/budgets.py` — the single budget home since P4 T4 — and is
+re-exported here. It is the per-specialist retrieval
 profile. Jonathan sees conventions/decisions/impl scoped to his task, Bonnie sees
 failure history, Billy sees the security trail; the intent is forced (the driver's
 job IS the intent) and the type filter narrows the candidate pool.
@@ -27,53 +28,20 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .assemble import Package
+# Both tables live in budgets.py since P4 T4 (the single budget home);
+# re-exported here so existing importers keep working unchanged.
+from .budgets import DRIVER_BUDGETS, DRIVER_CORTEX, resolve_budget  # noqa: F401
 from .quality import build_package
 from .store import ObservationStore
-
-# Per-driver CORTEX retrieval profiles. `intent` is forced (intent_override);
-# `types` narrows the candidate pool. Salvaged verbatim from the intent/type
-# mapping in the legacy context/pipeline.py — the CORTEX-native home for it.
-DRIVER_CORTEX: dict[str, dict] = {
-    "jonathan-builder":    {"intent": "write_code",
-                            "types": ["convention", "decision",
-                                      "impl_detail", "api_behavior"]},
-    "samantha-mapper":     {"intent": "architecture",
-                            "types": ["decision", "impl_detail",
-                                      "milestone", "convention"]},
-    "angela-auditor":      {"intent": "planning",
-                            "types": ["decision", "milestone", "lesson"]},
-    "bonnie-qa":           {"intent": "testing",
-                            "types": ["bug_fix", "root_cause", "limitation"]},
-    "carmella-researcher": {"intent": "learning",
-                            "types": ["lesson", "api_behavior", "dependency"]},
-    "hank-designer":       {"intent": "write_code",
-                            "types": ["convention", "decision"]},
-    "billy-security":      {"intent": "security",
-                            "types": ["security", "dependency", "decision"]},
-    "tony-d-orchestrator": {"intent": "planning", "types": None},
-}
 
 # Unknown drivers fall back here: no forced intent (let the classifier decide),
 # no type filter (every category is a candidate). Predictable, never a crash.
 _FALLBACK = {"intent": None, "types": None}
 
-# Per-driver default context token budgets (mission default). Applied when the
-# caller/CLI passes no explicit budget. Unknown drivers get the generic cap.
-DRIVER_BUDGETS: dict[str, int] = {
-    "jonathan-builder": 900,
-    "samantha-mapper": 900,
-    "angela-auditor": 900,
-    "bonnie-qa": 800,
-    "billy-security": 800,
-    "hank-designer": 800,
-    "carmella-researcher": 800,
-}
-_DEFAULT_BUDGET = 1200
-
 
 def default_budget(driver: str) -> int:
     """The role's default context budget; unknown drivers -> generic cap."""
-    return DRIVER_BUDGETS.get(driver, _DEFAULT_BUDGET)
+    return resolve_budget(driver)
 
 
 @dataclass
