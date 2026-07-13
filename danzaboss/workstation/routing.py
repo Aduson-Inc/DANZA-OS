@@ -256,8 +256,11 @@ def _leaf_index(tasks) -> dict:
     return out
 
 
-def next_boss(routing: dict, plan_data: dict, state: TeamState) -> str:
-    """Pure decision (no I/O): the runner name that takes the next turn.
+def route_turn(routing: dict, plan_data: dict,
+               state: TeamState) -> tuple[str, str]:
+    """Pure decision (no I/O): ``(runner name, work type)`` for the next
+    turn. The work type rides along so the conductor's ignite log can say
+    WHY a runner was chosen, not just which one.
 
     Cursor rule (v1 proxy — see module docstring): feature index is
     ``state.turn_number * state.max_features_per_turn`` (continuous mode
@@ -300,5 +303,11 @@ def next_boss(routing: dict, plan_data: dict, state: TeamState) -> str:
     seat = routing.get("seats", {}).get(work_type)
     lineup = routing["lineup"]
     if seat is None or seat == BUILTIN_CONDUCTOR:
-        return lineup[state.turn_number % len(lineup)]
-    return seat
+        return lineup[state.turn_number % len(lineup)], work_type
+    return seat, work_type
+
+
+def next_boss(routing: dict, plan_data: dict, state: TeamState) -> str:
+    """The runner name that takes the next turn — route_turn minus the
+    work type, kept for callers that only need the seat holder."""
+    return route_turn(routing, plan_data, state)[0]

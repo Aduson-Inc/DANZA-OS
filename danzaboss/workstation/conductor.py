@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from danzaboss.kernel.state import StateError, StateManager, TeamState
+from danzaboss.workstation import planner as planner_mod
+from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation import runners as runners_mod
 
 
@@ -38,6 +40,10 @@ class Action(str, Enum):
 
 STALL_MINUTES = 10       # spec section 7 default T
 DEAD_SESSION_VALVE = 2   # spec section 7 default K
+
+# Appended to a routed, argv-activation runner's command in attachable
+# modes so the ignited session actually starts its turn (SKILL.md trigger).
+IGNITION_PHRASE = "Who's the Boss?"
 
 
 @dataclass(frozen=True)
@@ -190,7 +196,10 @@ class Conductor:
         # (pick_host may have degraded tmux -> headless); trusting the
         # raw config here would feed interactive argv to a headless host.
         self._mode = session_mode or self._config.get("session_host")
-        self._session_argv = self._argv()
+        # Routing degrades to this boss (see _route), so it must be
+        # launchable even when routing.json routes every planned turn.
+        runners_mod.boss_runner(self._config)   # no boss => no relay
+        self._argv_for(self._config["boss"])    # unusable argv => no relay
         self._manager = StateManager(str(self._root / TEAM_STATE_RELPATH))
         self._name = session_name(root)
         self._watch = Watch(session_alive=False, turn_at_ignite=None,
@@ -212,14 +221,47 @@ class Conductor:
             fh.write(json.dumps(line, sort_keys=True) + "\n")
 
     # -- internals --------------------------------------------------------
-    def _argv(self) -> list[str]:
-        """Interactive argv for attachable hosts, headless argv for the
-        headless host — keyed off the RESOLVED mode (constructor), not
-        isinstance, so test doubles and future hosts need no
-        special-casing."""
+    def _argv_for(self, name: str, *, routed: bool = False) -> list[str]:
+        """The named runner's argv for the RESOLVED mode (constructor),
+        not isinstance, so test doubles and future hosts need no
+        special-casing. Headless with an empty headless argv fails closed
+        (the runners.headless_argv rule). In attachable modes an
+        argv-activation runner gets the ignition phrase appended ONLY when
+        routing chose it — the routed session must actually start its
+        turn, while the no-routing path keeps today's bare argv (zero
+        behavior change for existing users)."""
+        entry = self._config["runners"][name]
         if self._mode == "headless":
-            return runners_mod.headless_argv(self._config)
-        return runners_mod.interactive_argv(self._config)
+            argv = list(entry["headless"])
+            if not argv:
+                raise runners_mod.RunnerError(
+                    f"runner {name!r} does not support headless mode "
+                    f"(headless argv is empty)")
+            return argv
+        argv = list(entry["interactive"])
+        if routed and entry.get("activation") == "argv":
+            argv.append(IGNITION_PHRASE)
+        return argv
+
+    def _route(self, state: TeamState) -> tuple[str, str | None]:
+        """(runner, work_type) for this ignition. routing.json and
+        plan.json are re-read on EVERY ignite — setup edits apply from the
+        next turn, never mid-session (Decision 7). Any routing or plan
+        defect degrades to today's single-boss behavior with a logged
+        routing_fallback: the relay never dies on a hand-edited config,
+        but the degradation is flagged, not silent."""
+        try:
+            routing = routing_mod.load_routing(self._root)
+            plan_data = json.loads(
+                (self._root / planner_mod.PLAN_JSON_RELPATH)
+                .read_text(encoding="utf-8"))
+            return routing_mod.route_turn(routing, plan_data, state)
+        except (runners_mod.RunnerError, OSError, ValueError) as exc:
+            # RoutingError and JSONDecodeError are ValueErrors; a missing
+            # plan.json is an OSError; a re-validated registry gone bad is
+            # a RunnerError.
+            self.log("routing_fallback", reason=str(exc))
+            return self._config["boss"], None
 
     def _refresh_watch(self, state: TeamState) -> None:
         alive = self._host.alive(self._name)
@@ -270,14 +312,16 @@ class Conductor:
             self._stall_logged = True  # once per episode
         action = decide(state, self._watch)
         if action is Action.IGNITE:
-            argv = self._session_argv
+            runner, work_type = self._route(state)
+            argv = self._argv_for(runner, routed=work_type is not None)
             self._host.ignite(self._name, self._root, argv)
             self._watch = replace(self._watch, session_alive=True,
                                   turn_at_ignite=state.turn_number,
                                   last_change_monotonic=self._clock())
             self._stall_logged = False
             self.log("ignite", session=self._name, argv=argv,
-                     turn_number=state.turn_number, boss=state.current_boss)
+                     turn_number=state.turn_number, boss=state.current_boss,
+                     runner=runner, work_type=work_type)
         elif action in self._TERMINAL:
             self.log(action.value, status=state.status,
                      dead_sessions=self._watch.dead_sessions)

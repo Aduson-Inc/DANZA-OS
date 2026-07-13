@@ -9,8 +9,11 @@ from pathlib import Path
 
 import _bootstrap  # noqa
 from danzaboss.kernel.state import StateManager
+from danzaboss.workstation import planner as planner_mod
+from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation import runners as runners_mod
-from danzaboss.workstation.conductor import (LOG_RELPATH, PIDFILE_RELPATH,
+from danzaboss.workstation.conductor import (IGNITION_PHRASE, LOG_RELPATH,
+                                             PIDFILE_RELPATH,
                                              TEAM_STATE_RELPATH, Action,
                                              Conductor, ConductorError,
                                              acquire_pidfile, release_pidfile,
@@ -217,6 +220,127 @@ class Pidfile(LoopFixture):
         acquire_pidfile(self.root, pid=111, alive=lambda p: True)
         release_pidfile(self.root, pid=222)
         self.assertTrue((self.root / PIDFILE_RELPATH).exists())
+
+
+def _plan_payload() -> dict:
+    """Minimal parseable plan.json. Features in execution order: 1.1
+    (backend -> build seat), 1.2 (design), 2.1 (test -> qa seat). With the
+    default max_features_per_turn=2 cursor, turn 0 routes feature 1.1 and
+    turn 1 routes feature 2.1."""
+    def leaf(tid: str, kind: str) -> dict:
+        return {"id": tid, "description": f"do {tid}", "kind": kind,
+                "size_est": 10, "writes": ["x"],
+                "verification": {"kind": "automated_test",
+                                 "detail": "pytest tests/x.py"}}
+
+    return {
+        "spec_ref": "spec.md",
+        "tasks": [
+            {"id": "1", "description": "section one",
+             "subtasks": [leaf("1.1", "backend"), leaf("1.2", "design")]},
+            {"id": "2", "description": "section two",
+             "subtasks": [leaf("2.1", "test")]},
+        ],
+        "order": ["1.1", "1.2", "2.1"],
+    }
+
+
+class Routing(LoopFixture):
+    """P4 T8: each ignition consults the seat router (next_boss) for the
+    routed runner's argv; any routing/plan defect falls back to today's
+    single-boss behavior with a logged routing_fallback."""
+
+    def install_team(self, *, claude_activation: str = "argv") -> None:
+        """Two-runner lineup: build -> claude, qa -> codex, plan on disk."""
+        config = runners_mod.default_config({"claude": True, "codex": True})
+        config["runners"]["claude"]["activation"] = claude_activation
+        runners_mod.save_runners(self.root, config)
+        seats = {seat: "claude" for seat in routing_mod.SEATS}
+        seats["conductor"] = routing_mod.BUILTIN_CONDUCTOR
+        seats["qa"] = "codex"
+        routing_mod.save_routing(
+            self.root, {"version": 1, "lineup": ["claude", "codex"],
+                        "seats": seats}, config)
+        (self.root / planner_mod.PLAN_JSON_RELPATH).write_text(
+            json.dumps(_plan_payload()), encoding="utf-8")
+
+    def ignite_events(self):
+        return [e for e in self.log_events() if e["event"] == "ignite"]
+
+    def test_routed_argv_with_ignition_phrase(self):
+        # tmux mode + argv-activation runner + active routing: the ignited
+        # session must actually start its turn.
+        self.install_team()
+        self.conductor().tick()
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude", IGNITION_PHRASE])
+        event = self.ignite_events()[-1]
+        self.assertEqual(event["runner"], "claude")
+        self.assertEqual(event["work_type"], "build")
+
+    def test_typed_activation_runner_gets_bare_argv(self):
+        self.install_team(claude_activation="typed")
+        self.conductor().tick()
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude"])
+
+    def test_headless_mode_uses_routed_headless_argv_without_phrase(self):
+        self.install_team()
+        self.conductor(session_mode="headless").tick()
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude", "-p", "--output-format", "json"])
+
+    def test_no_routing_keeps_single_boss_argv_and_logs_fallback(self):
+        # Zero behavior change for existing users: bare boss argv, but the
+        # missing routing is flagged, never silent.
+        self.conductor().tick()
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude"])
+        event = self.ignite_events()[-1]
+        self.assertEqual(event["runner"], "claude")
+        self.assertIsNone(event["work_type"])
+        fallbacks = [e for e in self.log_events()
+                     if e["event"] == "routing_fallback"]
+        self.assertTrue(fallbacks and fallbacks[-1]["reason"])
+
+    def test_corrupt_routing_falls_back_with_logged_reason(self):
+        # The relay never dies on a hand-edited config.
+        self.install_team()
+        (self.root / routing_mod.ROUTING_RELPATH).write_text(
+            "{not json", encoding="utf-8")
+        con = self.conductor()
+        self.assertIs(con.tick(), Action.IGNITE)
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude"])
+        self.assertIn("routing_fallback",
+                      {e["event"] for e in self.log_events()})
+
+    def test_missing_plan_falls_back_with_logged_reason(self):
+        self.install_team()
+        (self.root / planner_mod.PLAN_JSON_RELPATH).unlink()
+        self.conductor().tick()
+        _, _, argv = self.host.ignites[0]
+        self.assertEqual(argv, ["claude"])
+        self.assertIn("routing_fallback",
+                      {e["event"] for e in self.log_events()})
+
+    def test_two_runner_handoff_ignites_each_routed_runner(self):
+        # Acceptance (spec section 8): turn 0 routes feature 1.1 (build ->
+        # claude); after the handoff advances the turn, turn 1 routes
+        # feature 2.1 (test -> qa -> codex).
+        self.install_team()
+        con = self.conductor()
+        con.tick()                                     # ignite turn 0
+        self.manager.transition(to_status="in_progress", actor="claude")
+        self.manager.handoff("codex")                  # -> turn 1
+        self.host.alive_now = False                    # session exits
+        con.tick()                                     # observe death + ignite
+        self.assertEqual([argv for _, _, argv in self.host.ignites],
+                         [["claude", IGNITION_PHRASE],
+                          ["codex", IGNITION_PHRASE]])
+        events = self.ignite_events()
+        self.assertEqual([e["runner"] for e in events], ["claude", "codex"])
+        self.assertEqual([e["work_type"] for e in events], ["build", "qa"])
 
 
 class SessionName(unittest.TestCase):
