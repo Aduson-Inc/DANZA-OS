@@ -1,6 +1,6 @@
-/* DANZA-OS dashboard — vanilla JS, no build step. Read-only over product
-   state in Phase 2: OVERVIEW is live; ONBOARD / MODELS / BUILD render the
-   real state files and gain their interactive surfaces in Phases 3-4. */
+/* DANZA-OS dashboard — vanilla JS, no build step. OVERVIEW is live;
+   SETUP confirms the AI team (Phase 4); ONBOARD runs the wizard + the
+   grill (Phase 3, locked until setup completes); BUILD renders the plan. */
 "use strict";
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -279,6 +279,18 @@ function activeStep(o) {
 
 function renderOnboard() {
   const o = onboardData;
+  // Hard setup-first gate (Phase 4 Decision 1): the server 409s every
+  // onboarding write until the team is confirmed — render that honestly.
+  if (!o.setup_complete) {
+    $("#onboard-panel").innerHTML = `<div class="locked">
+      <h3>Set up your AI team first</h3>
+      <p class="dim">Onboarding unlocks once your team is confirmed —
+        pick who plans, builds and tests on the Setup tab.</p>
+      <button id="goto-setup" class="chip">Go to Setup</button></div>`;
+    $("#goto-setup").addEventListener("click", () =>
+      $$(".tab[data-view]").find((b) => b.dataset.view === "setup")?.click());
+    return;
+  }
   const step = activeStep(o);
   let main;
   if (o.blocking_phase && !onboard.edit) main = interviewPanel(step);
@@ -396,26 +408,216 @@ async function loadOnboard() {
   renderOnboard();
 }
 
-/* ---------- models (read-only until Phase 4) ---------- */
-async function loadModels() {
-  const r = (await api("api/runners")).runners;
-  if (!r) {
-    $("#models-panel").innerHTML = `<p class="dim">No runner registry yet —
-      run <code>danza runners .</code> to detect installed AI CLIs.</p>`;
-    return;
+/* ---------- setup (Phase 4: confirm your AI team) ---------- */
+let setupData = null;                    // last /api/setup payload
+const setup = { pick: null, error: "", notice: "", busy: false };
+
+// Seat work types -> plain-English names + one-sentence job descriptions
+// (Phase 4 Decision 9: no jargon on the SETUP tab).
+const SEAT_INFO = {
+  conductor: ["Conductor", "Passes finished work to the next AI."],
+  plan:      ["Planner", "Turns your idea into a build plan."],
+  build:     ["Builder", "Writes the code."],
+  map:       ["Mapper", "Keeps the map of your codebase current."],
+  qa:        ["Tester", "Checks that finished features really work."],
+  review:    ["Reviewer", "Tracks decisions and catches the team looping."],
+  research:  ["Researcher", "Looks things up before the team commits."],
+  design:    ["Designer", "Handles the look — colors, fonts, layout."],
+  security:  ["Security Checker", "Reviews the work for security problems."],
+};
+
+const SEAT_VERBS = {
+  plan: "plan", build: "build", map: "map the codebase", qa: "test",
+  review: "review decisions", research: "research",
+  design: "design", security: "check security",
+};
+
+function initPick(s) {
+  return { seats: { conductor: "builtin", ...s.seats },
+           dial: s.dial, overrides: { ...s.overrides } };
+}
+
+function agentChip(a) {
+  if (a.detected && a.auth === "unauthenticated")
+    return `<span class="chip mono chip-bad">Found, not logged in</span>`;
+  if (a.detected && a.auth === "ok")
+    return `<span class="chip mono chip-ok">Connected</span>`;
+  if (a.detected) return `<span class="chip mono chip-dim">Found</span>`;
+  return `<span class="chip mono dim">Not installed</span>`;
+}
+
+function agentCard(a) {
+  return `<div class="agent-card${a.detected ? "" : " dim"}">
+    <div class="agent-head"><b>${esc(a.display_name)}</b>${agentChip(a)}</div>
+    <p class="dim">${esc((a.strengths || []).join(" · "))}</p></div>`;
+}
+
+// Seatable = detected and not known to be logged out ("unprobed" counts) —
+// mirrors routing._connected so the pickers and the server agree.
+const seatable = (agents) =>
+  agents.filter((a) => a.detected && a.auth !== "unauthenticated");
+
+function seatRow(seat, agents, pick) {
+  const [label, blurb] = SEAT_INFO[seat];
+  const current = pick.seats[seat] ?? "";
+  const opts = seatable(agents).map((a) =>
+    `<option value="${esc(a.name)}"${a.name === current ? " selected" : ""}>
+     ${esc(a.display_name)}</option>`).join("");
+  const builtin = seat === "conductor"
+    ? `<option value="builtin"${current === "builtin" ? " selected" : ""}>
+       Built-in (recommended)</option>` : "";
+  return `<div class="seat-row">
+    <div class="seat-name"><b>${esc(label)}</b>
+      <span class="dim">${esc(blurb)}</span></div>
+    <select data-seat="${esc(seat)}">${builtin}${current || builtin ? ""
+      : '<option value="" selected disabled>choose…</option>'}${opts}</select>
+  </div>`;
+}
+
+function dialCard(value, title, blurb, pick) {
+  return `<button class="dial-card${pick.dial === value ? " active" : ""}"
+    data-dial="${value}"><b>${title}</b><span>${blurb}</span></button>`;
+}
+
+function overrideRows(s, pick) {
+  return Object.entries(s.floors).map(([driver, floor]) => `
+    <div class="field"><label>${esc(driver)}
+      <span class="dim">(minimum ${esc(floor)})</span></label>
+    <input type="number" data-override="${esc(driver)}" min="${esc(floor)}"
+      value="${esc(pick.overrides[driver] ?? "")}"
+      placeholder="dial default"></div>`).join("");
+}
+
+// The confirm payload's lineup: every distinct agent holding a seat, in
+// seat order (the server makes lineup[0] the boss, so the conductor —
+// when it is a real runner — or the planner leads).
+function pickLineup(pick) {
+  const lineup = [];
+  for (const seat of Object.keys(SEAT_INFO)) {
+    const who = pick.seats[seat];
+    if (who && who !== "builtin" && !lineup.includes(who)) lineup.push(who);
   }
-  if (r.error) {
-    $("#models-panel").innerHTML = `<p class="warn mono">${esc(r.error)}</p>`;
-    return;
+  return lineup;
+}
+
+function teamSentences(pick, agents) {
+  const nameOf = (n) =>
+    (agents.find((a) => a.name === n) || { display_name: n }).display_name;
+  const jobs = new Map();
+  for (const [seat, verb] of Object.entries(SEAT_VERBS)) {
+    const who = pick.seats[seat];
+    if (!who) continue;
+    if (!jobs.has(who)) jobs.set(who, []);
+    jobs.get(who).push(verb);
   }
-  $("#models-panel").innerHTML = `<table class="kv">
-    ${row("boss", `<b>${esc(r.boss ?? "none detected")}</b>`)}
-    ${row("session host", esc(r.session_host))}
-    ${row("detected", r.detected.length
-        ? r.detected.map((n) => `<span class="chip mono">${esc(n)}</span>`).join(" ")
-        : '<span class="dim">none</span>')}
-  </table>
-  <p class="dim">Read-only view — lineup selection and the routing table land in Phase 4.</p>`;
+  const list = (v) => v.length > 1
+    ? `${v.slice(0, -1).join(", ")} and ${v[v.length - 1]}` : v[0];
+  const lines = [...jobs].map(([who, verbs]) =>
+    `${nameOf(who)} will ${list(verbs)}.`);
+  if (pick.seats.conductor === "builtin") {
+    lines.push("The built-in conductor passes finished work to the next AI.");
+  } else if (pick.seats.conductor) {
+    lines.push(`${nameOf(pick.seats.conductor)} will conduct the relay.`);
+  }
+  return lines;
+}
+
+function renderSetup() {
+  const s = setupData;
+  const pick = setup.pick;
+  const banner = [
+    setup.error ? `<p class="warn mono">${esc(setup.error)}</p>` : "",
+    setup.notice ? `<p class="ok">${esc(setup.notice)}</p>` : "",
+    setup.busy ? `<p class="dim">saving your team…</p>` : "",
+    s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : "",
+    s.budgets_error ? `<p class="warn mono">${esc(s.budgets_error)}</p>` : "",
+  ].join("");
+  const agents = panel("Your AI agents",
+    `<div class="agent-grid">${s.agents.map(agentCard).join("")}</div>
+     <p class="dim">Log in to an agent in your terminal, then come back —
+     this list updates on its own.</p>`);
+  const seats = seatable(s.agents).length
+    ? panel("Who does what",
+        Object.keys(SEAT_INFO).map((k) => seatRow(k, s.agents, pick)).join(""))
+    : panel("Who does what", `<p class="dim">No agents are connected yet —
+        install and log in to at least one AI CLI above.</p>`);
+  const dial = panel("Power", `<div class="dial-row">
+    ${dialCard("normal", "Normal (recommended)",
+               "Balanced memory for every seat — right for most projects.", pick)}
+    ${dialCard("full_power", "Full Power",
+               "Twice the memory for every seat — better recall, higher token cost.", pick)}
+    </div>`);
+  const advanced = `<details class="panel advanced"><summary>Advanced</summary>
+    <p class="dim">Per-role memory budgets in tokens. Leave blank to use the
+    dial. Per-seat model and effort overrides arrive with safe flags.</p>
+    ${overrideRows(s, pick)}</details>`;
+  const sentences = teamSentences(pick, s.agents);
+  const team = panel("Your team", `
+    ${s.setup_complete ? `<p class="ok">Team confirmed — onboarding is
+      unlocked. Confirm again any time to change it.</p>` : ""}
+    ${sentences.length
+      ? sentences.map((t) => `<p>${esc(t)}</p>`).join("")
+      : `<p class="dim">Pick at least one agent to see your team.</p>`}
+    <button id="confirm-team" class="chip">Confirm team</button>`);
+  $("#setup-panel").innerHTML = banner + agents + seats + dial + advanced + team;
+  wireSetup();
+}
+
+async function setupAction(fn) {
+  if (setup.busy) return;
+  setup.busy = true;
+  setup.error = "";
+  setup.notice = "";
+  renderSetup();
+  try {
+    const out = await fn();
+    setupData = out.setup;
+    setup.pick = initPick(setupData);
+    setup.notice = "Team saved.";
+  } catch (e) {
+    setup.error = e.message;
+  }
+  setup.busy = false;
+  renderSetup();
+}
+
+function wireSetup() {
+  const pick = setup.pick;
+  $$("[data-seat]").forEach((sel) => sel.addEventListener("change", () => {
+    pick.seats[sel.dataset.seat] = sel.value;
+    renderSetup();                       // team sentences follow the seats
+  }));
+  $$("[data-dial]").forEach((b) => b.addEventListener("click", () => {
+    pick.dial = b.dataset.dial;
+    renderSetup();
+  }));
+  $$("[data-override]").forEach((inp) => inp.addEventListener("change", () => {
+    const v = parseInt(inp.value, 10);
+    if (Number.isFinite(v)) pick.overrides[inp.dataset.override] = v;
+    else delete pick.overrides[inp.dataset.override];
+  }));
+  const confirm = $("#confirm-team");
+  if (confirm) confirm.addEventListener("click", () => {
+    const lineup = pickLineup(pick);
+    // 1-5 agents (the server re-validates — it stays authoritative)
+    if (!lineup.length) {
+      setup.error = "pick at least one agent before confirming";
+      return renderSetup();
+    }
+    if (lineup.length > 5) {
+      setup.error = "a team holds at most 5 agents — share some seats";
+      return renderSetup();
+    }
+    setupAction(() => post("api/setup", {
+      lineup, seats: pick.seats, dial: pick.dial,
+      overrides: pick.overrides }));
+  });
+}
+
+async function loadSetup() {
+  setupData = await api("api/setup");
+  if (!setup.pick) setup.pick = initPick(setupData);
+  renderSetup();
 }
 
 /* ---------- build (read-only until Phase 4) ---------- */
@@ -459,7 +661,12 @@ async function refresh() {
       if (onboard.busy || (panelEl && panelEl.contains(document.activeElement))) return;
       await loadOnboard();
     }
-    else if (state.view === "models") await loadModels();
+    else if (state.view === "setup") {
+      const panelEl = $("#setup-panel");
+      // same rule as ONBOARD: a poll never wipes a half-picked team
+      if (setup.busy || (panelEl && panelEl.contains(document.activeElement))) return;
+      await loadSetup();
+    }
     else if (state.view === "build") await loadBuild();
   } catch (e) {
     console.error(e);   // a failed poll must never kill the page

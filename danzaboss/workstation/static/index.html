@@ -30,8 +30,8 @@
 
   <nav class="tabs" aria-label="Views">
     <button class="tab active" data-view="overview">Overview</button>
+    <button class="tab" data-view="setup">Setup</button>
     <button class="tab" data-view="onboard">Onboard</button>
-    <button class="tab" data-view="models">Models</button>
     <button class="tab" data-view="build">Build</button>
     <a class="tab" href="cortex/">CORTEX</a>
   </nav>
@@ -50,16 +50,16 @@
     <div class="console-log mono" id="conductor-log"></div>
   </section>
 
-  <!-- ONBOARD — read-only window; interactive forms land in Phase 3. -->
+  <!-- SETUP — confirm the AI team: agents, seats, dial (Phase 4). -->
+  <section class="view" id="view-setup" hidden>
+    <h2 class="section-label">Your AI team</h2>
+    <div id="setup-panel"></div>
+  </section>
+
+  <!-- ONBOARD — live forms + the grill; locked until Setup confirms. -->
   <section class="view" id="view-onboard" hidden>
     <h2 class="section-label">Onboarding wizard</h2>
     <div class="panel" id="onboard-panel"></div>
-  </section>
-
-  <!-- MODELS — read-only window; lineup + routing land in Phase 4. -->
-  <section class="view" id="view-models" hidden>
-    <h2 class="section-label">Runner registry</h2>
-    <div class="panel" id="models-panel"></div>
   </section>
 
   <!-- BUILD — read-only window; relay controls land in Phase 4. -->

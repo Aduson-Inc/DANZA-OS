@@ -549,3 +549,80 @@ a.tab { text-decoration: none; display: inline-flex; align-items: center; }
   margin-right: 14px; color: var(--text); }
 button.chip { cursor: pointer; }
 .chip.warn-chip { border-color: var(--ember); color: var(--ember); }
+
+/* ---------- Phase 4: SETUP tab (confirm your AI team) ---------- */
+.ok { color: var(--ember); }
+#setup-panel .panel { margin-bottom: 18px; }
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.agent-card {
+  background: rgba(10, 10, 12, .5);
+  border: 1px solid var(--gunmetal);
+  border-left: 3px solid var(--gunmetal);
+  padding: 12px 14px;
+}
+.agent-card .agent-head {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 6px;
+}
+.agent-card p { font-size: 12.5px; margin: 0; }
+.chip-ok { border-color: var(--ember); color: var(--ember); }
+.chip-bad { border-color: var(--crimson); color: var(--crimson); }
+.chip-dim { border-color: var(--silver); color: var(--silver); }
+
+.seat-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 16px; padding: 8px 0;
+  border-bottom: 1px solid rgba(58, 61, 68, .35);
+}
+.seat-row:last-child { border-bottom: none; }
+.seat-row .seat-name b {
+  display: block;
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--silver);
+}
+.seat-row .seat-name .dim { font-size: 12.5px; }
+.seat-row select {
+  min-width: 220px; padding: 8px 10px;
+  background: var(--carbon); color: var(--text);
+  border: 1px solid var(--gunmetal); border-radius: 2px;
+  font-family: "IBM Plex Sans", sans-serif; font-size: 14px;
+}
+.seat-row select:focus { outline: none; border-color: var(--crimson); }
+
+.dial-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.dial-card {
+  flex: 1; min-width: 220px; text-align: left; cursor: pointer;
+  background: rgba(10, 10, 12, .5); color: var(--text);
+  border: 1px solid var(--gunmetal);
+  padding: 14px 16px;
+  font-family: "IBM Plex Sans", sans-serif; font-size: 13.5px;
+}
+.dial-card b {
+  display: block; margin-bottom: 4px;
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+}
+.dial-card span { color: var(--dim); }
+.dial-card.active { border-color: var(--crimson); background: rgba(200, 16, 46, .08); }
+.dial-card.active b { color: var(--glow); }
+
+details.advanced summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 13px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--silver);
+}
+
+.locked { text-align: center; padding: 28px 0; }
+.locked h3 {
+  font-family: "Chakra Petch", sans-serif;
+  letter-spacing: .08em; text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.locked p { margin-bottom: 14px; }

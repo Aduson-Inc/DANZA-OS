@@ -457,10 +457,20 @@ class TestDashboardStatic(unittest.TestCase):
 
     def test_all_five_tabs_present(self):
         _, _, html = get(self.port, "/")
-        for marker in (b'data-view="overview"', b'data-view="onboard"',
-                       b'data-view="models"', b'data-view="build"',
+        for marker in (b'data-view="overview"', b'data-view="setup"',
+                       b'data-view="onboard"', b'data-view="build"',
                        b'href="cortex/"'):
             self.assertIn(marker, html)
+        # MODELS is gone — the tab and its view became SETUP in Phase 4
+        self.assertNotIn(b'data-view="models"', html)
+
+    def test_tab_order_setup_before_onboard(self):
+        # Phase 4 order: OVERVIEW · SETUP · ONBOARD · BUILD · CORTEX
+        _, _, html = get(self.port, "/")
+        self.assertLess(html.index(b'data-view="setup"'),
+                        html.index(b'data-view="onboard"'))
+        self.assertLess(html.index(b'data-view="overview"'),
+                        html.index(b'data-view="setup"'))
 
     def test_front_end_is_origin_relative(self):
         _, _, html = get(self.port, "/")
@@ -484,6 +494,24 @@ class TestDashboardStatic(unittest.TestCase):
     def test_onboard_css_form_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         self.assertIn(".field", body.decode())
+
+    def test_setup_ui_wiring_present(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in ("api/setup", "loadSetup", "Confirm team",
+                       "Built-in (recommended)", "Connected",
+                       "Found, not logged in", "Full Power",
+                       "Set up your AI team first"):
+            self.assertIn(marker, js)
+        # the read-only Phase-2 MODELS view is fully replaced
+        self.assertNotIn("loadModels", js)
+        self.assertNotIn("lineup selection and the routing table land", js)
+
+    def test_setup_css_tokens(self):
+        _, _, body = get(self.port, "/static/app.css")
+        css = body.decode()
+        for token in (".agent-card", ".seat-row", ".dial-card"):
+            self.assertIn(token, css)
 
 
 def fake_registry(auth=None, detected=("claude", "gemini")):
