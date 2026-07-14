@@ -482,7 +482,7 @@ function agentChip(a) {
 function agentCard(a) {
   return `<div class="agent-card${a.detected ? "" : " dim"}">
     <div class="agent-head"><b>${esc(a.display_name)}</b>${agentChip(a)}</div>
-    <p class="dim">${esc((a.strengths || []).join(" · "))}</p></div>`;
+    <p class="dim">${esc(a.strengths || "")}</p></div>`;
 }
 
 // Seatable = detected and not known to be logged out ("unprobed" counts) —

@@ -179,6 +179,40 @@ compiles per-driver context → dashboard streams progress via SSE.
 
 ## 8. Phase 4 — 1–5 LLM conductor + token economy
 
+> **STATUS: COMPLETE 2026-07-14 @e6c7415 + T13 verification fixes** (plan:
+> `docs/superpowers/plans/2026-07-12-phase4-conductor-setup-token-economy.md`).
+> All acceptance criteria met; suite 983 green (skipped=14); live Playwright
+> eyeball green (SETUP renders agents/seats/dial; Confirm writes
+> routing.json + budgets.json + runners.json and unlocks ONBOARD; ONBOARD
+> locked panel shows before confirm; BUILD start gates on setup+plan; 0
+> console errors). T13 fixes: bundled Tony D payload re-synced after the T8
+> template line; `app.js` agentCard rendered `strengths` as a list — the
+> catalog ships a plain sentence (crash found live, pinned in
+> `test_danza_ui`).
+
+> **Decisions locked with user (grilling, 2026-07-12)** — these refine the
+> bullets below where they differ:
+>
+> | # | Question | Decision |
+> |---|---|---|
+> | 0 | Layers | Per-task stops = Layer-0 session discipline only; the OS never stops between its own build tasks |
+> | 1 | Flow | Hard setup-first gate — ONBOARD locked until SETUP confirmed |
+> | 2 | Conductor seat | Built-in deterministic conductor by default; AI conductor is an advanced opt-in (seat recorded, engine unchanged in v1) |
+> | 3 | Seats | Conductor + 8 work types (plan/build/map/qa/review/research/design/security). NO Fast Scaffolder. Seats auto-suggested from per-model strengths; user approves or reassigns among connected models only |
+> | 4 | Budgets | Dial = Normal / Full Power (no Economy). Floors protect quality; context/build quality never compromised |
+> | 5 | Models | Each CLI runs as configured; per-seat model changes advanced-only, only where the catalog declares a safe flag |
+> | 6 | Effort | The dial IS the effort control; per-seat effort advanced-only. v1 catalog ships empty `full_power_extra_argv` (plumbing present, no unverified vendor flags) |
+> | 7 | Setup done | probe-passed agent + all seats assigned + dial set + conductor resolved → "Your team" card → Confirm writes validated files and unlocks ONBOARD; later edits apply from the next turn |
+> | 8 | Dashboard | SETUP replaces MODELS; tab order OVERVIEW · SETUP · ONBOARD · BUILD · CORTEX; Advanced = collapsed section inside SETUP |
+> | 9 | Language | Plain-English copy pass NOW, words only — wizard prompts, labels, buttons, user-visible errors |
+
+> **Drift note (verified 2026-07-12):** the token-economy bullet below says
+> the duplicate budget tables are `context/pipeline.py DRIVER_BUDGETS` +
+> `cortex/driver_context.py DRIVER_CORTEX`. Reality: `DRIVER_BUDGETS` lives
+> in `cortex/driver_context.py`; the actual duplicate was `DRIVER_CORTEX` in
+> BOTH `context/pipeline.py` and `cortex/driver_context.py`. Task 4
+> reconciled both tables into `cortex/budgets.py`, which both now import.
+
 - **Known-runner catalog (`runners.py`):** claude, codex, gemini, grok,
   opencode + generic entry — each with binary name, interactive argv,
   headless argv (empty = unsupported, fail-closed as today), activation

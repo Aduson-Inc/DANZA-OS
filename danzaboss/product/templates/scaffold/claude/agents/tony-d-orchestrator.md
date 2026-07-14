@@ -158,6 +158,7 @@ Answer every question honestly (see checklist below). Fix any issues before hand
 
 ### Phase 5: Handoff
 - Write handoff to `.danza/handoff.md` (follow template below)
+- Name who takes the next turn from `.danza/runtime/routing.json` (the seat of the next planned work); if the file is absent, keep the current alternation
 - Update `.danza/feature-list.md`, `.danza/turn-log.md`
 - CORTEX auto-records this turn's build data (observation extractor); no manual step
 - Tell user: **"My 2 features are complete. Hand this to your next AI environment with the trigger: Who's the Boss?"**

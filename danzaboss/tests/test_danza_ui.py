@@ -526,6 +526,10 @@ class TestDashboardStatic(unittest.TestCase):
         # the read-only Phase-2 MODELS view is fully replaced
         self.assertNotIn("loadModels", js)
         self.assertNotIn("lineup selection and the routing table land", js)
+        # catalog strengths is a plain sentence (runners.py), not a list —
+        # joining it crashes renderSetup (found in the T13 live eyeball)
+        self.assertNotIn("a.strengths || []", js)
+        self.assertIn("a.strengths || \"\"", js)
 
     def test_setup_css_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
