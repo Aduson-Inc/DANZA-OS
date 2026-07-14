@@ -517,6 +517,25 @@ class TestDashboardStatic(unittest.TestCase):
         for token in (".agent-card", ".seat-row", ".dial-card"):
             self.assertIn(token, css)
 
+    def test_build_ui_wiring_present(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in ("api/build/start", "api/build/stop", "loadBuild",
+                       "Stop the build crew? The current turn finishes safely.",
+                       "Finish Setup and Onboarding to start building",
+                       "Handed the baton to"):
+            self.assertIn(marker, js)
+        # the Phase-2 read-only placeholder is fully replaced
+        self.assertNotIn("relay start/stop controls land in Phase 4", js)
+        _, _, html = get(self.port, "/")
+        self.assertIn(b'id="build-controls"', html)
+
+    def test_build_css_tokens(self):
+        _, _, body = get(self.port, "/static/app.css")
+        css = body.decode()
+        for token in (".team-strip", ".session-tail"):
+            self.assertIn(token, css)
+
 
 def fake_registry(auth=None, detected=("claude", "gemini")):
     """A build_registry double: no shutil.which, no subprocess, controlled

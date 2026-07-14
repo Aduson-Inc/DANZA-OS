@@ -1,6 +1,7 @@
 /* DANZA-OS dashboard — vanilla JS, no build step. OVERVIEW is live;
    SETUP confirms the AI team (Phase 4); ONBOARD runs the wizard + the
-   grill (Phase 3, locked until setup completes); BUILD renders the plan. */
+   grill (Phase 3, locked until setup completes); BUILD starts/stops the
+   relay and shows live team state over the plan (Phase 4). */
 "use strict";
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -620,7 +621,120 @@ async function loadSetup() {
   renderSetup();
 }
 
-/* ---------- build (read-only until Phase 4) ---------- */
+/* ---------- build (Phase 4: relay controls + live state) ---------- */
+let buildData = null;              // {plan, tree, plan_md, live, setup_complete}
+const build = { error: "", busy: false, advanced: false };
+
+// Runner ids -> plain names for event lines (the conductor logs internal
+// ids; the catalog's display_name is what a human should read).
+const RUNNER_NAMES = { claude: "Claude Code", codex: "Codex",
+  gemini: "Gemini CLI", grok: "Grok CLI", opencode: "OpenCode" };
+const runnerName = (n) => RUNNER_NAMES[n] || n || "the next AI";
+
+// One friendly sentence per conductor event (Phase 4 Decision 9: plain
+// English first — the raw JSONL stays behind the Advanced toggle).
+function friendlyEvent(e) {
+  switch (e.event) {
+    case "ignite":
+      return `Handed the baton to ${runnerName(e.runner)} (turn ${e.turn_number}).`;
+    case "session_end":
+      return e.orphaned_turn
+        ? `A session died mid-turn (turn ${e.turn_number}) — the conductor is watching.`
+        : `Turn ${e.turn_number} wrapped up and its session closed.`;
+    case "stall":
+      return `Nothing has moved for ${e.minutes} minutes — the crew may be stuck.`;
+    case "state_error":
+      return `Team state file problem: ${e.error}`;
+    case "routing_fallback":
+      return `Seat routing unavailable — taking turns in order. (${e.reason})`;
+    case "halt_blocked":
+      return "The build hit a hard stop and needs you — check the team state.";
+    case "stop_done":
+      return "The build finished — every task is done.";
+    case "stop_valve":
+      return "The relay stopped itself: sessions kept dying without progress.";
+    default:
+      return e.event || "event";
+  }
+}
+
+function teamStripHTML(live) {
+  const t = live.team_state;
+  if (!t) {
+    const err = live.team_state_error
+      ? ` <span class="warn mono">${esc(live.team_state_error)}</span>` : "";
+    return `<p class="dim">No team state yet — this strip lights up once a
+      build runs.${err}</p>`;
+  }
+  return `<div class="team-strip">
+    <span><span class="dim">taking this turn</span>
+      <b>${esc(runnerName(t.current_boss))}</b></span>
+    <span><span class="dim">turn</span> <b>${esc(t.turn_number)}</b></span>
+    <span class="chip mono">${esc(t.status)}</span>
+    <span><span class="dim">features this turn</span>
+      ${esc(t.features_completed_this_turn)} / ${esc(t.max_features_per_turn)}</span>
+  </div>`;
+}
+
+function controlsHTML(live) {
+  const planReady = !!(buildData.plan && !buildData.plan.error);
+  const ready = !!buildData.setup_complete && planReady;
+  const banner = [
+    build.error ? `<p class="warn mono">${esc(build.error)}</p>` : "",
+    build.busy ? `<p class="dim">working…</p>` : "",
+  ].join("");
+  const buttons = live.running
+    ? `<p class="ok">The build crew is running.</p>
+       <button id="stop-build" class="chip">Stop build</button>`
+    : `<button id="start-build" class="chip"${ready ? "" : " disabled"}>
+       Start build</button>${ready ? ""
+       : ` <span class="dim">Finish Setup and Onboarding to start building.</span>`}`;
+  const tail = live.session.alive
+    ? `<h2 class="section-label">Live session — ${esc(live.session.name)}</h2>
+       <pre class="session-tail mono">${esc(live.session.tail)}</pre>`
+    : "";
+  const events = live.conductor.length
+    ? `<h2 class="section-label">What the conductor did</h2>
+       ${live.conductor.map((e) => `<div class="log-line">
+         <span class="dim">${esc(e.ts || "")}</span> ${esc(friendlyEvent(e))}</div>`).join("")}
+       <details class="advanced" id="build-advanced"${build.advanced ? " open" : ""}>
+         <summary class="dim">Advanced — raw event log</summary>
+         <div class="console-log mono">${live.conductor.map(logLine).join("")}</div>
+       </details>`
+    : `<p class="dim">No conductor activity yet.</p>`;
+  return banner + buttons + teamStripHTML(live) + tail + events;
+}
+
+async function buildAction(fn) {
+  if (build.busy) return;
+  build.busy = true;
+  build.error = "";
+  renderBuild();
+  try {
+    await fn();
+    buildData.live = await api("api/build");
+  } catch (e) {
+    build.error = e.message;
+  }
+  build.busy = false;
+  renderBuild();
+}
+
+function wireBuild() {
+  const start = $("#start-build");
+  if (start) start.addEventListener("click", () =>
+    buildAction(() => post("api/build/start", {})));
+  const stop = $("#stop-build");
+  if (stop) stop.addEventListener("click", () => {
+    if (!window.confirm(
+        "Stop the build crew? The current turn finishes safely.")) return;
+    buildAction(() => post("api/build/stop", {}));
+  });
+  // the Advanced toggle survives SSE re-renders via the state object
+  const adv = $("#build-advanced");
+  if (adv) adv.addEventListener("toggle", () => { build.advanced = adv.open; });
+}
+
 function taskHTML(t) {
   const meta = [t.kind, t.size_est ? `${t.size_est}m` : "",
                 (t.writes || []).join(", ")].filter(Boolean).map(esc).join(" · ");
@@ -632,23 +746,32 @@ function taskHTML(t) {
     ${subs ? `<ul>${subs}</ul>` : ""}</li>`;
 }
 
-async function loadBuild() {
-  const p = await api("api/plan");
-  if (!p.plan) {
-    $("#build-panel").innerHTML = `<p class="dim">No plan yet — the BUILD tab
+function renderBuild() {
+  $("#build-controls").innerHTML = controlsHTML(buildData.live);
+  // plan tree below the controls — rendering unchanged since Phase 2
+  let planHTML;
+  if (!buildData.plan) {
+    planHTML = `<p class="dim">No plan yet — the BUILD tab
       arms once onboarding compiles spec.md and planning writes plan.json.</p>`;
-    return;
+  } else if (buildData.plan.error) {
+    planHTML = `<p class="warn mono">${esc(buildData.plan.error)}</p>`;
+  } else {
+    const tree = buildData.tree.length
+      ? `<ul class="plan-tree">${buildData.tree.map(taskHTML).join("")}</ul>` : "";
+    const md = buildData.plan_md ? `<h2 class="section-label">plan.md</h2>
+      <pre class="plan-md mono">${esc(buildData.plan_md)}</pre>` : "";
+    planHTML = tree + md;
   }
-  if (p.plan.error) {
-    $("#build-panel").innerHTML = `<p class="warn mono">${esc(p.plan.error)}</p>`;
-    return;
-  }
-  const tree = p.tree.length
-    ? `<ul class="plan-tree">${p.tree.map(taskHTML).join("")}</ul>` : "";
-  const md = p.plan_md ? `<h2 class="section-label">plan.md</h2>
-    <pre class="plan-md mono">${esc(p.plan_md)}</pre>` : "";
-  $("#build-panel").innerHTML = tree + md +
-    `<p class="dim">Read-only view — relay start/stop controls land in Phase 4.</p>`;
+  $("#build-panel").innerHTML = planHTML;
+  wireBuild();
+}
+
+async function loadBuild() {
+  const [p, live, o] = await Promise.all(
+    [api("api/plan"), api("api/build"), api("api/onboarding")]);
+  buildData = { plan: p.plan, tree: p.tree || [], plan_md: p.plan_md,
+                live, setup_complete: !!o.setup_complete };
+  renderBuild();
 }
 
 /* ---------- refresh + SSE ---------- */
@@ -667,7 +790,11 @@ async function refresh() {
       if (setup.busy || (panelEl && panelEl.contains(document.activeElement))) return;
       await loadSetup();
     }
-    else if (state.view === "build") await loadBuild();
+    else if (state.view === "build") {
+      // a poll never races a start/stop click mid-flight
+      if (build.busy) return;
+      await loadBuild();
+    }
   } catch (e) {
     console.error(e);   // a failed poll must never kill the page
   }

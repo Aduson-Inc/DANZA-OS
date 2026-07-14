@@ -626,3 +626,21 @@ details.advanced summary {
   margin-bottom: 8px;
 }
 .locked p { margin-bottom: 14px; }
+
+/* ---------- build: relay controls + live state (Phase 4) ---------- */
+.team-strip {
+  display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap;
+  padding: 12px 0;
+}
+.team-strip .dim { font-size: 12px; margin-right: 6px; }
+
+.session-tail {
+  background: var(--carbon);
+  border: 1px solid var(--graphite);
+  border-radius: 4px;
+  padding: 12px 16px;
+  font-size: 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
