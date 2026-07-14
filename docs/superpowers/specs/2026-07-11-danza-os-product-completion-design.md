@@ -181,7 +181,7 @@ compiles per-driver context → dashboard streams progress via SSE.
 
 > **STATUS: COMPLETE 2026-07-14 @e6c7415 + T13 verification fixes** (plan:
 > `docs/superpowers/plans/2026-07-12-phase4-conductor-setup-token-economy.md`).
-> All acceptance criteria met; suite 983 green (skipped=14); live Playwright
+> All acceptance criteria met; suite 984 green (skipped=14); live Playwright
 > eyeball green (SETUP renders agents/seats/dial; Confirm writes
 > routing.json + budgets.json + runners.json and unlocks ONBOARD; ONBOARD
 > locked panel shows before confirm; BUILD start gates on setup+plan; 0
@@ -189,6 +189,15 @@ compiles per-driver context → dashboard streams progress via SSE.
 > template line; `app.js` agentCard rendered `strengths` as a list — the
 > catalog ships a plain sentence (crash found live, pinned in
 > `test_danza_ui`).
+>
+> **Known limitation (final review 2026-07-14):** the dial + Advanced
+> overrides persist to a validated `budgets.json` and display everywhere,
+> but no runtime call site loads them yet — `driver_context.default_budget`
+> resolves with the built-in "normal" dial, so "Full Power" does not change
+> real driver budgets until a follow-up wires `load_budgets(root)` into
+> `default_budget`/`danza cortex context`. Tracked in
+> `.superpowers/sdd/progress.md` (Phase 4 close-out) as the first post-phase
+> task.
 
 > **Decisions locked with user (grilling, 2026-07-12)** — these refine the
 > bullets below where they differ:

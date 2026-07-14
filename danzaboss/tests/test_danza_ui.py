@@ -777,6 +777,11 @@ class TestBuildApi(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{pid}\n")
 
+    def _pass_start_gate(self):
+        """Confirmed setup + a plan — the two server-side start conditions."""
+        seed_confirmed_setup(self.root)
+        (Path(self.root) / ".danza" / "plan.json").write_text(json.dumps(PLAN))
+
     def _get(self, port, path):
         try:
             return get(port, path)[0]
@@ -785,6 +790,7 @@ class TestBuildApi(unittest.TestCase):
             return e.code
 
     def test_start_spawns_the_managed_conduct_subprocess(self):
+        self._pass_start_gate()
         calls = {}
 
         class Proc:
@@ -806,7 +812,20 @@ class TestBuildApi(unittest.TestCase):
         log = Path(self.root) / ".danza" / "runtime" / "conduct-ui.log"
         self.assertTrue(log.exists())
 
+    def test_start_gates_on_setup_and_plan(self):
+        def exploding_popen(*a, **k):
+            raise AssertionError("a gated start must not spawn")
+
+        # no setup at all -> the setup-first gate refuses
+        with self.assertRaises(server_mod.GateConflict):
+            server_mod.post_build_start(self.root, {}, popen=exploding_popen)
+        # setup confirmed but no plan yet -> still refused
+        seed_confirmed_setup(self.root)
+        with self.assertRaises(server_mod.GateConflict):
+            server_mod.post_build_start(self.root, {}, popen=exploding_popen)
+
     def test_double_start_is_a_conflict(self):
+        self._pass_start_gate()
         self._pidfile(1234)
 
         def exploding_popen(*a, **k):
@@ -818,6 +837,7 @@ class TestBuildApi(unittest.TestCase):
                                         alive=lambda pid: True)
 
     def test_stale_pidfile_does_not_block_start(self):
+        self._pass_start_gate()
         self._pidfile(1234)
 
         class Proc:

@@ -637,9 +637,17 @@ def post_build_start(root: str, body: dict,
                      popen: Callable = subprocess.Popen,
                      alive: Callable[[int], bool] = _pid_alive) -> dict:
     """Start the relay: spawn `danza conduct` detached, output to a
-    tailable log. A live pidfile refuses fast here, but the conductor's
-    own acquire_pidfile remains the single-instance authority — this
-    check is a courtesy, not a second lock."""
+    tailable log. The client disables Start until setup is confirmed and
+    a plan exists, but the server re-validates both (server stays
+    authoritative) — a direct POST gets a clean conflict, not a spawned
+    subprocess that dies on its first read. A live pidfile refuses fast
+    here, but the conductor's own acquire_pidfile remains the
+    single-instance authority — this check is a courtesy, not a second
+    lock."""
+    _require_setup(root)
+    if not (Path(root) / PLAN_JSON_RELPATH).is_file():
+        raise GateConflict(
+            "finish Onboarding first — there is no build plan yet")
     pid = _conductor_pid(root)
     if pid is not None and alive(pid):
         raise GateConflict("the build crew is already running")
