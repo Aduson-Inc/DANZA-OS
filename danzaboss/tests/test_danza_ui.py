@@ -13,6 +13,7 @@ from pathlib import Path
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
 from danzaboss.cortex.budgets import BUDGETS_RELPATH
+from danzaboss.cortex.events import CaptureLog
 from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
@@ -80,7 +81,8 @@ def seed_activated_repo(root):
     (Path(root) / ".danza" / "spec.md").write_text("# Spec\n")
     (runtime / "conductor-log.jsonl").write_text(
         json.dumps({"ts": "2026-07-11T00:00:00+00:00", "event": "ignite",
-                    "session": "danza-boss", "runner": "claude"}) + "\n" +
+                    "session": "danza-boss", "runner": "claude",
+                    "turn_number": 3}) + "\n" +
         json.dumps({"ts": "2026-07-11T00:05:00+00:00", "event": "session_end",
                     "turn_number": 3}) + "\n")
     store = ObservationStore(SqliteBackend(commands.db_path(root)))
@@ -89,6 +91,8 @@ def seed_activated_repo(root):
         type=ObsType.DECISION.value, project=os.path.basename(root),
         importance=Importance.CRITICAL.value, confidence=90,
         reasoning="seeded for HTTP tests", concepts=["dashboard"]))
+    CaptureLog(commands.db_path(root)).record_context_read(
+        os.path.basename(root), "jonathan-builder", 400, 900)
 
 
 class TestOverview(unittest.TestCase):
@@ -126,9 +130,21 @@ class TestOverview(unittest.TestCase):
         self.assertGreater(o["cortex"]["read_tokens"], 0)
         self.assertTrue(o["project"])
 
+    def test_overview_carries_token_telemetry(self):
+        # P4 T11: per-agent context spend + per-turn ignite counts ride the
+        # cortex block so the Tokens card renders from one payload.
+        status, _, body = get(self.port, "/api/overview")
+        self.assertEqual(status, 200)
+        c = json.loads(body)["cortex"]
+        self.assertEqual(c["per_agent"]["jonathan-builder"],
+                         {"reads": 1, "tokens": 400})
+        self.assertEqual(c["per_turn"], {"3": 1})
+
     def test_overview_unactivated_repo_is_honest(self):
         with tempfile.TemporaryDirectory() as bare:
             o = overview(bare)
+        self.assertEqual(o["cortex"]["per_agent"], {})
+        self.assertEqual(o["cortex"]["per_turn"], {})
         self.assertIsNone(o["team_state"])
         self.assertIsNone(o["plan"])
         self.assertIsNone(o["runners"])

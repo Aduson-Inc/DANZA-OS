@@ -94,6 +94,36 @@ function cortexPanel(o) {
   <p><a class="chip" href="cortex/">open CORTEX →</a></p>`);
 }
 
+/* P4 T11: plain name for a fixed driver id — "jonathan-builder" ->
+   "Jonathan (builder)", "tony-d-orchestrator" -> "Tony D (orchestrator)". */
+function driverName(id) {
+  const parts = String(id).split("-");
+  const role = parts.pop();
+  const name = parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
+  return name ? `${name} (${role})` : role;
+}
+
+function tokensPanel(o) {
+  const c = o.cortex;
+  const agents = Object.entries(c.per_agent || {});
+  const spent = agents.reduce((n, [, t]) => n + t.tokens, 0);
+  const agentRows = agents.map(([id, t]) =>
+    row(esc(driverName(id)),
+        `<b>~${esc(t.tokens)}t</b> <span class="dim">· ${esc(t.reads)}
+         read${t.reads === 1 ? "" : "s"}</span>`)).join("");
+  const turnRows = Object.entries(c.per_turn || {}).map(([turn, n]) =>
+    row(`turn ${esc(turn)}`,
+        `${esc(n)} agent start${n === 1 ? "" : "s"}`)).join("");
+  return panel("Tokens", `<table class="kv">
+    ${row("your team read",
+          `<b>~${esc(spent)}t</b> <span class="dim">— full memory is
+           ~${esc(c.read_tokens)}t; each agent gets only its slice</span>`)}
+    ${agentRows ||
+      row("agents", `<span class="dim">no memory reads yet</span>`)}
+    ${turnRows}
+  </table>`);
+}
+
 function logLine(e) {
   const rest = Object.fromEntries(Object.entries(e)
     .filter(([k]) => k !== "ts" && k !== "event"));
@@ -108,7 +138,8 @@ async function loadOverview() {
   const o = await api("api/overview");
   $("#profile-chip").textContent = o.profile.name;
   $("#overview-grid").innerHTML =
-    projectPanel(o) + teamPanel(o) + planPanel(o) + cortexPanel(o);
+    projectPanel(o) + teamPanel(o) + planPanel(o) + cortexPanel(o) +
+    tokensPanel(o);
   const log = await api("api/conductor?limit=40");
   $("#conductor-log").innerHTML = log.items.length
     ? log.items.map(logLine).join("")

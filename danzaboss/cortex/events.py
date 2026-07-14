@@ -59,6 +59,10 @@ class CaptureLog:
             processed INTEGER DEFAULT 0)""")
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, processed)")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS context_reads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+            project TEXT NOT NULL, driver TEXT NOT NULL,
+            tokens INTEGER NOT NULL, budget INTEGER NOT NULL)""")
         self.conn.commit()
 
     # -- sessions --------------------------------------------------------------
@@ -113,6 +117,28 @@ class CaptureLog:
             (session_id,))
         self.conn.commit()
         return cur.rowcount
+
+    # -- context reads (P4 T11 telemetry) ----------------------------------------
+    def record_context_read(self, project: str, driver: str,
+                            tokens: int, budget: int) -> int:
+        """One driver-context compile: what `driver` just read vs its cap.
+        The compile seat is the only path every driver context passes, so
+        this table is the per-agent spend ledger the dashboard renders."""
+        cur = self.conn.execute(
+            "INSERT INTO context_reads (ts, project, driver, tokens, budget) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (_utcnow(), project, driver, int(tokens), int(budget)))
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def context_read_stats(self, project: str) -> dict:
+        """Per-driver context spend: {driver: {"reads": n, "tokens": n}}."""
+        rows = self.conn.execute(
+            "SELECT driver, COUNT(*) reads, COALESCE(SUM(tokens), 0) tokens "
+            "FROM context_reads WHERE project = ? GROUP BY driver",
+            (project,)).fetchall()
+        return {r["driver"]: {"reads": r["reads"], "tokens": r["tokens"]}
+                for r in rows}
 
     # -- stats -----------------------------------------------------------------
     def stats(self, project: Optional[str] = None) -> dict:

@@ -179,17 +179,32 @@ def _runner_summary(root: str) -> Optional[dict]:
     return summary
 
 
+def _ignites_per_turn(root: str) -> dict:
+    """Turn number -> ignite count from the conductor log — the per-turn
+    denominator for the Tokens card (D10: cost regressions visible now)."""
+    counts: dict = {}
+    for item in conductor_tail(root)["items"]:
+        if item.get("event") == "ignite" and "turn_number" in item:
+            key = str(item["turn_number"])
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _cortex_stats(root: str) -> dict:
     """The home-screen CORTEX strip — the same numbers the CORTEX stats view
-    computes, so the two UIs can never disagree."""
+    computes, so the two UIs can never disagree — plus the P4 T11 telemetry
+    (per-agent context spend, per-turn ignite counts)."""
     db = cortex_commands.db_path(root)
     project = resolve_project(root)
-    s = CaptureLog(db).stats(project)
+    log = CaptureLog(db)
+    s = log.stats(project)
     count = read_tokens = 0
     for o in SqliteBackend(db).all(project):
         count += 1
         read_tokens += est_tokens(o.summary + o.reasoning)
-    s.update({"observations_stored": count, "read_tokens": read_tokens})
+    s.update({"observations_stored": count, "read_tokens": read_tokens,
+              "per_agent": log.context_read_stats(project),
+              "per_turn": _ignites_per_turn(root)})
     return s
 
 
