@@ -191,7 +191,7 @@ class ControllerTests(unittest.TestCase):
     def test_no_command_degrades(self):
         record = interview.run_interview_round(self.root, "p1", None)
         self.assertTrue(record["degraded"])
-        self.assertIn("no headless boss", record["degraded_reason"])
+        self.assertIn("no AI agent is connected", record["degraded_reason"])
 
     def test_double_garbage_reply_degrades_and_continues(self):
         # boss returns unparseable prose on both the first call and the

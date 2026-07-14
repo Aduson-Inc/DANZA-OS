@@ -313,7 +313,7 @@ class FinishTests(unittest.TestCase):
                  "seed_name": "idea", "seed_intent": "a workflow thing"}})
         status, out = post(self.port, "/api/onboard/finish", {})
         self.assertEqual(status, 400)
-        self.assertIn("seed", out["error"].lower())
+        self.assertIn("idea", out["error"].lower())
 
     def test_escalated_resolution_reaches_spec_appendix(self):
         # p0 clears normally through the SWITCHING_STUB's grill (unclear

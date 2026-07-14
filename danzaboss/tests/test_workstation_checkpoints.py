@@ -280,7 +280,7 @@ class NoCommandTests(unittest.TestCase):
     def test_none_command_records_degraded_verdict(self):
         verdict = checkpoints.run_checkpoint(self.tmp, "cp_concept", None)
         self.assertTrue(verdict["degraded"])
-        self.assertIn("no headless boss", verdict["degraded_reason"])
+        self.assertIn("no AI agent is connected", verdict["degraded_reason"])
         self.assertEqual(verdict["verdict"], "revise")
         wiz = Wizard(self.tmp)
         self.assertEqual(wiz.status("cp_concept"), "pending")

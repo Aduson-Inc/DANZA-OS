@@ -29,8 +29,8 @@ JSON_CONTRACT = (
 
 # The one degraded-reason string for "no boss configured" — checkpoints,
 # the interview, and the finish flow all report the same absence.
-NO_BOSS_REASON = ("no headless boss runner configured "
-                  "(open MODELS or run 'danza runners')")
+NO_BOSS_REASON = ("no AI agent is connected yet — "
+                  "open Setup (or run 'danza runners')")
 
 
 class CheckpointError(ValueError):

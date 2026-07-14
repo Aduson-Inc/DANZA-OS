@@ -46,8 +46,8 @@ function projectPanel(o) {
     ${row("name", `<b>${esc(o.project)}</b>`)}
     ${row("root", `<span class="mono dim">${esc(o.root)}</span>`)}
     ${row("profile", `<span class="chip mono">${esc(o.profile.name)}</span>`)}
-    ${row("spec", o.spec_exists ? "spec.md present"
-                                : '<span class="dim">no spec.md yet</span>')}
+    ${row("project brief", o.spec_exists ? "ready (spec.md)"
+                                : '<span class="dim">not written yet</span>')}
   </table>`);
 }
 
@@ -60,7 +60,7 @@ function teamPanel(o) {
       team-state.json. Run <code>danza init</code> in this repo.</p>${err}`);
   }
   return panel("Team state", `<table class="kv">
-    ${row("boss", `<b>${esc(t.current_boss)}</b>`)}
+    ${row("taking this turn", `<b>${esc(t.current_boss)}</b>`)}
     ${row("turn", esc(t.turn_number))}
     ${row("status", `<span class="chip mono">${esc(t.status)}</span>`)}
     ${row("features this turn",
@@ -71,13 +71,13 @@ function teamPanel(o) {
 
 function planPanel(o) {
   const p = o.plan;
-  if (!p) return panel("Plan", `<p class="dim">No plan.json yet — finish
-    onboarding and planning to arm the build.</p>`);
+  if (!p) return panel("Plan", `<p class="dim">No build plan yet — finish
+    onboarding to create one.</p>`);
   if (p.error) return panel("Plan", `<p class="warn mono">${esc(p.error)}</p>`);
   return panel("Plan", `<table class="kv">
-    ${row("spec", `<span class="mono dim">${esc(p.spec_ref)}</span>`)}
+    ${row("brief", `<span class="mono dim">${esc(p.spec_ref)}</span>`)}
     ${row("tasks", esc(p.tasks))}
-    ${row("dispatchable leaves", esc(p.leaves))}
+    ${row("ready-to-build tasks", esc(p.leaves))}
     ${row("build order",
           `<span class="mono dim">${esc((p.order || []).join(" → "))}</span>`)}
   </table>`);
@@ -86,10 +86,10 @@ function planPanel(o) {
 function cortexPanel(o) {
   const c = o.cortex;
   return panel("CORTEX memory", `<table class="kv">
-    ${row("observations", `<b>${esc(c.observations_stored)}</b>`)}
-    ${row("read tokens", `~${esc(c.read_tokens)}t`)}
+    ${row("memories", `<b>${esc(c.observations_stored)}</b>`)}
+    ${row("memory size", `~${esc(c.read_tokens)}t`)}
     ${row("sessions", esc(c.sessions))}
-    ${row("pending events", esc(c.pending_events))}
+    ${row("waiting to process", esc(c.pending_events))}
   </table>
   <p><a class="chip" href="cortex/">open CORTEX →</a></p>`);
 }
@@ -143,8 +143,8 @@ async function loadOverview() {
   const log = await api("api/conductor?limit=40");
   $("#conductor-log").innerHTML = log.items.length
     ? log.items.map(logLine).join("")
-    : `<p class="dim">No conductor activity yet — start the relay with
-       <code>danza conduct</code>.</p>`;
+    : `<p class="dim">Nothing has happened yet — start a build from the
+       Build tab.</p>`;
 }
 
 /* ---------- onboard (Phase 3: live forms + the grill) ---------- */
@@ -216,9 +216,9 @@ function formPanel(step) {
 
 function grillChip(rec) {
   if (!rec) return "";
-  const label = rec.resolution ? "user-decided" : rec.degraded ? "degraded"
-    : rec.needs_user_decision ? "escalated" : rec.clear ? "clear"
-    : `grill ${rec.rounds.length}/3`;
+  const label = rec.resolution ? "you decided" : rec.degraded ? "not AI-checked"
+    : rec.needs_user_decision ? "needs you" : rec.clear ? "clear"
+    : `round ${rec.rounds.length}/3`;
   const tone = rec.clear || rec.resolution ? "" : " warn-chip";
   return ` <span class="chip mono${tone}">${esc(label)}</span>`;
 }
@@ -229,9 +229,9 @@ function interviewPanel(step) {
     || { ambiguities: [], follow_up_questions: [] };
   const ambis = last.ambiguities.map((a) => `<li>${esc(a)}</li>`).join("");
   if (rec.needs_user_decision) {
-    return panel(`The grill — ${step.title} needs your decision`, `
+    return panel(`Follow-up questions — ${step.title} needs your decision`, `
       <p class="warn">Still unclear after ${rec.rounds.length} rounds.
-      Open ambiguities:</p><ul>${ambis}</ul>
+      What is still open:</p><ul>${ambis}</ul>
       <form id="resolve-form" data-step="${esc(step.id)}">
         <div class="field"><label>Your decision (final — the build follows
         it verbatim)</label><textarea name="decision" rows="3"></textarea></div>
@@ -243,10 +243,10 @@ function interviewPanel(step) {
     ? last.follow_up_questions.map((q) => `
       <div class="field"><label>${esc(q)}</label>
       <textarea data-fq="${esc(q)}" rows="2"></textarea></div>`).join("")
-    : `<div class="field"><label>Your response to the ambiguities above</label>
+    : `<div class="field"><label>Your response to the points above</label>
       <textarea data-fq="response" rows="2"></textarea></div>`;
-  return panel(`The grill — ${step.title} (round ${rec.rounds.length}/3)`, `
-    ${ambis ? `<p class="dim">Ambiguities found:</p><ul>${ambis}</ul>` : ""}
+  return panel(`Follow-up questions — ${step.title} (round ${rec.rounds.length}/3)`, `
+    ${ambis ? `<p class="dim">Still unclear:</p><ul>${ambis}</ul>` : ""}
     <form id="followup-form" data-step="${esc(step.id)}">${qs}
     <button type="submit" class="chip">Answer follow-ups</button></form>`);
 }
@@ -282,8 +282,8 @@ function checkpointPanel(step) {
       ${row("verdict", `<span class="chip mono">${esc(v.verdict)}</span>`)}
       ${row("summary", esc(v.summary))}
       ${row("recommendation", esc(v.recommendation))}</table>
-      ${v.degraded ? `<p class="warn">Degraded:
-        ${esc(v.degraded_reason || "boss CLI unreachable")}</p>` : ""}
+      ${v.degraded ? `<p class="warn">Not AI-checked:
+        ${esc(v.degraded_reason || "the AI agent could not be reached")}</p>` : ""}
       ${concerns ? `<p class="dim">Concerns</p><ul>${concerns}</ul>` : ""}
       ${qs ? `<p class="dim">Questions for you</p><ul>${qs}</ul>` : ""}`;
   }
@@ -295,12 +295,13 @@ function checkpointPanel(step) {
 
 function finishPanel(o) {
   if (!o.app_project) return panel("Finish",
-    `<p class="dim">Seed idea captured — seed projects do not compile a
-     build spec.</p>`);
-  return panel("Finish — compile spec + plan", `
-    <p>All steps complete. Compiling writes <span class="mono">.danza/spec.md</span>
-    and asks the boss for a validated task plan (may take a few minutes).</p>
-    <button id="finish-onboarding" class="chip">Compile spec + plan</button>`);
+    `<p class="dim">Your idea is saved — idea projects don't need a
+     build brief.</p>`);
+  return panel("Finish — create your brief + plan", `
+    <p>All steps complete. Finishing writes your project brief
+    (<span class="mono">.danza/spec.md</span>) and asks your AI team for a
+    step-by-step build plan (may take a few minutes).</p>
+    <button id="finish-onboarding" class="chip">Create brief + plan</button>`);
 }
 
 function activeStep(o) {
@@ -340,10 +341,10 @@ function renderOnboard() {
           : ""}</td></tr>`).join("");
   const banner = [
     onboard.error ? `<p class="warn mono">${esc(onboard.error)}</p>` : "",
-    onboard.busy ? `<p class="dim">working — the boss is thinking…</p>` : "",
-    o.boss_available ? "" : `<p class="warn">No headless boss runner
-      configured — AI review and the grill run degraded. Run
-      <code>danza runners .</code></p>`].join("");
+    onboard.busy ? `<p class="dim">working — your AI team is thinking…</p>` : "",
+    o.boss_available ? "" : `<p class="warn">No AI agent is connected —
+      reviews and follow-up questions will be skipped. Open Setup to
+      connect one.</p>`].join("");
   $("#onboard-panel").innerHTML = `<table class="kv">
     ${row("project type", esc(o.project_type ?? "not chosen yet"))}
     ${row("answers stored", esc(o.answered))}
@@ -732,7 +733,7 @@ function controlsHTML(live) {
          <summary class="dim">Advanced — raw event log</summary>
          <div class="console-log mono">${live.conductor.map(logLine).join("")}</div>
        </details>`
-    : `<p class="dim">No conductor activity yet.</p>`;
+    : `<p class="dim">No build activity yet.</p>`;
   return banner + buttons + teamStripHTML(live) + tail + events;
 }
 
@@ -782,8 +783,8 @@ function renderBuild() {
   // plan tree below the controls — rendering unchanged since Phase 2
   let planHTML;
   if (!buildData.plan) {
-    planHTML = `<p class="dim">No plan yet — the BUILD tab
-      arms once onboarding compiles spec.md and planning writes plan.json.</p>`;
+    planHTML = `<p class="dim">No plan yet — it appears here once
+      onboarding finishes.</p>`;
   } else if (buildData.plan.error) {
     planHTML = `<p class="warn mono">${esc(buildData.plan.error)}</p>`;
   } else {

@@ -508,7 +508,8 @@ def post_submit(root: str, body: dict) -> dict:
     blocking = interview_mod.blocking_phase(root, wiz)
     if blocking and blocking != step_id:
         raise GateConflict(
-            f"phase {blocking} has open ambiguities — settle the grill first")
+            f"the {blocking} step still has open questions — "
+            "answer those first")
     wiz.submit(step_id, answers)
     interview_mod.begin_phase(root, step_id)
     record = interview_mod.run_interview_round(
@@ -569,10 +570,12 @@ def post_approve(root: str, body: dict) -> dict:
     blocking = interview_mod.blocking_phase(root, wiz)
     if blocking:
         raise GateConflict(
-            f"cannot approve {step_id}: phase {blocking} has open ambiguities")
+            f"cannot approve {step_id} yet — the {blocking} step "
+            "still has open questions")
     result = wiz.result(step_id)
     if result is None:
-        raise GateConflict(f"cannot approve {step_id}: run the review first")
+        raise GateConflict(
+            f"run the AI review of {step_id} before approving it")
     wiz.record_result(step_id, result, approved=True)
     return {"ok": True, "onboarding": onboarding_summary(root)}
 
@@ -584,19 +587,20 @@ def finish_onboarding(root: str, command: Optional[list]) -> dict:
     without a valid plan."""
     wiz = Wizard(root)
     if wiz.project_type() not in APP_PROJECT_TYPES:
-        raise WizardError("seed projects capture an idea; only app "
-                          "projects (website/saas) compile a build spec")
+        raise WizardError("this project saved an idea — only website or "
+                          "SaaS projects get a build brief")
     if not wiz.is_complete():
         raise GateConflict(
-            "onboarding is not complete — finish every "
-            "step (checkpoints need approval) first")
+            "onboarding is not finished — complete every "
+            "step and approve each AI review first")
     blocking = interview_mod.blocking_phase(root, wiz)
     if blocking:
         raise GateConflict(
-            f"phase {blocking} has open ambiguities — settle the grill first")
+            f"the {blocking} step still has open questions — "
+            "answer those first")
     if command is None:
         raise PlanningUnavailable(
-            f"{checkpoints_mod.NO_BOSS_REASON} — planning needs one")
+            f"{checkpoints_mod.NO_BOSS_REASON} — planning needs an AI agent")
     answers = wiz.answers
     template = None
     chosen = answers.get("stack_template")

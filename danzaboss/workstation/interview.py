@@ -218,16 +218,20 @@ def record_followup_answers(root: str | os.PathLike, step_id: str,
             or not all(isinstance(k, str) and isinstance(v, str) and v.strip()
                        for k, v in answers.items())):
         raise InterviewError(
-            "follow-up answers must map question -> non-empty text")
+            "fill in at least one follow-up answer before sending")
     data = load_interview(root)
     record = data["phases"].get(step_id)
     if record is None or not record["rounds"]:
-        raise InterviewError(f"no interview round open for {step_id}")
+        raise InterviewError(
+            f"there are no open follow-up questions for {step_id}")
     if (record["clear"] or record["resolution"] is not None
             or record["degraded"]):
-        raise InterviewError(f"{step_id} interview already settled")
+        raise InterviewError(
+            f"the follow-up questions for {step_id} are already settled")
     if record["needs_user_decision"]:
-        raise InterviewError(f"{step_id} escalated: resolve it instead")
+        raise InterviewError(
+            f"{step_id} is waiting on your final decision — "
+            "use the decision box")
     record["rounds"][-1]["answers"].update(
         {k: v.strip() for k, v in answers.items()})
     save_interview(root, data)
@@ -240,13 +244,14 @@ def resolve(root: str | os.PathLike, step_id: str, decision: str) -> dict:
     the grill (spec section 7). Deliberately callable before escalation:
     the user may cut any open grill short with a final decision."""
     if not isinstance(decision, str) or not decision.strip():
-        raise InterviewError("resolution must be non-empty text")
+        raise InterviewError("type your decision before sending it")
     data = load_interview(root)
     record = data["phases"].get(step_id)
     if record is None:
-        raise InterviewError(f"no interview record for {step_id}")
+        raise InterviewError(f"nothing to decide for {step_id} yet")
     if record["clear"] or record["resolution"] is not None:
-        raise InterviewError(f"{step_id} interview already settled")
+        raise InterviewError(
+            f"the follow-up questions for {step_id} are already settled")
     record["resolution"] = decision.strip()
     record["needs_user_decision"] = False
     save_interview(root, data)
