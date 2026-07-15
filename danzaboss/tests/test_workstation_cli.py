@@ -5,6 +5,7 @@ All I/O is captured via redirect_stdout/stderr; no network, no real tmux
 or claude binary is needed.
 """
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -14,6 +15,8 @@ from pathlib import Path
 import _bootstrap  # noqa
 from danzaboss.cli import main
 from danzaboss.kernel.state import StateManager
+from danzaboss.workstation import execution, routing
+from danzaboss.workstation.planner import PLAN_JSON_RELPATH
 from danzaboss.workstation import runners as runners_mod
 import danzaboss.workstation.conductor as conductor_mod
 from danzaboss.workstation.conductor import (
@@ -93,6 +96,25 @@ class ConductCmd(unittest.TestCase):
         StateManager(
             str(self.root / ".danza" / "runtime" / "team-state.json")
         ).init()
+        config = runners_mod.load_runners(self.root)
+        seats = {seat: "claude" for seat in routing.SEATS}
+        seats["conductor"] = routing.BUILTIN_CONDUCTOR
+        routing.save_routing(self.root, {
+            "version": routing.SCHEMA_VERSION, "features_per_turn": 2,
+            "lineup": ["claude"], "seats": seats,
+        }, config)
+        unit = {
+            "id": "71-A", "feature_id": 71,
+            "description": "implement the unit", "kind": "backend",
+            "size_est": 10, "writes": ["src/x.py"],
+            "verification": {"kind": "automated_test", "detail": "exit 0"},
+        }
+        data = {"spec_ref": "features#1", "tasks": [unit],
+                "order": ["71-A"],
+                "execution": execution.initial_execution(["71-A"]),
+                "calibration": []}
+        (self.root / PLAN_JSON_RELPATH).write_text(json.dumps(data),
+                                                   encoding="utf-8")
 
     def test_no_registry_exits_2(self):
         """`conduct` with no runners.json must exit 2 and emit a helpful
@@ -144,6 +166,92 @@ class ConductCmd(unittest.TestCase):
         self.assertEqual(rc, 0)
         pidfile = self.root / conductor_mod.PIDFILE_RELPATH
         self.assertFalse(pidfile.exists(), "pidfile must be released after run()")
+
+
+class UnitCmd(unittest.TestCase):
+    """The installed CLI is the production caller for Task 5 mutations."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        runtime = self.root / ".danza" / "runtime"
+        runtime.mkdir(parents=True)
+        self.manager = StateManager(str(runtime / "team-state.json"))
+        self.manager.init(current_boss="claude")
+
+    def write_plan(self, *, verify="exit 0", flags=()):
+        unit = {
+            "id": "71-A", "feature_id": 71,
+            "description": "implement the unit", "kind": "backend",
+            "size_est": 10, "writes": ["src/x.py"],
+            "flags": list(flags),
+            "verification": {"kind": "automated_test", "detail": verify},
+        }
+        data = {
+            "spec_ref": "features#1", "tasks": [unit], "order": ["71-A"],
+            "execution": execution.initial_execution(["71-A"]),
+            "calibration": [],
+        }
+        (self.root / PLAN_JSON_RELPATH).write_text(json.dumps(data),
+                                                   encoding="utf-8")
+
+    def run_unit(self, *args):
+        out = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["unit", *args])
+        payload = json.loads(out.getvalue()) if out.getvalue().strip() else None
+        return rc, payload, err.getvalue()
+
+    def test_start_and_verify_success_call_the_real_lifecycle(self):
+        self.write_plan()
+        rc, started, _ = self.run_unit(
+            "start", str(self.root), "71-A", "--actor", "claude")
+        self.assertEqual(rc, 0)
+        self.assertEqual(started["unit"]["status"], "in_progress")
+
+        rc, verified, _ = self.run_unit(
+            "verify", str(self.root), "71-A", "--actor", "claude")
+        self.assertEqual(rc, 0)
+        self.assertTrue(verified["verification"]["passed"])
+        self.assertEqual(verified["unit"]["status"], "completed")
+        self.assertEqual(verified["conclusion"], "no_work")
+
+    def test_verify_failure_returns_one_and_does_not_count(self):
+        self.write_plan(verify="exit 9")
+        self.run_unit("start", str(self.root), "71-A",
+                      "--actor", "claude")
+
+        rc, verified, _ = self.run_unit(
+            "verify", str(self.root), "71-A", "--actor", "claude")
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(verified["verification"]["passed"])
+        self.assertEqual(self.manager.load().features_completed_this_turn, 0)
+
+    def test_block_and_conclude_have_explicit_results(self):
+        self.write_plan()
+        self.run_unit("start", str(self.root), "71-A",
+                      "--actor", "claude")
+
+        rc, blocked, _ = self.run_unit(
+            "block", str(self.root), "71-A", "--actor", "claude",
+            "--reason", "missing API key")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(blocked["conclusion"], "blocked")
+        rc, concluded, _ = self.run_unit(
+            "conclude", str(self.root), "--actor", "claude")
+        self.assertEqual(rc, 0)
+        self.assertEqual(concluded["conclusion"], "blocked")
+
+    def test_bad_unit_usage_exits_two_without_traceback(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = main(["unit", "verify", str(self.root)])
+        self.assertEqual(rc, 2)
+        self.assertNotIn("Traceback", err.getvalue())
 
 
 if __name__ == "__main__":

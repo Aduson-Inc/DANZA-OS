@@ -10,6 +10,7 @@ from pathlib import Path
 import _bootstrap  # noqa
 from danzaboss.kernel.state import StateManager
 from danzaboss.workstation import planner as planner_mod
+from danzaboss.workstation import execution as execution_mod
 from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation import runners as runners_mod
 from danzaboss.workstation.conductor import (IGNITION_PHRASE, LOG_RELPATH,
@@ -57,9 +58,18 @@ class LoopFixture(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         (self.root / ".danza" / "runtime").mkdir(parents=True)
-        runners_mod.save_runners(
-            self.root, runners_mod.default_config({"claude": True,
-                                                   "codex": False}))
+        config = runners_mod.default_config({"claude": True,
+                                             "codex": False})
+        config["runners"]["claude"]["activation"] = "typed"
+        runners_mod.save_runners(self.root, config)
+        seats = {seat: "claude" for seat in routing_mod.SEATS}
+        seats["conductor"] = routing_mod.BUILTIN_CONDUCTOR
+        routing_mod.save_routing(
+            self.root, {"version": routing_mod.SCHEMA_VERSION,
+                        "features_per_turn": 2,
+                        "lineup": ["claude"], "seats": seats}, config)
+        (self.root / planner_mod.PLAN_JSON_RELPATH).write_text(
+            json.dumps(_plan_payload()), encoding="utf-8")
         self.manager = StateManager(str(self.root / TEAM_STATE_RELPATH))
         self.manager.init(mode="relay", current_boss="claude")
         self.host = FakeHost()
@@ -247,8 +257,8 @@ def _plan_payload() -> dict:
 
 class Routing(LoopFixture):
     """P4 T8: each ignition consults the seat router (next_boss) for the
-    routed runner's argv; any routing/plan defect falls back to today's
-    single-boss behavior with a logged routing_fallback."""
+    routed runner's argv. Task 5 makes routing failures fail closed: the
+    postman logs and waits instead of choosing a fallback boss."""
 
     def install_team(self, *, claude_activation: str = "argv") -> None:
         """Two-runner lineup: build -> claude, qa -> codex, plan on disk."""
@@ -292,39 +302,52 @@ class Routing(LoopFixture):
         _, _, argv = self.host.ignites[0]
         self.assertEqual(argv, ["claude", "-p", "--output-format", "json"])
 
-    def test_no_routing_keeps_single_boss_argv_and_logs_fallback(self):
-        # Zero behavior change for existing users: bare boss argv, but the
-        # missing routing is flagged, never silent.
-        self.conductor().tick()
-        _, _, argv = self.host.ignites[0]
-        self.assertEqual(argv, ["claude"])
-        event = self.ignite_events()[-1]
-        self.assertEqual(event["runner"], "claude")
-        self.assertIsNone(event["work_type"])
-        fallbacks = [e for e in self.log_events()
-                     if e["event"] == "routing_fallback"]
-        self.assertTrue(fallbacks and fallbacks[-1]["reason"])
+    def test_no_routing_waits_without_choosing_configured_boss(self):
+        (self.root / routing_mod.ROUTING_RELPATH).unlink()
+        self.assertIs(self.conductor().tick(), Action.WAIT)
+        self.assertEqual(self.host.ignites, [])
+        errors = [e for e in self.log_events()
+                  if e["event"] == "routing_error"]
+        self.assertTrue(errors and errors[-1]["reason"])
 
-    def test_corrupt_routing_falls_back_with_logged_reason(self):
-        # The relay never dies on a hand-edited config.
+    def test_corrupt_routing_waits_with_logged_reason(self):
         self.install_team()
         (self.root / routing_mod.ROUTING_RELPATH).write_text(
             "{not json", encoding="utf-8")
         con = self.conductor()
-        self.assertIs(con.tick(), Action.IGNITE)
-        _, _, argv = self.host.ignites[0]
-        self.assertEqual(argv, ["claude"])
-        self.assertIn("routing_fallback",
+        self.assertIs(con.tick(), Action.WAIT)
+        self.assertEqual(self.host.ignites, [])
+        self.assertIn("routing_error",
                       {e["event"] for e in self.log_events()})
 
-    def test_missing_plan_falls_back_with_logged_reason(self):
+    def test_missing_plan_waits_with_logged_reason(self):
         self.install_team()
         (self.root / planner_mod.PLAN_JSON_RELPATH).unlink()
-        self.conductor().tick()
-        _, _, argv = self.host.ignites[0]
-        self.assertEqual(argv, ["claude"])
-        self.assertIn("routing_fallback",
+        self.assertIs(self.conductor().tick(), Action.WAIT)
+        self.assertEqual(self.host.ignites, [])
+        self.assertIn("routing_error",
                       {e["event"] for e in self.log_events()})
+
+    def test_no_ready_work_waits_without_fallback_ignition(self):
+        self.install_team()
+        data = json.loads((self.root / planner_mod.PLAN_JSON_RELPATH)
+                          .read_text(encoding="utf-8"))
+        data["execution"] = execution_mod.initial_execution(data["order"])
+        for unit_id in data["order"]:
+            data["execution"][unit_id].update({
+                "status": "completed", "started_at": "start",
+                "completed_at": "done", "actual_minutes": 1,
+                "verification_attempts": 1, "verification_passed": True,
+                "verification_evidence": [{"passed": True}],
+                "completed_turn": 0,
+            })
+        (self.root / planner_mod.PLAN_JSON_RELPATH).write_text(
+            json.dumps(data), encoding="utf-8")
+
+        self.assertIs(self.conductor().tick(), Action.WAIT)
+        self.assertEqual(self.host.ignites, [])
+        self.assertIn("no dependency-ready",
+                      self.log_events()[-1]["reason"])
 
     def test_two_runner_handoff_ignites_each_routed_runner(self):
         # Acceptance (spec section 8): turn 0 routes feature 1.1 (build ->
@@ -333,6 +356,19 @@ class Routing(LoopFixture):
         self.install_team()
         con = self.conductor()
         con.tick()                                     # ignite turn 0
+        data = json.loads((self.root / planner_mod.PLAN_JSON_RELPATH)
+                          .read_text(encoding="utf-8"))
+        data["execution"] = execution_mod.initial_execution(data["order"])
+        for unit_id in ("1.1", "1.2"):
+            data["execution"][unit_id].update({
+                "status": "completed", "started_at": "start",
+                "completed_at": "done", "actual_minutes": 1,
+                "verification_attempts": 1, "verification_passed": True,
+                "verification_evidence": [{"passed": True}],
+                "completed_turn": 0,
+            })
+        (self.root / planner_mod.PLAN_JSON_RELPATH).write_text(
+            json.dumps(data), encoding="utf-8")
         self.manager.transition(to_status="in_progress", actor="claude")
         self.manager.handoff("codex")                  # -> turn 1
         self.host.alive_now = False                    # session exits

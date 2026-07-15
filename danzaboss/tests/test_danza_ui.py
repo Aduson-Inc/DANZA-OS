@@ -17,6 +17,7 @@ from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
 from danzaboss.workstation import server as server_mod
+from danzaboss.workstation import execution as execution_mod
 from danzaboss.workstation.conductor import (PIDFILE_RELPATH as
                                              CONDUCTOR_PIDFILE, session_name)
 from danzaboss.workstation.routing import (ROUTING_RELPATH,
@@ -855,6 +856,53 @@ class TestBuildApi(unittest.TestCase):
         # the detached conductor's output lands in a tailable log file
         log = Path(self.root) / ".danza" / "runtime" / "conduct-ui.log"
         self.assertTrue(log.exists())
+        state = json.loads((Path(self.root) / ".danza" / "runtime" /
+                            "team-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["current_boss"], "stub")
+        self.assertEqual(state["max_features_per_turn"], 2)
+        self.assertEqual(out["conclusion"], "continue")
+
+    def test_start_preflight_concludes_no_work_without_spawning(self):
+        self._pass_start_gate()
+        data = json.loads(json.dumps(PLAN))
+        data["execution"] = execution_mod.initial_execution(data["order"])
+        data["calibration"] = []
+        for unit_id in data["order"]:
+            data["execution"][unit_id].update({
+                "status": "completed", "started_at": "start",
+                "completed_at": "done", "actual_minutes": 1,
+                "verification_attempts": 1, "verification_passed": True,
+                "verification_evidence": [{"passed": True}],
+                "completed_turn": 0,
+            })
+        (Path(self.root) / ".danza" / "plan.json").write_text(
+            json.dumps(data), encoding="utf-8")
+
+        out = server_mod.post_build_start(
+            self.root, {}, popen=lambda *a, **k: self.fail("must not spawn"))
+
+        self.assertTrue(out["ok"])
+        self.assertIsNone(out["pid"])
+        self.assertEqual(out["conclusion"], "no_work")
+        state = json.loads((Path(self.root) / ".danza" / "runtime" /
+                            "team-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["status"], "done")
+
+    def test_start_preflight_concludes_hard_stop_without_spawning(self):
+        self._pass_start_gate()
+        data = json.loads(json.dumps(PLAN))
+        data["tasks"][0]["subtasks"][0]["flags"] = ["auth"]
+        (Path(self.root) / ".danza" / "plan.json").write_text(
+            json.dumps(data), encoding="utf-8")
+
+        out = server_mod.post_build_start(
+            self.root, {}, popen=lambda *a, **k: self.fail("must not spawn"))
+
+        self.assertIsNone(out["pid"])
+        self.assertEqual(out["conclusion"], "hard_stop")
+        state = json.loads((Path(self.root) / ".danza" / "runtime" /
+                            "team-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["status"], "blocked")
 
     def test_start_gates_on_setup_and_plan(self):
         def exploding_popen(*a, **k):

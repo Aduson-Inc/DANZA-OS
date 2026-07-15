@@ -34,8 +34,9 @@ from ..cortex.inject import est_tokens
 from ..cortex.sqlite_backend import SqliteBackend
 from ..cortex.ui.server import CortexUIHandler, cross_origin_reason
 from ..kernel.profile import active_profile
-from ..kernel.state import StateError, TeamState
+from ..kernel.state import StateError, StateManager, TeamState
 from . import checkpoints as checkpoints_mod
+from . import execution as execution_mod
 from . import interview as interview_mod
 from . import research as research_mod
 from . import routing as routing_mod
@@ -630,6 +631,24 @@ def post_build_start(root: str, body: dict,
     pid = _conductor_pid(root)
     if pid is not None and alive(pid):
         raise GateConflict("the build crew is already running")
+    try:
+        routing = routing_mod.load_routing(root)
+        manager = StateManager(str(Path(root) / TEAM_STATE_RELPATH))
+        if not (Path(root) / TEAM_STATE_RELPATH).exists():
+            manager.init(mode="relay", current_boss=routing["lineup"][0],
+                         max_features_per_turn=routing["features_per_turn"])
+        state = manager.load()
+        conclusion = execution_mod.apply_turn_conclusion(
+            root, manager, state.current_boss)
+    except (execution_mod.ExecutionError, routing_mod.RoutingError,
+            RunnerError, StateError) as exc:
+        raise GateConflict(f"build execution state is invalid: {exc}") from exc
+    if conclusion["conclusion"] in {
+            execution_mod.TurnConclusion.NO_WORK.value,
+            execution_mod.TurnConclusion.BLOCKED.value,
+            execution_mod.TurnConclusion.HARD_STOP.value}:
+        return {"ok": True, "pid": None,
+                "conclusion": conclusion["conclusion"]}
     log_path = Path(root) / CONDUCT_LOG_RELPATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # append mode: a restarted relay extends the evidence, never truncates
@@ -638,7 +657,8 @@ def post_build_start(root: str, body: dict,
                       "conduct", root],
                      stdout=log, stderr=subprocess.STDOUT,
                      start_new_session=True)
-    return {"ok": True, "pid": proc.pid}
+    return {"ok": True, "pid": proc.pid,
+            "conclusion": conclusion["conclusion"]}
 
 
 def post_build_stop(root: str, body: dict,

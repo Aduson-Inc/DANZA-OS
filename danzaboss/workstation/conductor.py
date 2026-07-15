@@ -196,8 +196,8 @@ class Conductor:
         # (pick_host may have degraded tmux -> headless); trusting the
         # raw config here would feed interactive argv to a headless host.
         self._mode = session_mode or self._config.get("session_host")
-        # Routing degrades to this boss (see _route), so it must be
-        # launchable even when routing.json routes every planned turn.
+        # The configured boss remains a required registry invariant, but the
+        # conductor never substitutes it for a missing kernel route.
         runners_mod.boss_runner(self._config)   # no boss => no relay
         self._argv_for(self._config["boss"])    # unusable argv => no relay
         self._manager = StateManager(str(self._root / TEAM_STATE_RELPATH))
@@ -243,13 +243,13 @@ class Conductor:
             argv.append(IGNITION_PHRASE)
         return argv
 
-    def _route(self, state: TeamState) -> tuple[str, str | None]:
+    def _route(self, state: TeamState) -> tuple[str, str] | None:
         """(runner, work_type) for this ignition. routing.json and
         plan.json are re-read on EVERY ignite — setup edits apply from the
-        next turn, never mid-session (Decision 7). Any routing or plan
-        defect degrades to today's single-boss behavior with a logged
-        routing_fallback: the relay never dies on a hand-edited config,
-        but the degradation is flagged, not silent."""
+        next turn, never mid-session (Decision 7). Routing and plan defects
+        fail closed with a logged error. Choosing a fallback boss would make
+        the postman a scheduler and could ignite work after a terminal kernel
+        conclusion."""
         try:
             routing = routing_mod.load_routing(self._root)
             plan_data = json.loads(
@@ -260,8 +260,8 @@ class Conductor:
             # RoutingError and JSONDecodeError are ValueErrors; a missing
             # plan.json is an OSError; a re-validated registry gone bad is
             # a RunnerError.
-            self.log("routing_fallback", reason=str(exc))
-            return self._config["boss"], None
+            self.log("routing_error", reason=str(exc))
+            return None
 
     def _refresh_watch(self, state: TeamState) -> None:
         alive = self._host.alive(self._name)
@@ -312,7 +312,10 @@ class Conductor:
             self._stall_logged = True  # once per episode
         action = decide(state, self._watch)
         if action is Action.IGNITE:
-            runner, work_type = self._route(state)
+            routed = self._route(state)
+            if routed is None:
+                return Action.WAIT
+            runner, work_type = routed
             argv = self._argv_for(runner, routed=work_type is not None)
             self._host.ignite(self._name, self._root, argv)
             self._watch = replace(self._watch, session_alive=True,

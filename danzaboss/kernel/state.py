@@ -92,10 +92,10 @@ class TeamState:
 
 # valid status transitions (deterministic state machine)
 _TRANSITIONS: dict[str, set[str]] = {
-    "ready": {"in_progress", "blocked"},
+    "ready": {"in_progress", "blocked", "done"},
     "in_progress": {"in_progress", "blocked", "awaiting_handoff", "done"},
     "blocked": {"in_progress", "ready", "awaiting_handoff"},
-    "awaiting_handoff": {"ready", "in_progress"},
+    "awaiting_handoff": {"ready", "in_progress", "blocked", "done"},
     "done": {"ready"},
 }
 

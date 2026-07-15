@@ -33,7 +33,11 @@ class PlanPayload(unittest.TestCase):
         raw["tasks"][0]["subtasks"][0]["cost_usd"] = 999
         tasks = parse_plan(raw)
         payload = plan_payload(".danza/spec.md", tasks, order_tasks(tasks))
-        self.assertEqual(set(payload), {"spec_ref", "tasks", "order"})
+        self.assertEqual(set(payload),
+                         {"spec_ref", "tasks", "order", "execution",
+                          "calibration"})
+        self.assertEqual(set(payload["execution"]), {"1.1", "1.2"})
+        self.assertEqual(payload["calibration"], [])
         section = payload["tasks"][0]
         self.assertEqual(set(section), {"id", "description", "subtasks"})
         leaf = section["subtasks"][0]

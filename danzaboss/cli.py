@@ -14,6 +14,8 @@ Commands:
   danzaboss.cli runners <root>                  detect/show the runner registry for a project root
   danzaboss.cli conduct <root> [--poll N] [--max-ticks N]
                                                 run the conductor relay loop against a project root
+  danzaboss.cli unit <start|verify|block|conclude> <root> [unit-id] --actor NAME
+                                                mutate verified atomic-unit execution state
   danzaboss.cli init [dir]                      scaffold .claude/ + .danza/ into a repo (danza init)
   danzaboss.cli doctor [dir]                    env + activation health checks (danza doctor)
   danzaboss.cli ui [dir] [--port N] [--no-open]  DANZA-OS product dashboard on 127.0.0.1:33100
@@ -30,6 +32,7 @@ from pathlib import Path
 
 from .cortex import commands as cortex_commands
 from .kernel.profile import active_profile
+from .kernel.state import StateError, StateManager, TeamState
 from .kernel.tiers import recommend_tier
 from .runtime.scan import profile_repo
 from .runtime.verify import run_verification
@@ -42,6 +45,8 @@ from .workstation.runners import (RunnerError, RUNNERS_RELPATH,
                                   save_runners, load_runners)
 from .workstation.hosts import HostError, TmuxHost, HeadlessHost, pick_host
 from .workstation.conductor import Conductor, ConductorError, Action
+from .workstation.conductor import TEAM_STATE_RELPATH
+from .workstation import execution as execution_mod
 from .product.doctor import run_doctor
 from .product.resume import session_start_context
 from .product.scaffold import ScaffoldError, scaffold
@@ -318,6 +323,65 @@ def _cmd_conduct(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_unit(argv: list[str]) -> int:
+    """Production boundary for Task 5 atomic-unit lifecycle mutations."""
+    usage = ("usage: danza unit <start|verify|block|conclude> <root> "
+             "[unit-id] --actor NAME [--reason TEXT]")
+    action = argv[0] if argv else ""
+    if action not in {"start", "verify", "block", "conclude"} or len(argv) < 2:
+        print(usage, file=sys.stderr)
+        return 2
+    root = argv[1]
+    needs_unit = action != "conclude"
+    if needs_unit and len(argv) < 3:
+        print(usage, file=sys.stderr)
+        return 2
+    unit_id = argv[2] if needs_unit else None
+    options = argv[3:] if needs_unit else argv[2:]
+
+    def option(name: str) -> str | None:
+        if name not in options:
+            return None
+        index = options.index(name)
+        if index + 1 >= len(options):
+            return None
+        return options[index + 1]
+
+    actor = option("--actor")
+    if not actor:
+        print(usage, file=sys.stderr)
+        return 2
+    reason = option("--reason")
+    if action == "block" and not reason:
+        print(usage, file=sys.stderr)
+        return 2
+    manager = StateManager(str(Path(root) / TEAM_STATE_RELPATH))
+    try:
+        if action == "start":
+            result = execution_mod.begin_unit(root, manager, actor, unit_id)
+        elif action == "verify":
+            result = execution_mod.verify_unit(root, manager, actor, unit_id)
+        elif action == "block":
+            result = execution_mod.block_active_unit(
+                root, manager, actor, unit_id, reason)
+        else:
+            result = execution_mod.apply_turn_conclusion(
+                root, manager, actor)
+    except (execution_mod.ExecutionError, StateError, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    def serializable(value):
+        if isinstance(value, TeamState):
+            return value.to_json()
+        raise TypeError(f"cannot serialize {type(value).__name__}")
+
+    print(json.dumps(result, indent=2, default=serializable))
+    if action == "verify" and not result["verification"]["passed"]:
+        return 1
+    return 0
+
+
 def _parse_ui_args(argv: list[str]) -> tuple[str, int | None, bool]:
     """danza ui [dir] [--port N] [--no-open] -> (root, port, open_browser).
 
@@ -408,7 +472,7 @@ _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
              "selftest": _cmd_selftest, "hook": _cmd_hook,
              "cortex": _cmd_cortex, "profile": _cmd_profile,
              "tier": _cmd_tier, "runners": _cmd_runners,
-             "conduct": _cmd_conduct, "init": _cmd_init,
+             "conduct": _cmd_conduct, "unit": _cmd_unit, "init": _cmd_init,
              "doctor": _cmd_doctor, "ui": _cmd_ui}
 
 
@@ -416,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in _COMMANDS:
         print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier"
-              "|runners|conduct|init|doctor|ui> ...",
+              "|runners|conduct|unit|init|doctor|ui> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:])

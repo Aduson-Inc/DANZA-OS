@@ -1,8 +1,8 @@
 """Tests for danzaboss.workstation.routing — deterministic seat router.
 
-Covers the P4 T3 contract: strengths-based seat suggestion, fail-closed
-routing.json validation, save/load round-trip, and the pure next_boss
-decision (kind table hit, rotation fallback, cursor clamp, unknown kind).
+Covers the P4 T3 contract plus Task 5 ledger routing: strengths-based seat
+suggestion, fail-closed routing.json validation, save/load round-trip, and
+the pure next_boss decision for the first dependency-ready unit.
 """
 import _bootstrap  # noqa
 import json
@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from danzaboss.kernel.state import TeamState
+from danzaboss.workstation import execution
 from danzaboss.workstation.routing import (
     BUILTIN_CONDUCTOR,
     DEFAULT_FEATURES_PER_TURN,
@@ -62,7 +63,7 @@ def _plan(first_kind: str = "backend") -> dict:
                 "verification": {"kind": "automated_test",
                                  "detail": "pytest tests/x.py"}}
 
-    return {
+    data = {
         "spec_ref": "spec.md",
         "tasks": [
             {"id": "1", "description": "section one",
@@ -72,6 +73,21 @@ def _plan(first_kind: str = "backend") -> dict:
         ],
         "order": ["1.1", "1.2", "2.1"],
     }
+    data["execution"] = execution.initial_execution(data["order"])
+    data["calibration"] = []
+    return data
+
+
+def _completed(plan: dict, *unit_ids: str) -> dict:
+    for unit_id in unit_ids:
+        plan["execution"][unit_id].update({
+            "status": "completed", "started_at": "start",
+            "completed_at": "done", "actual_minutes": 1,
+            "verification_attempts": 1, "verification_passed": True,
+            "verification_evidence": [{"passed": True}],
+            "completed_turn": 0,
+        })
+    return plan
 
 
 class TestSuggestSeats(unittest.TestCase):
@@ -261,7 +277,7 @@ class TestPersistence(unittest.TestCase):
 
 
 class TestNextBoss(unittest.TestCase):
-    """Pure routing decision: cursor -> kind -> work type -> seat."""
+    """Pure routing decision: ready unit -> kind -> work type -> seat."""
 
     ROUTING = {"version": SCHEMA_VERSION, "features_per_turn": 2,
                "lineup": ["claude", "codex"],
@@ -269,20 +285,19 @@ class TestNextBoss(unittest.TestCase):
                          "conductor": BUILTIN_CONDUCTOR, "qa": "codex"}}
 
     def test_kind_table_hit(self):
-        # turn 0, 2 features/turn -> cursor 0 -> feature 1.1, kind backend
-        # -> work type build -> seat claude
         state = TeamState(turn_number=0)
         self.assertEqual(next_boss(self.ROUTING, _plan(), state), "claude")
 
-    def test_second_turn_lands_on_qa_seat(self):
-        # turn 1 -> cursor 2 -> feature 2.1, kind test -> qa -> codex
+    def test_completed_units_reveal_dependency_ready_qa_seat(self):
         state = TeamState(turn_number=1)
-        self.assertEqual(next_boss(self.ROUTING, _plan(), state), "codex")
+        plan = _completed(_plan(), "1.1", "1.2")
+        self.assertEqual(next_boss(self.ROUTING, plan, state), "codex")
 
-    def test_cursor_clamps_at_plan_end(self):
-        # turn 9 -> cursor 18, clamped to last feature 2.1 -> qa -> codex
+    def test_completed_plan_has_no_route_instead_of_cursor_clamp(self):
         state = TeamState(turn_number=9)
-        self.assertEqual(next_boss(self.ROUTING, _plan(), state), "codex")
+        with self.assertRaisesRegex(RoutingError, "no dependency-ready"):
+            next_boss(self.ROUTING,
+                      _completed(_plan(), "1.1", "1.2", "2.1"), state)
 
     def test_builtin_seat_falls_back_to_rotation(self):
         # Hand-edited file: qa seat says "builtin" -> rotation by turn.
@@ -290,16 +305,16 @@ class TestNextBoss(unittest.TestCase):
                    "lineup": ["claude", "codex"],
                    "seats": {**{s: "claude" for s in SEATS},
                              "qa": BUILTIN_CONDUCTOR}}
-        state = TeamState(turn_number=1)  # feature 2.1 -> qa -> fallback
-        self.assertEqual(next_boss(routing, _plan(), state),
+        state = TeamState(turn_number=1)
+        self.assertEqual(next_boss(routing, _completed(_plan(), "1.1", "1.2"), state),
                          routing["lineup"][1 % 2])
 
     def test_missing_seat_value_falls_back_to_rotation(self):
         routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,
                    "lineup": ["claude", "codex"],
                    "seats": {s: "claude" for s in SEATS if s != "qa"}}
-        state = TeamState(turn_number=2)  # cursor clamps to 2.1 -> qa
-        self.assertEqual(next_boss(routing, _plan(), state),
+        state = TeamState(turn_number=2)
+        self.assertEqual(next_boss(routing, _completed(_plan(), "1.1", "1.2"), state),
                          routing["lineup"][2 % 2])
 
     def test_unknown_kind_raises(self):

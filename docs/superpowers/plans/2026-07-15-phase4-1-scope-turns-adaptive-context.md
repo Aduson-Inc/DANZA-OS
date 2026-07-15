@@ -20,6 +20,16 @@
 3. **Product-scope artifacts.** Add validated revisioned `features.json`, stable product IDs, approval state, immutable completions, concise summaries, acceptance criteria, and generated `feature-list.md`. Test round trips, stale approvals, status derivation, and corruption.
 4. **Atomic plan units.** Add product references and new `71-A` leaf IDs while retaining legacy dotted IDs. Enforce 1–20 sizing, sub-3 warnings, 1–3 write areas, one concern, verification, dependencies, and flags. Replace feature-prefix rendering/counting with ordered leaves.
 5. **Verified completion and routing.** Persist unit status/timing, route the first dependency-ready incomplete leaf, count successful verification once, conclude at quota/no work/block/hard stop, and record overruns. Remove arithmetic cursors. Keep conductor postman-only.
+
+   **Completion evidence — corrected 2026-07-15:** The installed `danza unit
+   start|verify|block|conclude` boundary now drives the execution ledger;
+   verification runs the concrete atomic-unit command and persists its result,
+   timing, calibration, and idempotent unit count. BUILD start initializes and
+   concludes kernel state before spawning the conductor. The conductor no
+   longer selects a fallback boss when routing has no ready work. Verification:
+   8 Task 5 lifecycle tests, 123 execution/routing/conductor tests, 8 BUILD
+   integration tests, 279 bounded call-graph regressions, 84 dashboard/onboarding
+   HTTP regressions, and the 8/8 cold-start self-test all passed.
 6. **PROJECT backend.** Split finish flow into discovery → draft scope → approval → decomposition. Add new/existing modes, deterministic takeover audit, coverage/gap acknowledgement, fingerprint caching, and server endpoints with revision conflicts.
 7. **PROJECT UI.** Rename ONBOARD, present Create New/Continue Existing, audit progress/results/gaps, interview continuation, concise draft scope, expandable acceptance details, and exact-revision approval.
 8. **BUILD backend.** Add live scope/unit payloads, transactional progress updates, feature status derivation, immutable completed work, draft additions, approval/replanning of pending work, and next-handoff queueing.

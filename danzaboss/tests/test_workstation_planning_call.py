@@ -120,7 +120,10 @@ class PlanningCall(unittest.TestCase):
         on_disk = json.loads(
             (self.root / PLAN_JSON_RELPATH).read_text(encoding="utf-8"))
         self.assertEqual(on_disk["spec_ref"], str(compiler.SPEC_RELPATH))
-        self.assertEqual(set(on_disk), {"spec_ref", "tasks", "order"})
+        self.assertEqual(set(on_disk),
+                         {"spec_ref", "tasks", "order", "execution",
+                          "calibration"})
+        self.assertEqual(set(on_disk["execution"]), set(on_disk["order"]))
         self.assertNotIn("cost_usd", on_disk["tasks"][0])
         self.assertEqual(result["plan"], on_disk)
 

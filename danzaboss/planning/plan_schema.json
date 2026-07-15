@@ -22,7 +22,7 @@
   "definitions": {
     "execution_record": {
       "type": "object",
-      "required": ["status", "started_at", "completed_at", "actual_minutes", "verification_attempts", "verification_passed", "blocker_reason", "completed_turn"],
+      "required": ["status", "started_at", "completed_at", "actual_minutes", "verification_attempts", "verification_passed", "verification_evidence", "blocker_reason", "completed_turn"],
       "properties": {
         "status": {"enum": ["pending", "in_progress", "blocked", "completed"]},
         "started_at": {"type": ["string", "null"]},
@@ -30,8 +30,26 @@
         "actual_minutes": {"type": ["number", "null"], "minimum": 0},
         "verification_attempts": {"type": "integer", "minimum": 0},
         "verification_passed": {"type": "boolean"},
+        "verification_evidence": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/verification_evidence"}
+        },
         "blocker_reason": {"type": ["string", "null"]},
         "completed_turn": {"type": ["integer", "null"], "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "verification_evidence": {
+      "type": "object",
+      "required": ["command", "passed", "exit_code", "stdout_tail", "stderr_tail", "timed_out", "recorded_at"],
+      "properties": {
+        "command": {"type": "string"},
+        "passed": {"type": "boolean"},
+        "exit_code": {"type": "integer"},
+        "stdout_tail": {"type": "string"},
+        "stderr_tail": {"type": "string"},
+        "timed_out": {"type": "boolean"},
+        "recorded_at": {"type": "string"}
       },
       "additionalProperties": false
     },

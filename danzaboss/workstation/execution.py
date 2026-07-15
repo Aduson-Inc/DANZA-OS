@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from danzaboss.kernel.state import StateManager, TeamState
+from danzaboss.runtime.verify import VerifyResult, run_verification
 from danzaboss.workstation import planner
 
 
@@ -57,6 +58,7 @@ def initial_execution(order: list[str] | tuple[str, ...]) -> dict[str, dict]:
             "actual_minutes": None,
             "verification_attempts": 0,
             "verification_passed": False,
+            "verification_evidence": [],
             "blocker_reason": None,
             "completed_turn": None,
         }
@@ -127,15 +129,24 @@ def execution_records(plan_data: dict) -> dict[str, dict]:
         if status not in UNIT_STATUSES:
             raise ExecutionError(
                 f"execution record {unit_id!r} has invalid status {status!r}")
+        evidence = record.get("verification_evidence", [])
+        if (not isinstance(evidence, list)
+                or not all(isinstance(item, dict) for item in evidence)):
+            raise ExecutionError(
+                f"execution record {unit_id!r} verification_evidence "
+                "must be an array")
+        record = {**record, "verification_evidence": list(evidence)}
         if status == "completed":
             if (record.get("verification_passed") is not True
                     or not isinstance(record.get("completed_at"), str)
                     or isinstance(record.get("actual_minutes"), bool)
-                    or not isinstance(record.get("actual_minutes"), (int, float))):
+                    or not isinstance(record.get("actual_minutes"), (int, float))
+                    or not evidence
+                    or evidence[-1].get("passed") is not True):
                 raise ExecutionError(
                     f"completed execution record {unit_id!r} lacks passing "
-                    "verification and timing")
-        records[unit_id] = dict(record)
+                    "verification evidence and timing")
+        records[unit_id] = record
     return records
 
 
@@ -186,21 +197,30 @@ def apply_turn_conclusion(root: str | os.PathLike, manager: StateManager,
     """
     plan_data = load_execution_plan(root)
     state = manager.load()
+    if actor != state.current_boss:
+        raise ExecutionError(
+            f"turn lock: {actor!r} does not own the active turn")
     conclusion = conclude_turn(plan_data, state)
     if conclusion is TurnConclusion.CONTINUE:
         return {"conclusion": conclusion.value, "state": state}
     if conclusion is TurnConclusion.QUOTA:
         if not next_boss:
-            raise ExecutionError("quota conclusion requires next_boss")
-        # Local import avoids making routing depend on an eager import cycle.
-        from danzaboss.workstation.routing import load_routing
-        next_quota = load_routing(root)["features_per_turn"]
+            # Local import avoids making routing depend on an eager import cycle.
+            from danzaboss.workstation import routing
+            routing_data = routing.load_routing(root)
+            next_boss, _ = routing.route_turn(routing_data, plan_data, state)
+        else:
+            from danzaboss.workstation.routing import load_routing
+            routing_data = load_routing(root)
+        next_quota = routing_data["features_per_turn"]
         state = manager.handoff(next_boss, actor=actor,
                                 max_features_per_turn=next_quota)
     elif conclusion is TurnConclusion.NO_WORK:
-        state = manager.transition(actor=actor, to_status="done")
+        if state.status != "done":
+            state = manager.transition(actor=actor, to_status="done")
     else:
-        state = manager.transition(actor=actor, to_status="blocked")
+        if state.status != "blocked":
+            state = manager.transition(actor=actor, to_status="blocked")
     return {"conclusion": conclusion.value, "state": state}
 
 
@@ -261,7 +281,8 @@ def block_unit(root: str | os.PathLike, unit_id: str, reason: str) -> dict:
 
 
 def record_verification_failure(root: str | os.PathLike,
-                                unit_id: str) -> dict:
+                                unit_id: str, *,
+                                verification_evidence: dict) -> dict:
     """Persist a failed verification without counting or blocking the unit."""
     plan_data = load_execution_plan(root)
     records = execution_records(plan_data)
@@ -271,9 +292,15 @@ def record_verification_failure(root: str | os.PathLike,
     if record["status"] != "in_progress":
         raise ExecutionError(
             f"unit {unit_id!r} must be in_progress before verification")
+    if (not isinstance(verification_evidence, dict)
+            or verification_evidence.get("passed") is not False):
+        raise ExecutionError(
+            "verification failure requires failing verification evidence")
     record["verification_attempts"] = int(
         record.get("verification_attempts", 0)) + 1
     record["verification_passed"] = False
+    record.setdefault("verification_evidence", []).append(
+        dict(verification_evidence))
     plan_data["execution"] = records
     _write_execution_plan(root, plan_data)
     return dict(record)
@@ -282,6 +309,7 @@ def record_verification_failure(root: str | os.PathLike,
 def record_verified_completion(
         root: str | os.PathLike, manager: StateManager, actor: str,
         unit_id: str, *, actual_minutes: int | float,
+        verification_evidence: dict,
         completed_at: str | None = None) -> tuple[dict, TeamState, bool]:
     """Persist a passing verification and count its unit exactly once.
 
@@ -293,6 +321,10 @@ def record_verified_completion(
             or not isinstance(actual_minutes, (int, float))
             or actual_minutes < 0):
         raise ExecutionError("actual_minutes must be a non-negative number")
+    if (not isinstance(verification_evidence, dict)
+            or verification_evidence.get("passed") is not True):
+        raise ExecutionError(
+            "verified completion requires passing verification evidence")
     plan_data = load_execution_plan(root)
     records = execution_records(plan_data)
     record = records.get(unit_id)
@@ -312,6 +344,10 @@ def record_verified_completion(
             "actual_minutes": actual_minutes,
             "verification_attempts": int(record.get("verification_attempts", 0)) + 1,
             "verification_passed": True,
+            "verification_evidence": [
+                *record.get("verification_evidence", []),
+                dict(verification_evidence),
+            ],
             "blocker_reason": None,
             "completed_turn": manager.load().turn_number,
         })
@@ -331,3 +367,134 @@ def record_verified_completion(
         _write_execution_plan(root, plan_data)
     state = manager.record_unit(actor, unit_id)
     return dict(record), state, counted
+
+
+def _task_for_unit(plan_data: dict, unit_id: str):
+    try:
+        return next(item["task"] for item in _ordered_units(plan_data)
+                    if item["task"].id == unit_id)
+    except StopIteration:
+        raise ExecutionError(f"unknown unit {unit_id!r}") from None
+
+
+def _require_actor(manager: StateManager, actor: str) -> TeamState:
+    state = manager.load()
+    if actor != state.current_boss:
+        raise ExecutionError(
+            f"turn lock: {actor!r} does not own the active turn")
+    return state
+
+
+def begin_unit(root: str | os.PathLike, manager: StateManager, actor: str,
+               unit_id: str, *, started_at: str | None = None) -> dict:
+    """Start the exact unit selected by the dependency-ready router."""
+    state = _require_actor(manager, actor)
+    plan_data = load_execution_plan(root)
+    conclusion = conclude_turn(plan_data, state)
+    if conclusion is not TurnConclusion.CONTINUE:
+        raise ExecutionError(
+            f"cannot start a unit while turn conclusion is {conclusion.value}")
+    selection = next_ready_unit(plan_data)
+    if selection is None or selection.id != unit_id:
+        selected = selection.id if selection is not None else None
+        raise ExecutionError(
+            f"unit {unit_id!r} is not the next dependency-ready unit "
+            f"({selected!r})")
+    if state.status not in {"ready", "awaiting_handoff", "in_progress"}:
+        raise ExecutionError(
+            f"team state {state.status!r} cannot start a unit")
+    record = start_unit(root, unit_id, started_at=started_at)
+    if state.status != "in_progress":
+        state = manager.transition(actor=actor, to_status="in_progress")
+    return {"conclusion": TurnConclusion.CONTINUE.value,
+            "unit": record, "state": state}
+
+
+def _verification_evidence(result: VerifyResult, recorded_at: str) -> dict:
+    return {
+        "command": result.command,
+        "passed": result.passed,
+        "exit_code": result.exit_code,
+        "stdout_tail": result.stdout_tail,
+        "stderr_tail": result.stderr_tail,
+        "timed_out": result.timed_out,
+        "recorded_at": recorded_at,
+    }
+
+
+def _actual_minutes(started_at: str, completed_at: str) -> float:
+    try:
+        start = _dt.datetime.fromisoformat(started_at)
+        end = _dt.datetime.fromisoformat(completed_at)
+    except (TypeError, ValueError) as exc:
+        raise ExecutionError(
+            "unit timing requires ISO-8601 started_at and completed_at") from exc
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ExecutionError("unit timing timestamps must include a timezone")
+    return round(max(0.0, (end - start).total_seconds() / 60), 6)
+
+
+def verify_unit(root: str | os.PathLike, manager: StateManager, actor: str,
+                unit_id: str, *, completed_at: str | None = None,
+                timeout: int = 600) -> dict:
+    """Run the unit's configured verification and persist its real result."""
+    _require_actor(manager, actor)
+    plan_data = load_execution_plan(root)
+    records = execution_records(plan_data)
+    record = records.get(unit_id)
+    if record is None:
+        raise ExecutionError(f"unknown unit {unit_id!r}")
+    if record["status"] == "completed":
+        evidence = record["verification_evidence"][-1]
+        record, state, counted = record_verified_completion(
+            root, manager, actor, unit_id,
+            actual_minutes=record["actual_minutes"],
+            verification_evidence=evidence,
+            completed_at=record["completed_at"])
+        conclusion = apply_turn_conclusion(root, manager, actor)
+        return {"verification": evidence, "unit": record,
+                "state": conclusion["state"],
+                "conclusion": conclusion["conclusion"],
+                "counted": counted}
+    if record["status"] != "in_progress":
+        raise ExecutionError(
+            f"unit {unit_id!r} must be in_progress before verification")
+    task = _task_for_unit(plan_data, unit_id)
+    if task.verification is None or not task.verification.is_concrete():
+        raise ExecutionError(f"unit {unit_id!r} has no concrete verification")
+    when = completed_at or _now()
+    result = run_verification(task.verification.detail, str(Path(root)),
+                              timeout=timeout)
+    evidence = _verification_evidence(result, when)
+    if not result.passed:
+        record = record_verification_failure(
+            root, unit_id, verification_evidence=evidence)
+        conclusion = apply_turn_conclusion(root, manager, actor)
+        return {"verification": evidence, "unit": record,
+                "state": conclusion["state"],
+                "conclusion": conclusion["conclusion"], "counted": False}
+    actual = _actual_minutes(record.get("started_at"), when)
+    record, state, counted = record_verified_completion(
+        root, manager, actor, unit_id, actual_minutes=actual,
+        verification_evidence=evidence, completed_at=when)
+    conclusion = apply_turn_conclusion(root, manager, actor)
+    return {"verification": evidence, "unit": record,
+            "state": conclusion["state"],
+            "conclusion": conclusion["conclusion"], "counted": counted}
+
+
+def block_active_unit(root: str | os.PathLike, manager: StateManager,
+                      actor: str, unit_id: str, reason: str) -> dict:
+    """Block the active concrete unit and persist the kernel conclusion."""
+    _require_actor(manager, actor)
+    plan_data = load_execution_plan(root)
+    record = execution_records(plan_data).get(unit_id)
+    if record is None:
+        raise ExecutionError(f"unknown unit {unit_id!r}")
+    if record["status"] != "in_progress":
+        raise ExecutionError(
+            f"unit {unit_id!r} must be in_progress before it can block")
+    record = block_unit(root, unit_id, reason)
+    conclusion = apply_turn_conclusion(root, manager, actor)
+    return {"unit": record, "state": conclusion["state"],
+            "conclusion": conclusion["conclusion"]}

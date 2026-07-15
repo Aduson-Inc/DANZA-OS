@@ -19,14 +19,16 @@ class TestScheduler(unittest.TestCase):
         mgr = make_mgr("continuous")
         sched = Scheduler(mgr)
         # executor: build then verify each unit
-        state_flip = {"built": False}
+        state_flip = {"built": False, "unit": 0}
 
         def executor(state, remaining):
             if not state_flip["built"]:
                 state_flip["built"] = True
                 return StepOutcome(built=True, verified=False)
             state_flip["built"] = False
-            return StepOutcome(built=True, verified=True)
+            state_flip["unit"] += 1
+            return StepOutcome(built=True, verified=True,
+                               unit_id=f"unit-{state_flip['unit']}")
 
         result = sched.run(tasks_remaining=3, executor=executor, actor="claude")
         self.assertEqual(result["decision"], Decision.STOP_DONE.value)
@@ -35,20 +37,23 @@ class TestScheduler(unittest.TestCase):
     def test_relay_hands_off_at_cap(self):
         mgr = make_mgr("relay")  # cap = 2
         sched = Scheduler(mgr)
-        flip = {"b": False}
+        flip = {"b": False, "unit": 0}
 
         def executor(state, remaining):
             if not flip["b"]:
                 flip["b"] = True
                 return StepOutcome(built=True, verified=False)
             flip["b"] = False
-            return StepOutcome(built=True, verified=True)
+            flip["unit"] += 1
+            return StepOutcome(built=True, verified=True,
+                               unit_id=f"unit-{flip['unit']}")
 
         result = sched.run(tasks_remaining=10, executor=executor,
                            actor="claude", next_boss="codex")
         self.assertEqual(result["decision"], Decision.HANDOFF.value)
         self.assertEqual(result["features_completed"], 2)  # stopped at cap
         self.assertEqual(result["next_boss"], "codex")
+        self.assertEqual(mgr.load().verified_unit_ids_this_turn, [])
 
     def test_blocker_stops_and_escalates(self):
         mgr = make_mgr("continuous")
@@ -78,6 +83,20 @@ class TestScheduler(unittest.TestCase):
         result = sched.run(tasks_remaining=5, executor=executor, actor="claude")
         self.assertEqual(result["decision"], Decision.STOP_BLOCKED.value)
         self.assertIn("loop", result["reason"].lower())
+
+    def test_verified_outcome_requires_concrete_unit_id(self):
+        mgr = make_mgr("continuous")
+        sched = Scheduler(mgr)
+        built = {"value": False}
+
+        def executor(state, remaining):
+            if not built["value"]:
+                built["value"] = True
+                return StepOutcome(built=True, verified=False)
+            return StepOutcome(built=True, verified=True)
+
+        with self.assertRaisesRegex(Exception, "unit_id"):
+            sched.run(tasks_remaining=1, executor=executor, actor="claude")
 
 
 if __name__ == "__main__":

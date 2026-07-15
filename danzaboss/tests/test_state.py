@@ -58,7 +58,7 @@ class TestTeamState(unittest.TestCase):
     def test_illegal_status_transition_rejected(self):
         self.mgr.init(current_boss="claude")  # status = ready
         with self.assertRaises(StateError):
-            self.mgr.transition(to_status="done")  # ready -> done not allowed
+            self.mgr.transition(to_status="awaiting_handoff")
 
     def test_legal_status_transition(self):
         self.mgr.init(current_boss="claude")

@@ -100,14 +100,16 @@ def run_cold_start() -> Report:
     try:
         mgr.transition(actor="claude", to_status="in_progress")
         sched = Scheduler(mgr)
-        flip = {"b": False}
+        flip = {"b": False, "unit": 0}
 
         def executor(state, remaining):
             if not flip["b"]:
                 flip["b"] = True
                 return StepOutcome(built=True, verified=False)
             flip["b"] = False
-            return StepOutcome(built=True, verified=True)
+            flip["unit"] += 1
+            return StepOutcome(built=True, verified=True,
+                               unit_id=f"selftest-{flip['unit']}")
 
         result = sched.run(tasks_remaining=10, executor=executor,
                            actor="claude", next_boss="codex")

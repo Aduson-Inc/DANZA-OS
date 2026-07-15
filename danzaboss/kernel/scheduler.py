@@ -38,6 +38,7 @@ class StepOutcome:
     verified: bool = False     # QA (Bonnie) passed it
     blocked: bool = False      # a genuine blocker (hard stop / missing dep)
     blocker_reason: str = ""
+    unit_id: str = ""            # concrete atomic identity when verified
 
 
 class Executor(Protocol):
@@ -119,7 +120,10 @@ class Scheduler:
                 # re-dispatch the same unit for verification
                 outcome = executor(state, tasks_remaining)
                 if outcome.verified:
-                    state = self.manager.record_feature(actor)
+                    if not outcome.unit_id:
+                        raise StateError(
+                            "verified scheduler outcome requires unit_id")
+                    state = self.manager.record_unit(actor, outcome.unit_id)
                     features += 1
                     tasks_remaining -= 1
                     last = None  # unit fully done
