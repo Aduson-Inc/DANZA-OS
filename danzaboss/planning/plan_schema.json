@@ -7,9 +7,47 @@
   "properties": {
     "spec_ref": {"type": "string", "description": "path/hash of the spec this plan derives from"},
     "order": {"type": "array", "items": {"type": "string"}, "description": "leaf ids in validated execution order (written by the workstation planner)"},
-    "tasks": {"type": "array", "items": {"$ref": "#/definitions/task"}}
+    "tasks": {"type": "array", "items": {"$ref": "#/definitions/task"}},
+    "execution": {
+      "type": "object",
+      "description": "mutable per-unit status/timing ledger keyed by ordered leaf id",
+      "additionalProperties": {"$ref": "#/definitions/execution_record"}
+    },
+    "calibration": {
+      "type": "array",
+      "description": "append-only estimate-versus-actual observations",
+      "items": {"$ref": "#/definitions/calibration_observation"}
+    }
   },
   "definitions": {
+    "execution_record": {
+      "type": "object",
+      "required": ["status", "started_at", "completed_at", "actual_minutes", "verification_attempts", "verification_passed", "blocker_reason", "completed_turn"],
+      "properties": {
+        "status": {"enum": ["pending", "in_progress", "blocked", "completed"]},
+        "started_at": {"type": ["string", "null"]},
+        "completed_at": {"type": ["string", "null"]},
+        "actual_minutes": {"type": ["number", "null"], "minimum": 0},
+        "verification_attempts": {"type": "integer", "minimum": 0},
+        "verification_passed": {"type": "boolean"},
+        "blocker_reason": {"type": ["string", "null"]},
+        "completed_turn": {"type": ["integer", "null"], "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "calibration_observation": {
+      "type": "object",
+      "required": ["unit_id", "estimated_minutes", "actual_minutes", "variance_minutes", "overrun", "recorded_at"],
+      "properties": {
+        "unit_id": {"type": "string"},
+        "estimated_minutes": {"type": "number", "minimum": 0},
+        "actual_minutes": {"type": "number", "minimum": 0},
+        "variance_minutes": {"type": "number"},
+        "overrun": {"type": "boolean"},
+        "recorded_at": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
     "task": {
       "type": "object",
       "required": ["id", "description"],

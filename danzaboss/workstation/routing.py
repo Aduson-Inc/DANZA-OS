@@ -9,12 +9,10 @@ conductor needs one pure, testable answer to "who takes this turn?". All
 three live here so seat vocabulary and routing policy have a single home —
 no other module hard-codes seat names.
 
-v1 progress cursor (documented proxy): next_boss locates the current feature
-as ``turn_number * max_features_per_turn`` clamped into the plan's feature
-list. This assumes every completed turn shipped its full feature quota; real
-task-completion tracking replaces the cursor in a later phase. The cursor
-feature's first leaf supplies the task kind, which maps through
-KIND_TO_WORK_TYPE to a seat.
+Routing follows the execution ledger in ``.danza/plan.json``.  The first
+dependency-ready pending atomic leaf supplies the task kind, which maps
+through ``KIND_TO_WORK_TYPE`` to a seat.  Turn numbers never act as work
+cursors: partial turns, blocks, and changed quotas cannot skip work.
 """
 from __future__ import annotations
 
@@ -23,7 +21,7 @@ import os
 from pathlib import Path
 
 from danzaboss.kernel.state import TeamState
-from danzaboss.workstation import planner
+from danzaboss.workstation import execution
 from danzaboss.workstation.runners import KNOWN_RUNNERS, load_runners
 
 # ---------------------------------------------------------------------------
@@ -263,64 +261,34 @@ def load_routing(root: str | os.PathLike) -> dict:
 # Turn routing
 # ---------------------------------------------------------------------------
 
-def _leaf_index(tasks) -> dict:
-    """id -> leaf Task for every leaf in the parsed tree."""
-    out: dict = {}
-
-    def walk(task) -> None:
-        if task.is_leaf():
-            out[task.id] = task
-        for sub in task.subtasks:
-            walk(sub)
-
-    for task in tasks:
-        walk(task)
-    return out
-
-
 def route_turn(routing: dict, plan_data: dict,
                state: TeamState) -> tuple[str, str]:
     """Pure decision (no I/O): ``(runner name, work type)`` for the next
     turn. The work type rides along so the conductor's ignite log can say
     WHY a runner was chosen, not just which one.
 
-    Cursor rule (v1 proxy — see module docstring): feature index is
-    ``state.turn_number * state.max_features_per_turn`` (continuous mode
-    has no quota; it advances one feature per turn), clamped to the last
-    feature so a finished plan routes its final feature rather than
-    crashing. The cursor feature's FIRST leaf in execution order supplies
-    the kind; KIND_TO_WORK_TYPE names the seat.
+    The execution ledger selects the first dependency-ready pending leaf.
+    The kernel must conclude quota, no-work, block, and hard-stop conditions
+    before ignition; the conductor only asks this router where to post the
+    selected work.
 
     An unknown kind raises RoutingError (fail closed). A "builtin" or
     missing seat value — possible only in a hand-edited file, since
     validate_routing forbids both — falls back to deterministic rotation:
     ``lineup[turn_number % len(lineup)]``."""
-    tasks = planner.parse_plan(plan_data)
-    index = _leaf_index(tasks)
-    order = plan_data.get("order")
-    if (not isinstance(order, list) or not order
-            or not all(isinstance(tid, str) for tid in order)):
-        raise RoutingError("plan 'order' must be a non-empty list of task ids")
     try:
-        ordered = tuple(index[tid] for tid in order)
-    except KeyError as exc:
-        raise RoutingError(
-            f"plan 'order' names unknown task {exc.args[0]!r}"
-        ) from None
+        unit = execution.next_ready_unit(plan_data)
+    except (execution.ExecutionError, ValueError) as exc:
+        raise RoutingError(str(exc)) from exc
+    if unit is None:
+        raise RoutingError("plan has no dependency-ready pending unit")
 
-    features = planner.feature_nodes(ordered)
-    per_turn = state.max_features_per_turn or 1
-    idx = min(state.turn_number * per_turn, len(features) - 1)
-    feature = features[idx]
-    leaf = next(item for item in ordered
-                if ".".join(item.id.split(".")[:2]) == feature)
-
-    if leaf.kind not in KIND_TO_WORK_TYPE:
+    if unit.kind not in KIND_TO_WORK_TYPE:
         raise RoutingError(
-            f"task {leaf.id!r} has kind {leaf.kind!r}, which has no "
+            f"task {unit.id!r} has kind {unit.kind!r}, which has no "
             f"work-type mapping in {sorted(KIND_TO_WORK_TYPE)!r}"
         )
-    work_type = KIND_TO_WORK_TYPE[leaf.kind]
+    work_type = KIND_TO_WORK_TYPE[unit.kind]
 
     seat = routing.get("seats", {}).get(work_type)
     lineup = routing["lineup"]

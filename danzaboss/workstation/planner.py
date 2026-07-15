@@ -331,9 +331,15 @@ def plan_payload(spec_ref: str, tasks: tuple[Task, ...],
     task tree with the canonical spec_ref and the computed order — never
     from the raw AI reply (P3-M1). Call after validate_plan: leaves are
     assumed complete (kind, size_est, writes, concrete verification)."""
+    order = [task.id for task in ordered]
+    # Imported lazily to keep the planner/execution ownership boundary clear:
+    # planner defines immutable work; execution owns mutable unit progress.
+    from danzaboss.workstation.execution import initial_execution
     return {"spec_ref": spec_ref,
             "tasks": [_task_to_dict(task) for task in tasks],
-            "order": [task.id for task in ordered]}
+            "order": order,
+            "execution": initial_execution(order),
+            "calibration": []}
 
 
 def render_plan_md(spec_ref: str, ordered: tuple[Task, ...]) -> str:

@@ -17,7 +17,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Optional
 
 _ALLOWED_MODES = {"continuous", "relay"}
@@ -49,6 +49,7 @@ class TeamState:
     previous_boss: Optional[str] = None
     turn_number: int = 0
     features_completed_this_turn: int = 0
+    verified_unit_ids_this_turn: list[str] = field(default_factory=list)
     max_features_per_turn: Optional[int] = 2
     handoff_required: bool = False
     status: str = "ready"
@@ -69,6 +70,13 @@ class TeamState:
         for name in ("turn_number", "features_completed_this_turn"):
             if not isinstance(getattr(self, name), int) or getattr(self, name) < 0:
                 raise StateError(f"{name} must be a non-negative int")
+        if (not isinstance(self.verified_unit_ids_this_turn, list)
+                or not all(isinstance(unit_id, str) and unit_id
+                           for unit_id in self.verified_unit_ids_this_turn)
+                or len(set(self.verified_unit_ids_this_turn))
+                   != len(self.verified_unit_ids_this_turn)):
+            raise StateError(
+                "verified_unit_ids_this_turn must contain unique non-empty ids")
         if self.mode == "relay":
             if (type(self.max_features_per_turn) is not int
                     or not _MIN_FEATURES_PER_TURN <= self.max_features_per_turn <= _MAX_FEATURES_PER_TURN):
@@ -193,6 +201,7 @@ class StateManager:
             current_boss=next_boss,
             turn_number=state.turn_number + 1,
             features_completed_this_turn=0,
+            verified_unit_ids_this_turn=[],
             max_features_per_turn=next_max,
             handoff_required=False,
         )
@@ -209,5 +218,28 @@ class StateManager:
         return self.transition(
             actor=actor,
             features_completed_this_turn=done,
+            handoff_required=handoff_required,
+        )
+
+    def record_unit(self, actor: str, unit_id: str) -> TeamState:
+        """Count a verified atomic unit once for the active turn.
+
+        The legacy numeric counter remains for compatibility and display, while
+        the durable id set makes retries idempotent.
+        """
+        if not isinstance(unit_id, str) or not unit_id:
+            raise StateError("unit_id must be a non-empty string")
+        state = self.load()
+        if unit_id in state.verified_unit_ids_this_turn:
+            return state
+        ids = [*state.verified_unit_ids_this_turn, unit_id]
+        done = state.features_completed_this_turn + 1
+        handoff_required = bool(
+            state.mode == "relay" and state.max_features_per_turn is not None
+            and done >= state.max_features_per_turn)
+        return self.transition(
+            actor=actor,
+            features_completed_this_turn=done,
+            verified_unit_ids_this_turn=ids,
             handoff_required=handoff_required,
         )

@@ -14,6 +14,11 @@
     "previous_boss": {"type": ["string", "null"]},
     "turn_number": {"type": "integer", "minimum": 0},
     "features_completed_this_turn": {"type": "integer", "minimum": 0},
+    "verified_unit_ids_this_turn": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
     "max_features_per_turn": {"type": ["integer", "null"], "minimum": 2, "maximum": 5},
     "handoff_required": {"type": "boolean"},
     "status": {"enum": ["ready", "in_progress", "blocked", "awaiting_handoff", "done"]},
