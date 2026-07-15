@@ -440,7 +440,8 @@ PLAN_CONTRACT = (
 def build_planning_prompt(spec_text: str, *,
                           testing_defaults: dict | None = None,
                           violations: tuple[str, ...] = (),
-                          prior_plan: dict | None = None) -> str:
+                          prior_plan: dict | None = None,
+                          reserved_unit_ids: set[str] | frozenset[str] = frozenset()) -> str:
     """Deterministic planning prompt: the spec IS the context (same
     principle as checkpoints.build_prompt — the headless call needs no
     repo access). Bounce rounds inline the machine's violation list plus
@@ -456,6 +457,12 @@ def build_planning_prompt(spec_text: str, *,
     if testing_defaults:
         lines += ["Test policy from the approved stack template (JSON):",
                   json.dumps(testing_defaults, indent=2, sort_keys=True), ""]
+    if reserved_unit_ids:
+        lines += [
+            "This is a pending-work replan. The following carried unit ids",
+            "are immutable and reserved; do not emit them again:",
+            ", ".join(sorted(reserved_unit_ids)), "",
+        ]
     lines += ["Spec:", spec_text, ""]
     if violations:
         lines.append("Your previous reply was REJECTED by machine "
@@ -471,32 +478,21 @@ def build_planning_prompt(spec_text: str, *,
     return "\n".join(lines)
 
 
-def run_planning(root: str | os.PathLike, command: list[str], *,
-                 timeout: int = 600, max_rounds: int = MAX_ROUNDS,
-                 template_dir: str | Path = templates_mod.DEFAULT_DIR) -> dict:
-    """Exact approved product scope -> validated plan artifacts.
-
-    Calls the boss CLI headless (same injectable-argv seam as
-    checkpoints.run_headless), machine-validates each proposal, bounces
-    violations back up to max_rounds, then fails closed: a plan that
-    never validates must not arm the button. There is deliberately no
-    degraded mode — unlike checkpoints, nothing downstream can proceed
-    without a valid plan."""
+def _generate_plan(root: str | os.PathLike, command: list[str], *,
+                   scope: dict, spec_ref: str, timeout: int,
+                   max_rounds: int, template_dir: str | Path,
+                   reserved_unit_ids: set[str] | frozenset[str] = frozenset()
+                   ) -> tuple[dict, tuple[Task, ...], tuple[Task, ...], int]:
+    """Return one validated plan proposal without writing active artifacts."""
     if max_rounds < 1:
         raise PlanningError(f"max_rounds must be at least 1, got {max_rounds}")
-    try:
-        scope = project_mod.require_approved_scope(root)
-    except project_mod.ProjectGateConflict as exc:
-        raise PlanningError(f"approved product scope required: {exc}") from exc
+    product_scope_mod.validate_scope(scope)
     spec_text = product_scope_mod.render_feature_list_md(scope)
-    spec_ref = project_mod.scope_ref(scope)
     try:
         answers = Wizard(root).answers
     except PlanningError:
         raise
     except ValueError as exc:
-        # Corrupt answers.json (load_state) or wizard misuse surfaces as
-        # this module's failure mode, not a bare ValueError (P3-M3).
         raise PlanningError(f"unusable onboarding state: {exc}") from exc
     testing_defaults = None
     chosen = answers.get("stack_template")
@@ -508,13 +504,12 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
     violations: tuple[str, ...] = ()
     prior_plan: dict | None = None
     for round_num in range(1, max_rounds + 1):
-        prompt = build_planning_prompt(spec_text,
-                                       testing_defaults=testing_defaults,
-                                       violations=violations,
-                                       prior_plan=prior_plan)
+        prompt = build_planning_prompt(
+            spec_text, testing_defaults=testing_defaults,
+            violations=violations, prior_plan=prior_plan,
+            reserved_unit_ids=reserved_unit_ids)
         try:
-            reply = checkpoints.run_headless(command, prompt,
-                                             timeout=timeout)
+            reply = checkpoints.run_headless(command, prompt, timeout=timeout)
         except checkpoints.CheckpointUnavailable as exc:
             raise PlanningUnavailable(str(exc)) from exc
         try:
@@ -526,6 +521,9 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
             continue
         found = validate_plan(tasks, require_atomic=True)
         found.extend(validate_scope_coverage(tasks, scope))
+        reused = sorted(set(feature_nodes(tasks)) & set(reserved_unit_ids))
+        if reused:
+            found.append(f"reserved carried unit ids were reused: {reused!r}")
         ordered: tuple[Task, ...] = ()
         if not found:
             try:
@@ -537,11 +535,46 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
             prior_plan = data
             continue
         payload = plan_payload(spec_ref, tasks, ordered)
-        json_path, md_path = write_plan(root, payload, ordered)
-        return {"plan": payload, "order": payload["order"],
-                "warnings": plan_warnings(tasks),
-                "rounds": round_num, "plan_json": str(json_path),
-                "plan_md": str(md_path)}
+        return payload, tasks, ordered, round_num
     raise PlanningError(
         f"plan still invalid after {max_rounds} rounds; last violations: "
         + "; ".join(violations))
+
+
+def propose_plan(root: str | os.PathLike, command: list[str], *,
+                 scope: dict, spec_ref: str,
+                 reserved_unit_ids: set[str] | frozenset[str] = frozenset(),
+                 timeout: int = 600, max_rounds: int = MAX_ROUNDS,
+                 template_dir: str | Path = templates_mod.DEFAULT_DIR) -> dict:
+    """Validate a pending-work replan without overwriting the active plan."""
+    payload, _, _, _ = _generate_plan(
+        root, command, scope=scope, spec_ref=spec_ref, timeout=timeout,
+        max_rounds=max_rounds, template_dir=template_dir,
+        reserved_unit_ids=reserved_unit_ids)
+    return payload
+
+
+def run_planning(root: str | os.PathLike, command: list[str], *,
+                 timeout: int = 600, max_rounds: int = MAX_ROUNDS,
+                 template_dir: str | Path = templates_mod.DEFAULT_DIR) -> dict:
+    """Exact approved product scope -> validated plan artifacts.
+
+    Calls the boss CLI headless (same injectable-argv seam as
+    checkpoints.run_headless), machine-validates each proposal, bounces
+    violations back up to max_rounds, then fails closed: a plan that
+    never validates must not arm the button. There is deliberately no
+    degraded mode — unlike checkpoints, nothing downstream can proceed
+    without a valid plan."""
+    try:
+        scope = project_mod.require_approved_scope(root)
+    except project_mod.ProjectGateConflict as exc:
+        raise PlanningError(f"approved product scope required: {exc}") from exc
+    spec_ref = project_mod.scope_ref(scope)
+    payload, tasks, ordered, round_num = _generate_plan(
+        root, command, scope=scope, spec_ref=spec_ref, timeout=timeout,
+        max_rounds=max_rounds, template_dir=template_dir)
+    json_path, md_path = write_plan(root, payload, ordered)
+    return {"plan": payload, "order": payload["order"],
+            "warnings": plan_warnings(tasks),
+            "rounds": round_num, "plan_json": str(json_path),
+            "plan_md": str(md_path)}

@@ -57,6 +57,21 @@
    workstation tests passed with 1 optional skip; JavaScript syntax and diff
    checks passed.
 8. **BUILD backend.** Add live scope/unit payloads, transactional progress updates, feature status derivation, immutable completed work, draft additions, approval/replanning of pending work, and next-handoff queueing.
+
+   **Completion evidence — 2026-07-15:** BUILD now returns the exact approved
+   scope with derived product progress, linked atomic-unit execution evidence,
+   turn quota, additions approval, and next-handoff state. Execution mutations
+   journal `plan.json`, `plan.md`, `features.json`, and `feature-list.md` as one
+   recoverable progress update; completed feature definitions and carried unit
+   identity/evidence cannot regress. Additions use independent exact-revision
+   drafts. Approval replans only pending units, preserves completed/active work,
+   and leaves active artifacts untouched until the next safe handoff. Queue
+   activation occurs before routing, fails closed on corruption, and preserves
+   blocked and hard-stop conclusions without conductor scheduling. Verification:
+   33 focused BUILD/replanning tests, 29 directly affected BUILD/API tests,
+   64 PROJECT-to-BUILD tests, 104 Task 5 lifecycle regressions, 426 cumulative
+   workstation tests with 1 optional skip, and 86 dashboard/onboarding HTTP
+   tests passed; changed Python files compiled and diff checks passed.
 9. **BUILD UI.** Add compact live crossed-off features, expandable criteria and A/B/C units, quota progress, approval states, additions, blocks, and hard stops without adding a FEATURES tab.
 10. **Adaptive CORTEX.** Implement base/ceiling policy, one-time qualified expansion, explicit-budget bypass, acceptance comparison, 6000 dispatch guard, and additive context-read telemetry migration.
 11. **Compatibility and documentation.** Update active prompts/scaffolds/docs, generated artifact contracts, top-level status/test counts, and historical supersession banners. Remove active dial references; retain historical text only behind banners.

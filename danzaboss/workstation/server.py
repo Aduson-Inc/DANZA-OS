@@ -35,6 +35,7 @@ from ..cortex.sqlite_backend import SqliteBackend
 from ..cortex.ui.server import CortexUIHandler, cross_origin_reason
 from ..kernel.profile import active_profile
 from ..kernel.state import StateError, StateManager, TeamState
+from . import build as build_mod
 from . import checkpoints as checkpoints_mod
 from . import execution as execution_mod
 from . import interview as interview_mod
@@ -48,7 +49,8 @@ from .conductor import (LOG_RELPATH, PIDFILE_RELPATH, TEAM_STATE_RELPATH,
                         _pid_alive, session_name)
 from .hosts import HeadlessHost, HostError, TmuxHost, pick_host
 from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
-                      PlanningUnavailable, parse_plan, run_planning)
+                      PlanningUnavailable, parse_plan, propose_plan,
+                      run_planning)
 from .runners import (RUNNERS_RELPATH, RunnerError, build_registry,
                       headless_argv, load_runners, save_runners)
 from .state import STATE_RELPATH
@@ -293,6 +295,12 @@ def build_summary(root: str,
            "conductor": conductor_tail(root, 50)["items"]}
     if team_err:
         out["team_state_error"] = team_err
+    try:
+        out.update(build_mod.live_payload(root))
+    except build_mod.BuildError as exc:
+        # Pre-PROJECT and corrupt projects still get relay/session evidence;
+        # the product payload fails closed with an explicit reason.
+        out["build_error"] = str(exc)
     return out
 
 
@@ -425,7 +433,9 @@ def snapshot_token(root: str) -> str:
                 STATE_RELPATH, interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH,
                 project_mod.PROJECT_STATE_RELPATH,
                 project_mod.TAKEOVER_AUDIT_RELPATH,
-                product_scope_mod.FEATURES_JSON_RELPATH):
+                product_scope_mod.FEATURES_JSON_RELPATH,
+                build_mod.ADDITIONS_RELPATH, build_mod.QUEUE_RELPATH,
+                build_mod.PROGRESS_TX_RELPATH):
         try:
             st = (Path(root) / rel).stat()
             parts.append(f"{st.st_mtime_ns}:{st.st_size}")
@@ -680,6 +690,10 @@ def post_build_start(root: str, body: dict,
     single-instance authority — this check is a courtesy, not a second
     lock."""
     _require_setup(root)
+    try:
+        build_mod.recover_progress(root)
+    except build_mod.BuildError as exc:
+        raise GateConflict(f"build progress is invalid: {exc}") from exc
     if not (Path(root) / PLAN_JSON_RELPATH).is_file():
         raise GateConflict(
             "finish PROJECT decomposition first — there is no build plan yet")
@@ -732,10 +746,51 @@ def post_build_stop(root: str, body: dict,
     return {"ok": True, "pid": pid}
 
 
+def post_build_additions(root: str, body: dict) -> dict:
+    """Save one isolated additions draft against the valid active BUILD."""
+    _require_setup(root)
+    additions = body.get("additions")
+    if not isinstance(additions, list):
+        raise ValueError("body.additions must be list")
+    expected_revision = body.get("expected_revision")
+    if expected_revision is not None and type(expected_revision) is not int:
+        raise ValueError("body.expected_revision must be int")
+    draft = build_mod.draft_additions(
+        root, additions=additions, expected_revision=expected_revision)
+    return {"ok": True, "additions": draft,
+            **build_mod.live_payload(root)}
+
+
+def post_build_approve(root: str, body: dict, *,
+                       propose: Callable | None = None) -> dict:
+    """Approve exact additions, replan unfinished work, and queue handoff."""
+    _require_setup(root)
+    expected_revision = body.get("expected_revision")
+    if type(expected_revision) is not int:
+        raise ValueError("body.expected_revision must be int")
+    if propose is None:
+        command = _headless_command(root)
+        if command is None:
+            raise PlanningUnavailable(
+                f"{checkpoints_mod.NO_BOSS_REASON} — replanning needs an AI agent")
+
+        def propose(scope, spec_ref, reserved_unit_ids):
+            return propose_plan(
+                root, command, scope=scope, spec_ref=spec_ref,
+                reserved_unit_ids=reserved_unit_ids)
+
+    queued = build_mod.approve_additions(
+        root, expected_revision=expected_revision, propose=propose)
+    return {"ok": True, "queued": queued,
+            **build_mod.live_payload(root)}
+
+
 _POST_ROUTES = {
     "/api/setup": post_setup,
     "/api/build/start": post_build_start,
     "/api/build/stop": post_build_stop,
+    "/api/build/additions": post_build_additions,
+    "/api/build/approve": post_build_approve,
     "/api/onboard/submit": post_submit,
     "/api/onboard/followup": post_followup,
     "/api/onboard/resolve": post_resolve,
@@ -858,7 +913,8 @@ class DanzaUIHandler(CortexUIHandler):
             with _POST_LOCK:
                 result = handler(self.root, body)
             self._json(result)
-        except (GateConflict, product_scope_mod.RevisionConflict) as e:
+        except (GateConflict, product_scope_mod.RevisionConflict,
+                build_mod.BuildRevisionConflict) as e:
             self._json({"error": str(e)}, 409)
         except ValueError as e:
             # WizardError / InterviewError / CheckpointError / ResearchError

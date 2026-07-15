@@ -15,7 +15,8 @@ from danzaboss.workstation.product_scope import (
     write_scope,
 )
 from danzaboss.workstation.planner import (PLAN_JSON_RELPATH, PlanningError,
-                                           PlanningUnavailable, run_planning)
+                                           PlanningUnavailable, propose_plan,
+                                           run_planning)
 
 VALID_PLAN = {"spec_ref": ".danza/spec.md", "tasks": [
     {"id": "71-A", "feature_id": 71, "description": "log a session",
@@ -32,6 +33,14 @@ OVERSIZED_PLAN = {"spec_ref": ".danza/spec.md", "tasks": [
 UNKNOWN_FEATURE_PLAN = {"spec_ref": ".danza/features.json#revision-1",
                         "tasks": [{
     "id": "72-A", "feature_id": 72, "description": "log a session",
+    "kind": "backend", "size_est": 12, "writes": ["src/log.py"],
+    "verification": {"kind": "automated_test",
+                     "detail": "pytest tests/test_log.py"},
+}]}
+
+REPLANNED_PLAN = {"spec_ref": ".danza/features.json#revision-2",
+                  "tasks": [{
+    "id": "71-B", "feature_id": 71, "description": "finish session logging",
     "kind": "backend", "size_est": 12, "writes": ["src/log.py"],
     "verification": {"kind": "automated_test",
                      "detail": "pytest tests/test_log.py"},
@@ -181,6 +190,30 @@ class PlanningCall(unittest.TestCase):
         self.assertEqual(result["plan"]["spec_ref"],
                          ".danza/features.json#revision-2")
         self.assertIn("Users can log a practice session.", self.prompt(0))
+
+    def test_pending_replan_reserves_completed_ids_and_does_not_write_active_plan(self):
+        active = self.root / PLAN_JSON_RELPATH
+        active.parent.mkdir(parents=True, exist_ok=True)
+        active.write_text('{"active": true}\n', encoding="utf-8")
+        pending_scope = {
+            "version": 1, "revision": 2,
+            "approval": {"state": "approved", "approved_revision": 2},
+            "features": [dict(self.scope_feature)],
+        }
+
+        proposed = propose_plan(
+            self.root,
+            self.command(json.dumps(VALID_PLAN), json.dumps(REPLANNED_PLAN)),
+            scope=pending_scope,
+            spec_ref=".danza/features.json#revision-2",
+            reserved_unit_ids={"71-A"},
+        )
+
+        self.assertEqual(proposed["order"], ["71-B"])
+        self.assertEqual(active.read_text(encoding="utf-8"),
+                         '{"active": true}\n')
+        self.assertIn("71-A", self.prompt(0))
+        self.assertIn("carried unit ids", self.prompt(1))
 
 
 if __name__ == "__main__":

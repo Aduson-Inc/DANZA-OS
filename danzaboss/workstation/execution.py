@@ -201,9 +201,41 @@ def apply_turn_conclusion(root: str | os.PathLike, manager: StateManager,
         raise ExecutionError(
             f"turn lock: {actor!r} does not own the active turn")
     conclusion = conclude_turn(plan_data, state)
-    if conclusion is TurnConclusion.CONTINUE:
+    queued_activated = False
+    from danzaboss.workstation import build as build_mod
+    records = execution_records(plan_data)
+    try:
+        safe_queue_boundary = (
+            conclusion is TurnConclusion.CONTINUE
+            and build_mod.queue_waiting(root)
+            and not any(record["status"] == "in_progress"
+                        for record in records.values())
+        )
+    except build_mod.BuildError as exc:
+        raise ExecutionError(f"cannot read next-handoff build: {exc}") from exc
+    if (conclusion in {TurnConclusion.QUOTA, TurnConclusion.NO_WORK}
+            or safe_queue_boundary):
+        # BUILD additions remain isolated until the kernel reaches a safe
+        # boundary. Activation happens before routing so the next runner sees
+        # only the newly approved, matching scope/plan pair.
+        try:
+            queued_activated = build_mod.activate_queued_build(root)
+        except build_mod.BuildError as exc:
+            raise ExecutionError(
+                f"cannot activate next-handoff build: {exc}") from exc
+        if queued_activated:
+            plan_data = load_execution_plan(root)
+            queued_selection = next_ready_unit(plan_data)
+            if (queued_selection is not None and queued_selection.flags
+                    and queued_selection.status == "pending"):
+                if state.status != "blocked":
+                    state = manager.transition(actor=actor,
+                                               to_status="blocked")
+                return {"conclusion": TurnConclusion.HARD_STOP.value,
+                        "state": state}
+    if conclusion is TurnConclusion.CONTINUE and not queued_activated:
         return {"conclusion": conclusion.value, "state": state}
-    if conclusion is TurnConclusion.QUOTA:
+    if conclusion is TurnConclusion.QUOTA or queued_activated:
         if not next_boss:
             # Local import avoids making routing depend on an eager import cycle.
             from danzaboss.workstation import routing
@@ -213,6 +245,8 @@ def apply_turn_conclusion(root: str | os.PathLike, manager: StateManager,
             from danzaboss.workstation.routing import load_routing
             routing_data = load_routing(root)
         next_quota = routing_data["features_per_turn"]
+        if state.status == "ready":
+            state = manager.transition(actor=actor, to_status="in_progress")
         state = manager.handoff(next_boss, actor=actor,
                                 max_features_per_turn=next_quota)
     elif conclusion is TurnConclusion.NO_WORK:
@@ -235,6 +269,16 @@ def load_execution_plan(root: str | os.PathLike) -> dict:
 
 
 def _write_execution_plan(root: str | os.PathLike, plan_data: dict) -> None:
+    scope_path = Path(root) / Path(".danza") / "features.json"
+    if scope_path.exists():
+        # Production BUILD projects carry approved scope. Keep its derived
+        # status and the execution ledger in one recoverable transaction.
+        from danzaboss.workstation import build as build_mod
+        try:
+            build_mod.commit_progress(root, plan_data)
+        except build_mod.BuildError as exc:
+            raise ExecutionError(f"cannot commit BUILD progress: {exc}") from exc
+        return
     path = Path(root) / planner.PLAN_JSON_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")

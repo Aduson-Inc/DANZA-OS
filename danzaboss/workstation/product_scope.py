@@ -249,6 +249,48 @@ def write_scope(root: str | os.PathLike, scope: dict) -> tuple[Path, Path]:
     return json_path, md_path
 
 
+def activate_queued_scope(root: str | os.PathLike, scope: dict) -> tuple[Path, Path]:
+    """Promote one separately approved next-handoff scope revision.
+
+    Normal editing must pass through draft -> exact approval. BUILD additions
+    complete that lifecycle in an isolated queue so the active turn keeps its
+    approved revision. This narrow boundary permits only the already-approved
+    next revision, preserves every existing definition, and keeps completed
+    work byte-for-byte immutable.
+    """
+    validate_scope(scope)
+    current = load_scope(root)
+    if current["approval"] != {
+            "state": "approved", "approved_revision": current["revision"]}:
+        raise RevisionConflict(
+            "queued activation requires an exact approved active scope")
+    if (scope["revision"] != current["revision"] + 1
+            or scope["approval"] != {
+                "state": "approved", "approved_revision": scope["revision"]}):
+        raise RevisionConflict(
+            "queued activation requires the exact approved next revision")
+    current_by_id = {feature["id"]: feature for feature in current["features"]}
+    candidate_by_id = {feature["id"]: feature for feature in scope["features"]}
+    for feature_id, feature in current_by_id.items():
+        candidate = candidate_by_id.get(feature_id)
+        if candidate is None:
+            raise ProductScopeError(
+                f"existing product feature {feature_id} cannot be removed")
+        for key in ("id", "summary", "acceptance_criteria"):
+            if candidate[key] != feature[key]:
+                raise ProductScopeError(
+                    f"existing product feature {feature_id} definition is immutable "
+                    "during queued addition activation")
+        if feature["status"] == "completed" and candidate != feature:
+            raise ProductScopeError(
+                f"completed product feature {feature_id} is immutable")
+    json_path = Path(root) / FEATURES_JSON_RELPATH
+    md_path = Path(root) / FEATURE_LIST_RELPATH
+    _atomic_write(json_path, json.dumps(scope, indent=2, sort_keys=True) + "\n")
+    _atomic_write(md_path, render_feature_list_md(scope))
+    return json_path, md_path
+
+
 def revise_scope(root: str | os.PathLike, *, expected_revision: int,
                  features: list[dict]) -> dict:
     """Replace editable scope content as the next draft revision."""
