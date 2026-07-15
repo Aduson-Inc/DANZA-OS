@@ -659,7 +659,7 @@ details.advanced summary {
 }
 .locked p { margin-bottom: 14px; }
 
-/* ---------- build: relay controls + live state (Phase 4) ---------- */
+/* ---------- BUILD: product progress + relay controls (Phase 4.1) ---------- */
 .team-strip {
   display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap;
   padding: 12px 0;
@@ -676,3 +676,62 @@ details.advanced summary {
   overflow-y: auto;
   white-space: pre-wrap;
 }
+
+#build-panel > .panel { margin-bottom: 18px; }
+.build-summary, .build-row, .build-feature-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.build-summary { font-size: 15px; margin-bottom: 8px; }
+.quota-block { margin: 16px 0; }
+.quota-meter {
+  height: 8px; margin-top: 7px; overflow: hidden;
+  background: var(--graphite); clip-path: var(--blade);
+}
+.quota-meter span {
+  display: block; height: 100%; background: linear-gradient(90deg, var(--crimson), var(--ember));
+}
+.build-alert {
+  margin: 10px 0; padding: 10px 12px;
+  border: 1px solid var(--ember); background: rgba(232, 53, 79, .08);
+  color: var(--ember);
+}
+.build-alert.hard-stop { border-left: 4px solid var(--crimson); }
+.build-feature-list, .addition-list { display: grid; gap: 10px; margin-top: 14px; }
+.build-feature {
+  padding: 12px 14px; background: rgba(10, 10, 12, .55);
+  border: 1px solid var(--gunmetal); border-left: 3px solid var(--gunmetal);
+}
+.build-feature.completed { opacity: .68; border-left-color: var(--silver); }
+.build-feature.completed .build-feature-head b { text-decoration: line-through; }
+.build-feature.blocked { border-left-color: var(--ember); }
+.build-feature-head { justify-content: flex-start; }
+.build-feature-head .chip { margin-left: auto; }
+.build-feature details { margin-top: 8px; }
+.build-feature details > summary {
+  cursor: pointer; color: var(--silver); font-family: var(--font-display);
+  letter-spacing: .08em; text-transform: uppercase; font-size: 12px;
+}
+.build-feature h3 {
+  margin: 12px 0 6px; color: var(--silver); font-family: var(--font-display);
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+}
+.build-units { display: grid; gap: 7px; padding-left: 0; list-style: none; }
+.build-unit {
+  padding: 9px 10px; border: 1px solid var(--graphite);
+  background: rgba(20, 20, 23, .75);
+}
+.build-unit p { margin: 4px 0; }
+.build-unit.completed { opacity: .72; }
+.build-unit.blocked { border-color: var(--ember); }
+.addition-feature {
+  padding: 12px 14px; border: 1px solid var(--gunmetal);
+  background: rgba(10, 10, 12, .55);
+}
+.addition-feature .field { margin: 8px 0; }
+.addition-feature input[type="number"] {
+  width: 120px; padding: 8px 10px; background: var(--carbon); color: var(--text);
+  border: 1px solid var(--gunmetal); font-family: var(--font-mono);
+}
+.scope-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.build-internals { margin-top: 18px; }

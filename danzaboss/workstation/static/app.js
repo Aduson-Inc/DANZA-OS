@@ -879,9 +879,10 @@ async function loadSetup() {
   renderSetup();
 }
 
-/* ---------- build (Phase 4: relay controls + live state) ---------- */
+/* ---------- build (Phase 4.1: live product progress + relay controls) ---------- */
 let buildData = null;              // {plan, tree, plan_md, live, setup_complete}
-const build = { error: "", busy: false, advanced: false };
+const build = { error: "", busy: false, advanced: false,
+  additions: null, additionsRevision: null, additionsDirty: false };
 
 // Runner ids -> plain names for event lines (the conductor logs internal
 // ids; the catalog's display_name is what a human should read).
@@ -991,6 +992,55 @@ function wireBuild() {
   // the Advanced toggle survives SSE re-renders via the state object
   const adv = $("#build-advanced");
   if (adv) adv.addEventListener("toggle", () => { build.advanced = adv.open; });
+  $$(".addition-feature input, .addition-feature textarea").forEach((input) =>
+    input.addEventListener("input", () => {
+      build.additions = collectBuildAdditions();
+      build.additionsDirty = true;
+      const approve = $("#approve-build-additions");
+      if (approve) approve.disabled = true;
+    }));
+  const add = $("#add-build-addition");
+  if (add) add.addEventListener("click", () => {
+    build.additions = collectBuildAdditions();
+    const nextId = Math.max(0, ...build.additions.map((feature) => feature.id),
+      ...(buildData.live.features || []).map((feature) => feature.id)) + 1;
+    build.additions.push(blankBuildAddition(nextId));
+    build.additionsDirty = true;
+    renderBuild();
+  });
+  $$(".remove-addition").forEach((button) => button.addEventListener("click", () => {
+    build.additions = collectBuildAdditions().filter(
+      (feature) => feature.id !== Number(button.dataset.featureId));
+    build.additionsDirty = true;
+    renderBuild();
+  }));
+  const save = $("#save-build-additions");
+  if (save) save.addEventListener("click", () => {
+    const features = collectBuildAdditions();
+    const additions = buildData.live.additions;
+    const body = { additions: features };
+    if (additions) body.expected_revision = additions.revision;
+    buildAction(async () => {
+      const out = await post("api/build/additions", body);
+      build.additions = null;
+      build.additionsRevision = null;
+      build.additionsDirty = false;
+      return out;
+    });
+  });
+  const approve = $("#approve-build-additions");
+  if (approve) approve.addEventListener("click", () => {
+    const additions = buildData.live.additions;
+    buildAction(async () => {
+      const out = await post("api/build/approve", {
+        expected_revision: additions.revision,
+      });
+      build.additions = null;
+      build.additionsRevision = null;
+      build.additionsDirty = false;
+      return out;
+    });
+  });
 }
 
 function taskHTML(t) {
@@ -1004,21 +1054,163 @@ function taskHTML(t) {
     ${subs ? `<ul>${subs}</ul>` : ""}</li>`;
 }
 
+function quotaHTML(quota) {
+  const completed = quota?.completed ?? 0;
+  const limit = quota?.limit;
+  const remaining = quota?.remaining;
+  const percent = limit ? Math.min(100, Math.round(completed * 100 / limit)) : 0;
+  const label = limit == null
+    ? `${esc(completed)} completed · turn quota starts with the build`
+    : `${esc(completed)} / ${esc(limit)} · ${esc(remaining)} remaining`;
+  return `<div class="quota-block"><div class="build-row">
+    <b>Quota this turn</b><span class="mono dim">${label}</span></div>
+    <div class="quota-meter" aria-label="Quota this turn: ${esc(label)}">
+      <span style="width:${percent}%"></span></div></div>`;
+}
+
+function unitHTML(unit) {
+  const hardStop = unit.status !== "completed" && (unit.flags || []).length
+    ? `<span class="chip warn-chip">Hard stop · ${esc(unit.flags.join(", "))}</span>` : "";
+  const blocked = unit.status === "blocked"
+    ? `<p class="build-alert"><b>Blocked</b> · ${esc(unit.blocker_reason || "No reason recorded")}</p>` : "";
+  const timing = unit.actual_minutes == null ? `${esc(unit.size_est)}m estimate`
+    : `${esc(unit.actual_minutes)}m actual · ${esc(unit.size_est)}m estimate`;
+  return `<li class="build-unit ${esc(unit.status)}">
+    <div class="build-row"><span><b class="mono">${esc(unit.id)}</b>
+      ${esc(unit.description)}</span><span class="chip mono">${esc(unit.status)}</span></div>
+    <p class="dim mono">${esc(unit.kind)} · ${timing}</p>${hardStop}${blocked}</li>`;
+}
+
+function buildFeatureHTML(feature) {
+  const completed = feature.status === "completed";
+  const title = completed ? `<s>${esc(feature.summary)}</s>` : esc(feature.summary);
+  const criteria = (feature.acceptance_criteria || [])
+    .map((item) => `<li>${esc(item)}</li>`).join("");
+  const units = (feature.units || []).map(unitHTML).join("");
+  return `<article class="build-feature ${esc(feature.status)}">
+    <div class="build-feature-head"><span class="mono">${esc(feature.id)}</span>
+      <b>${title}</b><span class="chip mono">${esc(feature.status)}</span></div>
+    <details><summary>Acceptance criteria · Atomic build units</summary>
+      <h3>Acceptance criteria</h3><ul>${criteria}</ul>
+      <h3>Atomic build units</h3><ul class="build-units">${units}</ul>
+    </details></article>`;
+}
+
+function buildAlertsHTML(features) {
+  const units = features.flatMap((feature) => feature.units || []);
+  const blocked = units.filter((unit) => unit.status === "blocked");
+  const hardStops = units.filter((unit) => unit.status !== "completed"
+    && (unit.flags || []).length);
+  return `${blocked.length ? `<div class="build-alert"><b>Blocked</b> ·
+      ${blocked.map((unit) => `${esc(unit.id)}: ${esc(unit.blocker_reason || "reason not recorded")}`).join(" · ")}</div>` : ""}
+    ${hardStops.length ? `<div class="build-alert hard-stop"><b>Hard stop</b> ·
+      ${hardStops.map((unit) => `${esc(unit.id)} (${esc(unit.flags.join(", "))})`).join(" · ")}</div>` : ""}`;
+}
+
+function nextAdditionId(live) {
+  const ids = [...(live.features || []).map((feature) => feature.id),
+    ...(live.additions?.features || []).map((feature) => feature.id)];
+  return Math.max(0, ...ids) + 1;
+}
+
+function blankBuildAddition(id) {
+  return { id, summary: "", acceptance_criteria: [""], status: "pending" };
+}
+
+function seedBuildAdditions(live) {
+  const revision = live.additions?.revision ?? null;
+  if (build.additions !== null && (build.additionsDirty
+      || build.additionsRevision === revision)) return;
+  build.additions = live.additions
+    ? live.additions.features.map((feature) => ({ ...feature,
+      acceptance_criteria: [...feature.acceptance_criteria] }))
+    : [blankBuildAddition(nextAdditionId(live))];
+  build.additionsRevision = revision;
+  build.additionsDirty = false;
+}
+
+function collectBuildAdditions() {
+  return $$(".addition-feature", $("#build-panel")).map((card) => ({
+    id: Number($("[name=addition-id]", card).value),
+    summary: $("[name=addition-summary]", card).value.trim(),
+    acceptance_criteria: $("[name=addition-criteria]", card).value
+      .split("\n").map((line) => line.trim()).filter(Boolean),
+    status: "pending",
+  }));
+}
+
+function additionFeatureHTML(feature) {
+  const remove = build.additions.length > 1
+    ? `<button type="button" class="chip remove-addition"
+       data-feature-id="${esc(feature.id)}">Remove</button>` : "";
+  return `<article class="addition-feature" data-feature-id="${esc(feature.id)}">
+    <div class="build-row"><b>Add product feature</b>${remove}</div>
+    <div class="field"><label>Feature id</label><input type="number"
+      name="addition-id" min="1" value="${esc(feature.id)}"></div>
+    <div class="field"><label>Concise product feature</label><input type="text"
+      name="addition-summary" maxlength="300" value="${esc(feature.summary)}"></div>
+    <div class="field"><label>Acceptance criteria</label><textarea
+      name="addition-criteria" rows="3">${esc(feature.acceptance_criteria.join("\n"))}</textarea></div>
+    </article>`;
+}
+
+function additionsHTML(live) {
+  seedBuildAdditions(live);
+  const additions = live.additions;
+  if (live.next_handoff) return panel("Approved additions", `
+    <p class="ok">Exact additions revision ${esc(additions?.revision)} is approved.</p>
+    <p><b>Next handoff:</b> scope revision ${esc(live.next_handoff.scope_revision)} ·
+      ${esc(live.next_handoff.unit_count)} atomic units queued. Active work is unchanged
+      until the safe handoff boundary.</p>`);
+  const cards = build.additions.map(additionFeatureHTML).join("");
+  const revision = additions
+    ? `revision ${esc(additions.revision)} · ${esc(additions.approval.state)}`
+    : "no additions draft saved";
+  const approve = additions?.approval.state === "draft"
+    ? `<button type="button" id="approve-build-additions" class="chip"
+       ${build.additionsDirty ? "disabled" : ""}>Approve exact additions revision ${esc(additions.revision)}</button>` : "";
+  return panel("Add to the approved product", `<p class="dim">New product outcomes
+    are drafted separately. Approval replans pending work for the next safe handoff.</p>
+    <p class="mono">${revision}</p><div class="addition-list">${cards}</div>
+    <div class="scope-actions"><button type="button" id="add-build-addition"
+      class="chip">Add product feature</button><button type="button"
+      id="save-build-additions" class="chip">Save additions draft</button>${approve}</div>`);
+}
+
+function productProgressHTML(live) {
+  if (live.build_error) return `<p class="warn mono">${esc(live.build_error)}</p>`;
+  if (!live.scope || !live.features) return `<p class="dim">No approved product
+    scope is ready for BUILD.</p>`;
+  const approval = live.scope.approval || {};
+  const progress = live.progress || {};
+  const features = live.features.map(buildFeatureHTML).join("");
+  return `${panel("Live product progress", `
+    <div class="build-summary"><span><b>${esc(progress.completed)} / ${esc(progress.total)}</b>
+      product features complete</span><span class="chip mono">${esc(progress.status)}</span></div>
+    <p class="mono dim">Product scope revision ${esc(live.scope.revision)} ·
+      ${esc(approval.state)}${approval.approved_revision == null ? "" : ` exactly at revision ${esc(approval.approved_revision)}`}</p>
+    ${quotaHTML(live.quota)}${buildAlertsHTML(live.features)}
+    <div class="build-feature-list">${features}</div>`)}${additionsHTML(live)}`;
+}
+
 function renderBuild() {
   $("#build-controls").innerHTML = controlsHTML(buildData.live);
-  // plan tree below the controls — rendering unchanged since Phase 2
   let planHTML;
-  if (!buildData.plan) {
+  if (buildData.live.scope && buildData.live.features) {
+    const tree = buildData.tree.length
+      ? `<ul class="plan-tree">${buildData.tree.map(taskHTML).join("")}</ul>` : "";
+    const md = buildData.plan_md ? `<h2 class="section-label">plan.md</h2>
+      <pre class="plan-md mono">${esc(buildData.plan_md)}</pre>` : "";
+    const internals = tree || md ? `<details class="advanced build-internals">
+      <summary class="dim">Advanced — internal plan artifacts</summary>${tree}${md}</details>` : "";
+    planHTML = productProgressHTML(buildData.live) + internals;
+  } else if (!buildData.plan) {
     planHTML = `<p class="dim">No plan yet — it appears here once
       Project scope is approved and decomposed.</p>`;
   } else if (buildData.plan.error) {
     planHTML = `<p class="warn mono">${esc(buildData.plan.error)}</p>`;
   } else {
-    const tree = buildData.tree.length
-      ? `<ul class="plan-tree">${buildData.tree.map(taskHTML).join("")}</ul>` : "";
-    const md = buildData.plan_md ? `<h2 class="section-label">plan.md</h2>
-      <pre class="plan-md mono">${esc(buildData.plan_md)}</pre>` : "";
-    planHTML = tree + md;
+    planHTML = productProgressHTML(buildData.live);
   }
   $("#build-panel").innerHTML = planHTML;
   wireBuild();
@@ -1050,8 +1242,9 @@ async function refresh() {
       await loadSetup();
     }
     else if (state.view === "build") {
-      // a poll never races a start/stop click mid-flight
-      if (build.busy) return;
+      // a poll never races a mutation or wipes a half-written addition
+      const panelEl = $("#build-panel");
+      if (build.busy || (panelEl && panelEl.contains(document.activeElement))) return;
       await loadBuild();
     }
   } catch (e) {

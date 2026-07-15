@@ -598,10 +598,32 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, html = get(self.port, "/")
         self.assertIn(b'id="build-controls"', html)
 
+    def test_build_ui_renders_live_product_progress_and_additions(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in (
+            "Product scope revision", "Acceptance criteria",
+            "Atomic build units", "Quota this turn", "Hard stop",
+            "Blocked", "blocker_reason", "next_handoff",
+            "Add product feature", "Save additions draft",
+            "Approve exact additions revision",
+            'post("api/build/additions"', 'post("api/build/approve"',
+            "expected_revision: additions.revision",
+            "build.additionsDirty = true", "build-panel",
+        ):
+            self.assertIn(marker, js)
+        self.assertIn('panelEl.contains(document.activeElement)', js)
+
+        _, _, html = get(self.port, "/")
+        self.assertIn(b"Product progress", html)
+        self.assertNotIn(b'data-view="features"', html)
+
     def test_build_css_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         css = body.decode()
-        for token in (".team-strip", ".session-tail"):
+        for token in (".team-strip", ".session-tail", ".build-feature",
+                      ".build-feature.completed", ".build-unit",
+                      ".quota-meter", ".build-alert", ".addition-feature"):
             self.assertIn(token, css)
 
 

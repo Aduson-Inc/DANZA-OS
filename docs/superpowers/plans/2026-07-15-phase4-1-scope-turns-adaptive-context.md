@@ -73,6 +73,18 @@
    workstation tests with 1 optional skip, and 86 dashboard/onboarding HTTP
    tests passed; changed Python files compiled and diff checks passed.
 9. **BUILD UI.** Add compact live crossed-off features, expandable criteria and A/B/C units, quota progress, approval states, additions, blocks, and hard stops without adding a FEATURES tab.
+
+   **Completion evidence — 2026-07-15:** BUILD now presents the Task 8 product
+   payload as compact live feature cards, crosses off completed outcomes, and
+   expands acceptance criteria with linked atomic units. The same tab shows
+   turn quota, exact active-scope approval, blocked reasons, hard-stop flags,
+   isolated additions drafting and exact-revision approval, and queued
+   next-handoff activation while preserving internal plan artifacts under an
+   Advanced disclosure. Focused Task 9 tests failed first and then passed (2);
+   18 BUILD backend/API tests, 52 PROJECT-to-BUILD tests, 116 Task 5 lifecycle
+   regressions, 426 cumulative workstation tests with 1 optional skip, and 87
+   dashboard/onboarding HTTP tests passed. JavaScript syntax and diff checks
+   passed. No FEATURES tab or browser-level Playwright run was added.
 10. **Adaptive CORTEX.** Implement base/ceiling policy, one-time qualified expansion, explicit-budget bypass, acceptance comparison, 6000 dispatch guard, and additive context-read telemetry migration.
 11. **Compatibility and documentation.** Update active prompts/scaffolds/docs, generated artifact contracts, top-level status/test counts, and historical supersession banners. Remove active dial references; retain historical text only behind banners.
 12. **Whole-product verification.** Run focused suites, full unit/integration suite, lint/static/package/install checks, and full Playwright. Diagnose and fix regressions test-first. Perform final active-reference and repository-status audits.
