@@ -14,7 +14,7 @@
     "previous_boss": {"type": ["string", "null"]},
     "turn_number": {"type": "integer", "minimum": 0},
     "features_completed_this_turn": {"type": "integer", "minimum": 0},
-    "max_features_per_turn": {"type": ["integer", "null"], "minimum": 1},
+    "max_features_per_turn": {"type": ["integer", "null"], "minimum": 2, "maximum": 5},
     "handoff_required": {"type": "boolean"},
     "status": {"enum": ["ready", "in_progress", "blocked", "awaiting_handoff", "done"]},
     "goal": {"type": ["string", "null"]},

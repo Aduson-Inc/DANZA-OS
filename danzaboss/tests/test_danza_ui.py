@@ -19,7 +19,9 @@ from danzaboss.cortex.store import ObservationStore
 from danzaboss.workstation import server as server_mod
 from danzaboss.workstation.conductor import (PIDFILE_RELPATH as
                                              CONDUCTOR_PIDFILE, session_name)
-from danzaboss.workstation.routing import ROUTING_RELPATH, SEAT_WORK_TYPES
+from danzaboss.workstation.routing import (ROUTING_RELPATH,
+                                           SCHEMA_VERSION as ROUTING_SCHEMA_VERSION,
+                                           SEAT_WORK_TYPES)
 from danzaboss.workstation.runners import (KNOWN_RUNNERS, RUNNERS_RELPATH,
                                            SCHEMA_VERSION, default_config)
 from danzaboss.workstation.server import (conductor_tail, overview,
@@ -523,8 +525,12 @@ class TestDashboardStatic(unittest.TestCase):
         for marker in ("api/setup", "loadSetup", "Confirm team",
                        "Built-in (recommended)", "Connected",
                        "Found, not logged in",
-                       "Set up your AI team first"):
+                       "Set up your AI team first", "features-per-turn",
+                       "independently completed build features per AI turn",
+                       "features_per_turn: pick.features_per_turn"):
             self.assertIn(marker, js)
+        for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
+            self.assertIn(value, js)
         for removed in ("Full Power", "data-dial", "data-override",
                         "dial: pick.dial", "overrides: pick.overrides"):
             self.assertNotIn(removed, js)
@@ -599,7 +605,8 @@ def seed_confirmed_setup(root):
                   "full_power_extra_argv": [], "interactive": ["stub"],
                   "headless": [], "detected": True, "auth": "unprobed"}}}
     (Path(root) / RUNNERS_RELPATH).write_text(json.dumps(config))
-    routing = {"version": 1, "lineup": ["stub"], "seats": team_seats("stub")}
+    routing = {"version": ROUTING_SCHEMA_VERSION, "features_per_turn": 2,
+               "lineup": ["stub"], "seats": team_seats("stub")}
     (Path(root) / ROUTING_RELPATH).write_text(json.dumps(routing))
 
 
@@ -645,12 +652,14 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(o["seats"]["research"], "gemini")
         self.assertEqual(o["seats"]["map"], "gemini")
         self.assertEqual(o["conductor"], "builtin")
+        self.assertEqual(o["features_per_turn"], 2)
         for removed in ("dial", "overrides", "floors", "budgets_error"):
             self.assertNotIn(removed, o)
         self.assertFalse(o["setup_complete"])
 
     def test_post_setup_writes_only_runners_and_routing(self):
         body = {"lineup": ["claude", "gemini"],
+                "features_per_turn": 4,
                 "seats": team_seats("claude", research="gemini",
                                     map="gemini")}
         status, out = post(self.port, "/api/setup", body)
@@ -662,6 +671,21 @@ class TestSetupApi(unittest.TestCase):
         self.assertFalse((Path(self.root) / STALE_BUDGETS_RELPATH).exists())
         saved = json.loads((Path(self.root) / RUNNERS_RELPATH).read_text())
         self.assertEqual(saved["boss"], "claude")  # boss = lineup[0]
+        routing = json.loads((Path(self.root) / ROUTING_RELPATH).read_text())
+        self.assertEqual(routing["features_per_turn"], 4)
+        self.assertEqual(out["setup"]["features_per_turn"], 4)
+
+    def test_post_requires_valid_features_per_turn_before_any_write(self):
+        base = {"lineup": ["claude"], "seats": team_seats("claude")}
+        for value in (None, True, False, 1, 6, 2.5, "2"):
+            with self.subTest(value=value):
+                body = dict(base)
+                if value is not None:
+                    body["features_per_turn"] = value
+                status, out = post(self.port, "/api/setup", body)
+                self.assertEqual(status, 400, out)
+                for rel in (RUNNERS_RELPATH, ROUTING_RELPATH):
+                    self.assertFalse((Path(self.root) / rel).exists(), rel)
 
     def test_post_setup_ignores_and_preserves_stale_budgets_file(self):
         stale = Path(self.root) / STALE_BUDGETS_RELPATH
@@ -669,6 +693,7 @@ class TestSetupApi(unittest.TestCase):
         original = '{"dial":"full_power","overrides":{"bonnie-qa":1}}\n'
         stale.write_text(original)
         body = {"lineup": ["claude"], "seats": team_seats("claude"),
+                "features_per_turn": 2,
                 "dial": "not-a-real-setting", "overrides": ["invalid"]}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 200, out)
@@ -678,6 +703,7 @@ class TestSetupApi(unittest.TestCase):
 
     def test_persisted_seats_win_over_suggestion(self):
         body = {"lineup": ["claude", "gemini"],
+                "features_per_turn": 3,
                 "seats": team_seats("gemini", plan="claude")}
         status, _ = post(self.port, "/api/setup", body)
         self.assertEqual(status, 200)
@@ -685,11 +711,13 @@ class TestSetupApi(unittest.TestCase):
         o = json.loads(raw)
         self.assertEqual(o["seats"], body["seats"])
         self.assertEqual(o["lineup"], ["claude", "gemini"])
+        self.assertEqual(o["features_per_turn"], 3)
         self.assertTrue(o["setup_complete"])
 
     def test_post_rejects_six_runner_lineup(self):
         body = {"lineup": ["claude", "codex", "gemini", "grok", "opencode",
                            "generic"],
+                "features_per_turn": 2,
                 "seats": team_seats("claude")}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
@@ -699,13 +727,15 @@ class TestSetupApi(unittest.TestCase):
         server_mod._BUILD_REGISTRY = \
             lambda: fake_registry(auth={"claude": "unauthenticated"})
         server_mod._reset_registry_cache()
-        body = {"lineup": ["claude"], "seats": team_seats("claude")}
+        body = {"lineup": ["claude"], "seats": team_seats("claude"),
+                "features_per_turn": 2}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
         self.assertIn("not logged in", out["error"])
 
     def test_post_rejects_invalid_seats_and_writes_nothing(self):
-        body = {"lineup": ["claude"], "seats": {"build": "claude"}}
+        body = {"lineup": ["claude"], "seats": {"build": "claude"},
+                "features_per_turn": 2}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
         self.assertIn("seats keys", out["error"])
@@ -732,7 +762,8 @@ class TestSetupApi(unittest.TestCase):
         server_mod.setup_summary(self.root)
         self.assertEqual(len(calls), 2)   # TTL expired: rebuilt
         server_mod.post_setup(self.root, {
-            "lineup": ["claude"], "seats": team_seats("claude")})
+            "lineup": ["claude"], "seats": team_seats("claude"),
+            "features_per_turn": 2})
         self.assertEqual(len(calls), 3)   # POST always re-probes fresh
 
     def test_onboarding_posts_409_until_setup_confirmed(self):

@@ -13,8 +13,12 @@ from pathlib import Path
 from danzaboss.kernel.state import TeamState
 from danzaboss.workstation.routing import (
     BUILTIN_CONDUCTOR,
+    DEFAULT_FEATURES_PER_TURN,
     KIND_TO_WORK_TYPE,
+    MAX_FEATURES_PER_TURN,
+    MIN_FEATURES_PER_TURN,
     ROUTING_RELPATH,
+    SCHEMA_VERSION,
     SEAT_WORK_TYPES,
     SEATS,
     RoutingError,
@@ -38,7 +42,8 @@ def _config(auth_by_name: dict[str, str]) -> dict:
 
 
 def _routing(lineup: list[str], seats: dict) -> dict:
-    return {"version": 1, "lineup": lineup, "seats": seats}
+    return {"version": SCHEMA_VERSION, "features_per_turn": 2,
+            "lineup": lineup, "seats": seats}
 
 
 def _full_seats(runner: str, **overrides: str) -> dict:
@@ -113,10 +118,33 @@ class TestValidateRouting(unittest.TestCase):
         self.assertEqual(validate_routing(routing, self.cfg), routing)
 
     def test_rejects_wrong_version(self):
-        routing = _routing(["claude"], _full_seats("claude"))
-        routing["version"] = 2
-        with self.assertRaises(RoutingError):
-            validate_routing(routing, self.cfg)
+        for version in (True, 1, 2.0, 3):
+            with self.subTest(version=version):
+                routing = _routing(["claude"], _full_seats("claude"))
+                routing["version"] = version
+                with self.assertRaises(RoutingError):
+                    validate_routing(routing, self.cfg)
+
+    def test_features_per_turn_contract(self):
+        self.assertEqual(SCHEMA_VERSION, 2)
+        self.assertEqual(DEFAULT_FEATURES_PER_TURN, 2)
+        self.assertEqual(MIN_FEATURES_PER_TURN, 2)
+        self.assertEqual(MAX_FEATURES_PER_TURN, 5)
+        for value in range(2, 6):
+            routing = _routing(["claude"], _full_seats("claude"))
+            routing["features_per_turn"] = value
+            self.assertEqual(validate_routing(routing, self.cfg), routing)
+
+    def test_rejects_missing_boolean_and_out_of_range_features_per_turn(self):
+        for value in (None, True, False, 1, 6, 2.5, "2"):
+            with self.subTest(value=value):
+                routing = _routing(["claude"], _full_seats("claude"))
+                if value is None:
+                    del routing["features_per_turn"]
+                else:
+                    routing["features_per_turn"] = value
+                with self.assertRaises(RoutingError):
+                    validate_routing(routing, self.cfg)
 
     def test_rejects_six_runner_lineup(self):
         lineup = ["claude", "codex", "gemini", "grok", "opencode", "generic"]
@@ -176,6 +204,39 @@ class TestPersistence(unittest.TestCase):
             self.assertEqual(path, Path(root) / ROUTING_RELPATH)
             self.assertEqual(load_routing(root), routing)
 
+    def test_load_normalizes_exact_legacy_v1_without_rewriting(self):
+        cfg = _config({"claude": "ok"})
+        legacy = {"version": 1, "lineup": ["claude"],
+                  "seats": _full_seats("claude")}
+        with tempfile.TemporaryDirectory() as root:
+            save_runners(root, cfg)
+            path = Path(root) / ROUTING_RELPATH
+            path.parent.mkdir(parents=True, exist_ok=True)
+            original = json.dumps(legacy, separators=(",", ":"))
+            path.write_text(original, encoding="utf-8")
+
+            loaded = load_routing(root)
+
+            self.assertEqual(loaded, {**legacy, "version": 2,
+                                     "features_per_turn": 2})
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_load_rejects_non_exact_legacy_and_other_versions(self):
+        cfg = _config({"claude": "ok"})
+        base = {"lineup": ["claude"], "seats": _full_seats("claude")}
+        for raw in ({"version": 0, **base},
+                    {"version": True, **base},
+                    {"version": 3, **base},
+                    {"version": 1, "features_per_turn": 2, **base},
+                    {"version": 1, "unexpected": True, **base}):
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as root:
+                save_runners(root, cfg)
+                path = Path(root) / ROUTING_RELPATH
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.assertRaises(RoutingError):
+                    load_routing(root)
+
     def test_save_validates_first(self):
         cfg = _config({"claude": "ok"})
         routing = _routing(["codex"], _full_seats("codex"))  # not detected
@@ -202,7 +263,8 @@ class TestPersistence(unittest.TestCase):
 class TestNextBoss(unittest.TestCase):
     """Pure routing decision: cursor -> kind -> work type -> seat."""
 
-    ROUTING = {"version": 1, "lineup": ["claude", "codex"],
+    ROUTING = {"version": SCHEMA_VERSION, "features_per_turn": 2,
+               "lineup": ["claude", "codex"],
                "seats": {**{s: "claude" for s in SEATS},
                          "conductor": BUILTIN_CONDUCTOR, "qa": "codex"}}
 
@@ -224,7 +286,8 @@ class TestNextBoss(unittest.TestCase):
 
     def test_builtin_seat_falls_back_to_rotation(self):
         # Hand-edited file: qa seat says "builtin" -> rotation by turn.
-        routing = {"version": 1, "lineup": ["claude", "codex"],
+        routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,
+                   "lineup": ["claude", "codex"],
                    "seats": {**{s: "claude" for s in SEATS},
                              "qa": BUILTIN_CONDUCTOR}}
         state = TeamState(turn_number=1)  # feature 2.1 -> qa -> fallback
@@ -232,7 +295,8 @@ class TestNextBoss(unittest.TestCase):
                          routing["lineup"][1 % 2])
 
     def test_missing_seat_value_falls_back_to_rotation(self):
-        routing = {"version": 1, "lineup": ["claude", "codex"],
+        routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,
+                   "lineup": ["claude", "codex"],
                    "seats": {s: "claude" for s in SEATS if s != "qa"}}
         state = TeamState(turn_number=2)  # cursor clamps to 2.1 -> qa
         self.assertEqual(next_boss(routing, _plan(), state),

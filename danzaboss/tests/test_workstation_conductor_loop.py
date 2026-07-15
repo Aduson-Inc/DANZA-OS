@@ -259,7 +259,9 @@ class Routing(LoopFixture):
         seats["conductor"] = routing_mod.BUILTIN_CONDUCTOR
         seats["qa"] = "codex"
         routing_mod.save_routing(
-            self.root, {"version": 1, "lineup": ["claude", "codex"],
+            self.root, {"version": routing_mod.SCHEMA_VERSION,
+                        "features_per_turn": 2,
+                        "lineup": ["claude", "codex"],
                         "seats": seats}, config)
         (self.root / planner_mod.PLAN_JSON_RELPATH).write_text(
             json.dumps(_plan_payload()), encoding="utf-8")

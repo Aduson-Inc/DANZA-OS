@@ -30,7 +30,10 @@ from danzaboss.workstation.runners import KNOWN_RUNNERS, load_runners
 # Constants
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+DEFAULT_FEATURES_PER_TURN = 2
+MIN_FEATURES_PER_TURN = 2
+MAX_FEATURES_PER_TURN = 5
 
 ROUTING_RELPATH: Path = Path(".danza") / "runtime" / "routing.json"
 
@@ -125,10 +128,19 @@ def validate_routing(routing: object, config: dict) -> dict:
         )
 
     version = routing.get("version")
-    if version != SCHEMA_VERSION:
+    if type(version) is not int or version != SCHEMA_VERSION:
         raise RoutingError(
             f"routing version {version!r} != expected {SCHEMA_VERSION} — "
             f"open the dashboard SETUP tab to rebuild your team"
+        )
+
+    features_per_turn = routing.get("features_per_turn")
+    if (type(features_per_turn) is not int
+            or not MIN_FEATURES_PER_TURN <= features_per_turn <= MAX_FEATURES_PER_TURN):
+        raise RoutingError(
+            f"features_per_turn must be an integer from "
+            f"{MIN_FEATURES_PER_TURN} to {MAX_FEATURES_PER_TURN}, "
+            f"got {features_per_turn!r}"
         )
 
     lineup = routing.get("lineup")
@@ -234,6 +246,16 @@ def load_routing(root: str | os.PathLike) -> dict:
         raise RoutingError(
             f"team routing at {path} is not valid JSON: {exc}"
         ) from exc
+    if (isinstance(raw, dict) and type(raw.get("version")) is int
+            and raw["version"] == 1):
+        legacy_keys = {"version", "lineup", "seats"}
+        if set(raw) != legacy_keys:
+            raise RoutingError(
+                "legacy routing version 1 must contain exactly version, "
+                "lineup, and seats"
+            )
+        raw = {**raw, "version": SCHEMA_VERSION,
+               "features_per_turn": DEFAULT_FEATURES_PER_TURN}
     return validate_routing(raw, load_runners(root))
 
 

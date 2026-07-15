@@ -326,10 +326,12 @@ def setup_summary(root: str) -> dict:
               if entry["binary"]]  # the generic copy-me template is no card
     lineup: list = []
     seats: dict = {}
+    features_per_turn = routing_mod.DEFAULT_FEATURES_PER_TURN
     routing_error = ""
     try:
         persisted = routing_mod.load_routing(root)
         lineup, seats = persisted["lineup"], persisted["seats"]
+        features_per_turn = persisted["features_per_turn"]
     except (RunnerError, routing_mod.RoutingError) as e:
         # a routing file that EXISTS but can't be trusted is reported, never
         # hidden; plain absence silently falls through to the suggestion
@@ -343,6 +345,7 @@ def setup_summary(root: str) -> dict:
             pass  # nothing connected: no team to suggest — honest emptiness
     out = {"agents": agents, "lineup": lineup, "seats": seats,
            "conductor": seats.get("conductor", routing_mod.BUILTIN_CONDUCTOR),
+           "features_per_turn": features_per_turn,
            "setup_complete": setup_complete(root)}
     if routing_error:
         out["routing_error"] = routing_error
@@ -454,6 +457,7 @@ def post_setup(root: str, body: dict) -> dict:
     written, so a rejected confirm leaves no torn multi-file state."""
     lineup = _require(body, "lineup", list)
     seats = _require(body, "seats", dict)
+    features_per_turn = _require(body, "features_per_turn", int)
     config = _live_registry(fresh=True)
     try:
         # keep host settings the user already chose; absence means defaults
@@ -464,6 +468,7 @@ def post_setup(root: str, body: dict) -> dict:
         pass
     config["boss"] = lineup[0] if lineup else None
     routing = {"version": routing_mod.SCHEMA_VERSION,
+               "features_per_turn": features_per_turn,
                "lineup": lineup, "seats": seats}
     routing_mod.validate_routing(routing, config)
     save_runners(root, config)

@@ -23,6 +23,9 @@ from typing import Any, Optional
 _ALLOWED_MODES = {"continuous", "relay"}
 _ALLOWED_STATUS = {"ready", "in_progress", "blocked", "awaiting_handoff", "done"}
 SCHEMA_VERSION = 1
+_MIN_FEATURES_PER_TURN = 2
+_MAX_FEATURES_PER_TURN = 5
+_UNSET = object()
 
 
 class StateError(Exception):
@@ -67,8 +70,11 @@ class TeamState:
             if not isinstance(getattr(self, name), int) or getattr(self, name) < 0:
                 raise StateError(f"{name} must be a non-negative int")
         if self.mode == "relay":
-            if not isinstance(self.max_features_per_turn, int) or self.max_features_per_turn < 1:
-                raise StateError("relay mode requires max_features_per_turn >= 1")
+            if (type(self.max_features_per_turn) is not int
+                    or not _MIN_FEATURES_PER_TURN <= self.max_features_per_turn <= _MAX_FEATURES_PER_TURN):
+                raise StateError(
+                    "relay mode requires integer max_features_per_turn "
+                    f"from {_MIN_FEATURES_PER_TURN} to {_MAX_FEATURES_PER_TURN}")
         if self.mode == "continuous" and self.max_features_per_turn is not None:
             raise StateError("continuous mode must have max_features_per_turn = null")
 
@@ -116,9 +122,12 @@ class StateManager:
         os.replace(tmp, self.path)  # atomic on POSIX
 
     def init(self, *, mode: str = "relay", current_boss: str = "claude",
-             goal: Optional[str] = None) -> TeamState:
+             goal: Optional[str] = None,
+             max_features_per_turn: int = 2) -> TeamState:
         state = TeamState(mode=mode, current_boss=current_boss, goal=goal,
-                          max_features_per_turn=(None if mode == "continuous" else 2))
+                          max_features_per_turn=(
+                              None if mode == "continuous"
+                              else max_features_per_turn))
         self._atomic_write(state)
         return state
 
@@ -163,7 +172,8 @@ class StateManager:
         return state
 
     # -- convenience: relay handoff ------------------------------------------
-    def handoff(self, next_boss: str, actor: Optional[str] = None) -> TeamState:
+    def handoff(self, next_boss: str, actor: Optional[str] = None,
+                max_features_per_turn: Any = _UNSET) -> TeamState:
         """Perform a relay handoff: increment turn, swap boss, reset counters.
 
         Only the current boss may hand off. ``actor`` defaults to the current
@@ -173,6 +183,9 @@ class StateManager:
         if state.mode != "relay":
             raise StateError("handoff() only valid in relay mode")
         actor = actor if actor is not None else state.current_boss
+        next_max = (state.max_features_per_turn
+                    if max_features_per_turn is _UNSET
+                    else max_features_per_turn)
         return self.transition(
             actor=actor,
             to_status="awaiting_handoff",
@@ -180,6 +193,7 @@ class StateManager:
             current_boss=next_boss,
             turn_number=state.turn_number + 1,
             features_completed_this_turn=0,
+            max_features_per_turn=next_max,
             handoff_required=False,
         )
 

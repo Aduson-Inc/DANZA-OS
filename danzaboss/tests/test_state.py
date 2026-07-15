@@ -1,6 +1,8 @@
+import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 import _bootstrap  # noqa: F401
 from danzaboss.kernel.state import StateManager, StateError, TeamState
@@ -26,6 +28,27 @@ class TestTeamState(unittest.TestCase):
         s = TeamState(mode="continuous", max_features_per_turn=2)
         with self.assertRaises(StateError):
             s.validate()
+
+    def test_relay_cap_accepts_only_integer_two_through_five(self):
+        for value in range(2, 6):
+            with self.subTest(value=value):
+                TeamState(max_features_per_turn=value).validate()
+        for value in (True, False, 1, 6, 2.5, "2", None):
+            with self.subTest(value=value):
+                with self.assertRaises(StateError):
+                    TeamState(max_features_per_turn=value).validate()
+
+    def test_schema_pins_relay_cap_range(self):
+        path = Path(__file__).parents[1] / "kernel" / "team_state.schema.json"
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        cap = schema["properties"]["max_features_per_turn"]
+        self.assertEqual(cap["minimum"], 2)
+        self.assertEqual(cap["maximum"], 5)
+
+    def test_init_relay_accepts_cap_override(self):
+        s = self.mgr.init(mode="relay", current_boss="claude",
+                          max_features_per_turn=5)
+        self.assertEqual(s.max_features_per_turn, 5)
 
     def test_turn_lock_blocks_wrong_actor(self):
         self.mgr.init(current_boss="claude")
@@ -60,6 +83,31 @@ class TestTeamState(unittest.TestCase):
         self.assertEqual(s.previous_boss, "claude")
         self.assertEqual(s.turn_number, 1)
         self.assertEqual(s.features_completed_this_turn, 0)
+
+    def test_handoff_omitted_cap_retains_active_turn_snapshot(self):
+        self.mgr.init(mode="relay", current_boss="claude",
+                      max_features_per_turn=4)
+        self.mgr.transition(to_status="in_progress")
+        s = self.mgr.handoff("codex")
+        self.assertEqual(s.max_features_per_turn, 4)
+
+    def test_handoff_supplied_cap_updates_snapshot_and_resets_counter(self):
+        self.mgr.init(mode="relay", current_boss="claude",
+                      max_features_per_turn=4)
+        self.mgr.transition(to_status="in_progress")
+        self.mgr.record_feature(actor="claude")
+        s = self.mgr.handoff("codex", max_features_per_turn=3)
+        self.assertEqual(s.max_features_per_turn, 3)
+        self.assertEqual(s.features_completed_this_turn, 0)
+
+    def test_invalid_handoff_cap_leaves_state_unchanged(self):
+        self.mgr.init(mode="relay", current_boss="claude",
+                      max_features_per_turn=4)
+        self.mgr.transition(to_status="in_progress")
+        before = self.mgr.load().to_json()
+        with self.assertRaises(StateError):
+            self.mgr.handoff("codex", max_features_per_turn=True)
+        self.assertEqual(self.mgr.load().to_json(), before)
 
     def test_unknown_field_rejected(self):
         self.mgr.init(current_boss="claude")

@@ -466,7 +466,8 @@ const SEAT_VERBS = {
 };
 
 function initPick(s) {
-  return { seats: { conductor: "builtin", ...s.seats } };
+  return { seats: { conductor: "builtin", ...s.seats },
+    features_per_turn: s.features_per_turn };
 }
 
 function agentChip(a) {
@@ -558,6 +559,16 @@ function renderSetup() {
         Object.keys(SEAT_INFO).map((k) => seatRow(k, s.agents, pick)).join(""))
     : panel("Who does what", `<p class="dim">No agents are connected yet —
         install and log in to at least one AI CLI above.</p>`);
+  const turnSize = panel("Features per turn", `
+    <label class="field" for="features-per-turn">How many features each AI completes</label>
+    <select id="features-per-turn">
+      <option value="2"${pick.features_per_turn === 2 ? " selected" : ""}>2</option>
+      <option value="3"${pick.features_per_turn === 3 ? " selected" : ""}>3</option>
+      <option value="4"${pick.features_per_turn === 4 ? " selected" : ""}>4</option>
+      <option value="5"${pick.features_per_turn === 5 ? " selected" : ""}>5</option>
+    </select>
+    <p class="dim">These are independently completed build features per AI turn —
+    not tokens or power.</p>`);
   const sentences = teamSentences(pick, s.agents);
   const team = panel("Your team", `
     ${s.setup_complete ? `<p class="ok">Team confirmed — onboarding is
@@ -566,7 +577,7 @@ function renderSetup() {
       ? sentences.map((t) => `<p>${esc(t)}</p>`).join("")
       : `<p class="dim">Pick at least one agent to see your team.</p>`}
     <button id="confirm-team" class="chip">Confirm team</button>`);
-  $("#setup-panel").innerHTML = banner + agents + seats + team;
+  $("#setup-panel").innerHTML = banner + agents + seats + turnSize + team;
   wireSetup();
 }
 
@@ -590,6 +601,11 @@ async function setupAction(fn) {
 
 function wireSetup() {
   const pick = setup.pick;
+  const features = $("#features-per-turn");
+  if (features) features.addEventListener("change", () => {
+    pick.features_per_turn = Number(features.value);
+    renderSetup();
+  });
   $$("[data-seat]").forEach((sel) => sel.addEventListener("change", () => {
     pick.seats[sel.dataset.seat] = sel.value;
     renderSetup();                       // team sentences follow the seats
@@ -606,7 +622,8 @@ function wireSetup() {
       setup.error = "a team holds at most 5 agents — share some seats";
       return renderSetup();
     }
-    setupAction(() => post("api/setup", { lineup, seats: pick.seats }));
+    setupAction(() => post("api/setup", { lineup, seats: pick.seats,
+      features_per_turn: pick.features_per_turn }));
   });
 }
 

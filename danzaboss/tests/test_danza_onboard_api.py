@@ -9,7 +9,9 @@ import urllib.request
 from pathlib import Path
 
 import _bootstrap  # noqa
-from danzaboss.workstation.routing import ROUTING_RELPATH, SEAT_WORK_TYPES
+from danzaboss.workstation.routing import (ROUTING_RELPATH,
+                                           SCHEMA_VERSION as ROUTING_SCHEMA_VERSION,
+                                           SEAT_WORK_TYPES)
 from danzaboss.workstation.runners import RUNNERS_RELPATH, SCHEMA_VERSION
 from danzaboss.workstation.server import serve_in_thread
 from danzaboss.workstation.wizard import Wizard
@@ -43,7 +45,8 @@ def install_stub_boss(root: Path, body: str, headless: bool = True) -> Path:
     path = root / RUNNERS_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config), encoding="utf-8")
-    routing = {"version": 1, "lineup": ["stub"],
+    routing = {"version": ROUTING_SCHEMA_VERSION, "features_per_turn": 2,
+               "lineup": ["stub"],
                "seats": {"conductor": "builtin",
                          **{wt: "stub" for wt in SEAT_WORK_TYPES}}}
     (root / ROUTING_RELPATH).write_text(json.dumps(routing), encoding="utf-8")
