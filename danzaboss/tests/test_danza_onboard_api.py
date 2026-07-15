@@ -59,11 +59,11 @@ from pathlib import Path
 prompt = sys.argv[1]
 if "DANZA planner" in prompt:
     print(json.dumps({"spec_ref": ".danza/spec.md", "tasks": [
-        {"id": "1", "description": "Walking skeleton", "subtasks": [
-            {"id": "1.1", "description": "Health endpoint returns ok",
-             "kind": "backend", "size_est": 20, "writes": ["app.py"],
-             "verification": {"kind": "automated_test",
-                              "detail": "pytest -k health"}}]}]}))
+        {"id": "1-A", "feature_id": 1,
+         "description": "Health endpoint returns ok",
+         "kind": "backend", "size_est": 12, "writes": ["app.py"],
+         "verification": {"kind": "automated_test",
+                          "detail": "pytest -k health"}}]}))
 elif "onboarding reviewer" in prompt:
     print(json.dumps({"summary": "looks buildable", "concerns": [],
                       "follow_up_questions": [], "recommendation": "proceed",

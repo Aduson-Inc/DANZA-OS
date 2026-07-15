@@ -1,6 +1,4 @@
-"""W1-P3 task record extension: plan_schema.json and decompose.Task gain
-the design-spec section-6 planning fields without disturbing the
-Upgrade-#4 verifiable-task gate."""
+"""Plan record/schema fields, including Phase 4.1 atomic product links."""
 import json
 import unittest
 from pathlib import Path
@@ -19,14 +17,21 @@ class SchemaExtension(unittest.TestCase):
         self.props = self.task_def["properties"]
 
     def test_new_fields_declared(self):
-        for name in ("kind", "size_est", "depends_on", "writes", "flags"):
+        for name in ("feature_id", "kind", "size_est", "depends_on", "writes",
+                     "flags"):
             self.assertIn(name, self.props)
 
     def test_kind_enum_matches_module_constant(self):
         self.assertEqual(tuple(self.props["kind"]["enum"]), TASK_KINDS)
 
-    def test_size_est_capped_at_30(self):
-        self.assertEqual(self.props["size_est"]["maximum"], 30)
+    def test_atomic_size_est_capped_at_20(self):
+        atomic_rule = next(
+            rule for rule in self.task_def["allOf"]
+            if rule["if"]["properties"]["id"].get("pattern") == "^\\d+-[A-Z]$"
+        )
+        self.assertEqual(
+            atomic_rule["then"]["properties"]["size_est"]["maximum"], 20)
+        self.assertIn("feature_id", atomic_rule["then"]["required"])
 
     def test_writes_capped_at_3_files(self):
         self.assertEqual(self.props["writes"]["maxItems"], 3)
@@ -44,6 +49,7 @@ class TaskRecordDefaults(unittest.TestCase):
         task = Task(id="t1", description="build the thing")
         self.assertIsNone(task.kind)
         self.assertIsNone(task.size_est)
+        self.assertIsNone(task.feature_id)
         self.assertEqual(task.depends_on, ())
         self.assertEqual(task.writes, ())
         self.assertEqual(task.flags, ())

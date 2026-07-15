@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "DANZABOSS plan",
-  "description": "Derived from spec.md. A tree of tasks; every leaf must carry a verification method (Upgrade #4). W1 (workstation design spec section 6) adds hierarchical ids, kind, size_est, depends_on, writes, flags.",
+  "description": "Authoritative internal execution plan. New product-linked atomic leaves use ids such as 71-A; legacy dotted task trees remain readable.",
   "type": "object",
   "required": ["spec_ref", "tasks"],
   "properties": {
@@ -14,12 +14,13 @@
       "type": "object",
       "required": ["id", "description"],
       "properties": {
-        "id": {"type": "string", "pattern": "^\\d+(\\.\\d+){0,2}$", "description": "hierarchical section.feature.task"},
+        "id": {"type": "string", "anyOf": [{"pattern": "^[1-9]\\d*-[A-Z]$"}, {"pattern": "^\\d+(\\.\\d+){0,2}$"}], "description": "product-linked atomic id (71-A) or legacy dotted id"},
         "description": {"type": "string", "description": "ONE concern; conjunction chains are rejected by the validator"},
+        "feature_id": {"type": "integer", "minimum": 1, "description": "approved numeric product feature id; required for atomic ids"},
         "kind": {"enum": ["scaffold", "backend", "frontend", "db-migration", "integration", "config", "design", "test"]},
-        "size_est": {"type": "integer", "minimum": 1, "maximum": 30, "description": "estimated minutes; hard cap 30 (split larger tasks)"},
+        "size_est": {"type": "integer", "minimum": 1, "maximum": 30, "description": "estimated minutes; legacy dotted plans allow up to 30"},
         "depends_on": {"type": "array", "items": {"type": "string"}, "description": "task ids that must complete first (leaves only)"},
-        "writes": {"type": "array", "items": {"type": "string"}, "maxItems": 3, "description": "files/areas touched; kept for wave planning"},
+        "writes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 3, "description": "non-empty files/areas touched; kept for wave planning"},
         "flags": {"type": "array", "items": {"enum": ["auth", "payment", "db-schema"]}, "description": "hard-stop markers surfaced at planning time (Rules 13-15)"},
         "verification": {
           "type": ["object", "null"],
@@ -30,7 +31,17 @@
           }
         },
         "subtasks": {"type": "array", "items": {"$ref": "#/definitions/task"}}
-      }
+      },
+      "allOf": [{
+        "if": {"properties": {"id": {"pattern": "^\\d+-[A-Z]$"}}},
+        "then": {
+          "required": ["feature_id", "kind", "size_est", "writes", "verification"],
+          "properties": {
+            "size_est": {"minimum": 1, "maximum": 20},
+            "subtasks": {"maxItems": 0}
+          }
+        }
+      }]
     }
   }
 }

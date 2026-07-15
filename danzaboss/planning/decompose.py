@@ -52,13 +52,14 @@ class Task:
     verification: Optional[Verification] = None
     subtasks: list["Task"] = field(default_factory=list)
 
-    # W1 planning fields (design spec section 6) — optional so pre-W1
-    # callers and tests construct Tasks exactly as before.
+    # Planning fields — optional so legacy dotted plans and pre-W1 callers
+    # retain their exact construction and identity.
     kind: Optional[str] = None
-    size_est: Optional[int] = None       # estimated minutes; policy cap 30
+    size_est: Optional[int] = None       # estimated minutes; atomic cap 20
     depends_on: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()         # files/areas touched (wave planning)
     flags: tuple[str, ...] = ()          # hard-stop markers (Rules 13-15)
+    feature_id: Optional[int] = None     # approved product-scope reference
 
     # -- properties -----------------------------------------------------------
     def is_leaf(self) -> bool:

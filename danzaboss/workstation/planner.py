@@ -1,11 +1,9 @@
 """W1 decomposition bridge (design spec section 6).
 
 spec.md -> headless planning call -> plan.json/plan.md -> machine
-validation -> deterministic order -> button armed. The AI proposes;
-this module refuses bad breakdowns. The 20-30 minute rule is enforced
-by PROXY (files touched, single concern, one verification, size_est
-cap) because real minutes are unknowable at planning time — actuals
-calibrate later through CORTEX observations.
+validation -> deterministic order -> button armed. New plans are flat,
+product-linked atomic leaves; legacy dotted task trees remain readable.
+The AI proposes and this module refuses invalid breakdowns.
 """
 from __future__ import annotations
 
@@ -32,8 +30,10 @@ class PlanningUnavailable(PlanningError):
 
 
 MAX_WRITES = 3
-MAX_SIZE_EST = 30
-_ID_RE = re.compile(r"^\d+(\.\d+){0,2}$")
+MAX_SIZE_EST = 20
+LEGACY_MAX_SIZE_EST = 30
+_LEGACY_ID_RE = re.compile(r"^\d+(\.\d+){0,2}$")
+_ATOMIC_ID_RE = re.compile(r"^([1-9]\d*)-([A-Z])$")
 _CHAIN_RE = re.compile(r"\b(and then|and also|as well as)\b")
 
 
@@ -77,6 +77,10 @@ def _parse_task(raw: object) -> Task:
     if size_est is not None and (isinstance(size_est, bool)
                                  or not isinstance(size_est, int)):
         raise PlanningError(f"{tid}: size_est must be an integer")
+    feature_id = raw.get("feature_id")
+    if feature_id is not None and (isinstance(feature_id, bool)
+                                   or not isinstance(feature_id, int)):
+        raise PlanningError(f"{tid}: feature_id must be an integer")
     for key in ("depends_on", "writes", "flags"):
         value = raw.get(key, [])
         if (not isinstance(value, list)
@@ -93,6 +97,7 @@ def _parse_task(raw: object) -> Task:
         description=raw["description"].strip(),
         verification=verification,
         subtasks=[_parse_task(s) for s in subtasks],
+        feature_id=feature_id,
         kind=kind,
         size_est=size_est,
         depends_on=tuple(raw.get("depends_on", [])),
@@ -110,7 +115,8 @@ def _conjunction_chained(description: str) -> bool:
             or lowered.count(" and ") >= 2)
 
 
-def validate_plan(tasks: tuple[Task, ...]) -> list[str]:
+def validate_plan(tasks: tuple[Task, ...], *,
+                  require_atomic: bool = False) -> list[str]:
     """Every structure + size-proxy violation at once — the bounce list
     the planner AI gets back. Empty list = plan accepted."""
     violations: list[str] = []
@@ -118,19 +124,40 @@ def validate_plan(tasks: tuple[Task, ...]) -> list[str]:
 
     def walk(task: Task, parent: Task | None) -> None:
         tid = task.id
-        if not _ID_RE.match(tid):
+        atomic_match = _ATOMIC_ID_RE.match(tid)
+        legacy_match = _LEGACY_ID_RE.match(tid)
+        if atomic_match:
+            if parent is not None or task.subtasks:
+                violations.append(
+                    f"{tid}: atomic ids must identify top-level leaves")
+            expected_feature_id = int(atomic_match.group(1))
+            if (type(task.feature_id) is not int
+                    or task.feature_id != expected_feature_id):
+                violations.append(
+                    f"{tid}: feature_id must be numeric {expected_feature_id}")
+        elif not legacy_match:
             violations.append(
-                f"{tid}: id must be dotted integers (section.feature.task)")
-        elif parent is None:
-            if "." in tid:
+                f"{tid}: id must be atomic (71-A) or legacy dotted integers")
+        else:
+            if require_atomic and task.is_leaf():
+                violations.append(
+                    f"{tid}: new plans require a product-linked atomic id "
+                    "such as 71-A")
+            if parent is None and "." in tid:
                 violations.append(
                     f"{tid}: top-level tasks must be sections "
                     "(single integer id)")
-        elif not (tid.startswith(parent.id + ".")
-                  and tid[len(parent.id) + 1:].isdigit()):
+            elif (parent is not None
+                  and not (tid.startswith(parent.id + ".")
+                           and tid[len(parent.id) + 1:].isdigit())):
+                violations.append(
+                    f"{tid}: id must extend parent {parent.id} by one "
+                    "integer segment")
+        if (task.feature_id is not None
+                and (type(task.feature_id) is not int
+                     or task.feature_id < 1)):
             violations.append(
-                f"{tid}: id must extend parent {parent.id} by one "
-                "integer segment")
+                f"{tid}: feature_id must be a positive integer")
         if tid in seen:
             violations.append(f"{tid}: duplicate id")
         seen[tid] = task
@@ -142,6 +169,9 @@ def validate_plan(tasks: tuple[Task, ...]) -> list[str]:
 
     for tid, task in seen.items():
         if not task.is_leaf():
+            if task.feature_id is not None:
+                violations.append(
+                    f"{tid}: feature_id is allowed on leaves only")
             if task.verification is not None:
                 violations.append(
                     f"{tid}: internal node must not carry a verification")
@@ -149,18 +179,22 @@ def validate_plan(tasks: tuple[Task, ...]) -> list[str]:
                 violations.append(f"{tid}: depends_on is allowed on "
                                   "leaves only")
             continue
-        # Leaf size proxies — the enforceable shadow of the 20-30 minute
-        # rule (design spec section 6).
+        # Atomic leaves are deliberately short; old dotted plan records keep
+        # their historical 30-minute ceiling for read/validation compatibility.
         if task.kind not in TASK_KINDS:
             violations.append(
                 f"{tid}: kind {task.kind!r} not one of {TASK_KINDS}")
-        if (not isinstance(task.size_est, int)
-                or not 1 <= task.size_est <= MAX_SIZE_EST):
-            violations.append(f"{tid}: size_est must be 1..{MAX_SIZE_EST} "
+        size_cap = (MAX_SIZE_EST if _ATOMIC_ID_RE.match(tid)
+                    else LEGACY_MAX_SIZE_EST)
+        if (isinstance(task.size_est, bool)
+                or not isinstance(task.size_est, int)
+                or not 1 <= task.size_est <= size_cap):
+            violations.append(f"{tid}: size_est must be 1..{size_cap} "
                               "minutes — split this")
-        if not 1 <= len(task.writes) <= MAX_WRITES:
+        if (not 1 <= len(task.writes) <= MAX_WRITES
+                or any(not item.strip() for item in task.writes)):
             violations.append(f"{tid}: writes must list 1..{MAX_WRITES} "
-                              "files/areas — split this")
+                              "non-empty files/areas — split this")
         if task.verification is None or not task.verification.is_concrete():
             violations.append(
                 f"{tid}: leaf needs exactly one concrete verification")
@@ -180,10 +214,21 @@ def validate_plan(tasks: tuple[Task, ...]) -> list[str]:
     return violations
 
 
+def plan_warnings(tasks: tuple[Task, ...]) -> list[str]:
+    """Return accepted calibration warnings, never validation failures."""
+    return [f"{task.id}: size_est {task.size_est} minutes is below the "
+            "3-minute calibration floor"
+            for task in _leaves(tasks)
+            if isinstance(task.size_est, int) and task.size_est < 3]
+
+
 def _id_key(task_id: str) -> tuple[int, ...]:
-    """Numeric segment order: '1.10' after '1.2' — section order, then id
-    (the spec section-6 tie-break)."""
-    return tuple(int(part) for part in task_id.split("."))
+    """Stable natural order for atomic and legacy dotted identities."""
+    atomic = _ATOMIC_ID_RE.match(task_id)
+    if atomic:
+        return (int(atomic.group(1)), 1, ord(atomic.group(2)) - ord("A"))
+    parts = tuple(int(part) for part in task_id.split("."))
+    return (parts[0], 0, *parts[1:])
 
 
 def _leaves(tasks: tuple[Task, ...]) -> list[Task]:
@@ -246,15 +291,12 @@ def order_tasks(tasks: tuple[Task, ...]) -> tuple[Task, ...]:
 
 
 def feature_nodes(tasks: tuple[Task, ...]) -> tuple[str, ...]:
-    """Feature ids for Rule 3 turn counting: the first two id segments of
-    each leaf (a section-level leaf counts as its own feature), unique,
-    in the order given — pass order_tasks() output for execution order."""
-    out: list[str] = []
-    for item in _leaves(tasks):
-        feature = ".".join(item.id.split(".")[:2])
-        if feature not in out:
-            out.append(feature)
-    return tuple(out)
+    """Counted work identities: exactly one entry per ordered leaf.
+
+    The legacy public name remains for callers until Task 5 replaces routing;
+    its old dotted-prefix grouping semantics intentionally do not.
+    """
+    return tuple(item.id for item in _leaves(tasks))
 
 
 PLAN_JSON_RELPATH = Path(".danza") / "plan.json"
@@ -269,6 +311,8 @@ def _task_to_dict(task: Task) -> dict:
     if task.subtasks:
         out["subtasks"] = [_task_to_dict(sub) for sub in task.subtasks]
         return out
+    if task.feature_id is not None:
+        out["feature_id"] = task.feature_id
     out["kind"] = task.kind
     out["size_est"] = task.size_est
     out["writes"] = list(task.writes)
@@ -300,21 +344,26 @@ def render_plan_md(spec_ref: str, ordered: tuple[Task, ...]) -> str:
     Call after validate_plan: every ordered task must be a validated
     leaf (concrete verification, kind, size_est) or rendering derefs
     None (P3-M2)."""
-    features = feature_nodes(ordered)
     lines = [f"# Plan — {spec_ref}", "",
-             f"{len(ordered)} tasks across {len(features)} features "
-             f"(Rule 3 counts feature nodes: {', '.join(features)})", ""]
+             f"{len(ordered)} atomic units "
+             f"(each ordered leaf counts once: "
+             f"{', '.join(feature_nodes(ordered))})", ""]
     for n, task in enumerate(ordered, start=1):
         lines.append(f"{n}. **{task.id}** ({task.kind}, ~{task.size_est}m) "
                      f"{task.description}")
         lines.append(f"   - verify [{task.verification.kind.value}]: "
                      f"{task.verification.detail}")
         lines.append(f"   - writes: {', '.join(task.writes)}")
+        if task.feature_id is not None:
+            lines.append(f"   - product feature {task.feature_id}")
         if task.depends_on:
             lines.append(f"   - after: {', '.join(task.depends_on)}")
         if task.flags:
             lines.append(f"   - HARD STOP flags: {', '.join(task.flags)} — "
                          "build pauses for user approval here")
+        if isinstance(task.size_est, int) and task.size_est < 3:
+            lines.append("   - WARNING: estimate is below 3 minutes; "
+                         "accepted for calibration")
     return "\n".join(lines) + "\n"
 
 
@@ -342,18 +391,19 @@ MAX_ROUNDS = 3
 PLAN_CONTRACT = (
     "Respond with ONLY a JSON object, no prose around it, shaped exactly:\n"
     '{"spec_ref": str, "tasks": [<task>, ...]}\n'
-    'where <task> = {"id": dotted integers — "1" section, "1.2" feature, '
-    '"1.2.3" task, "description": str (ONE concern; no \'and then\' '
-    'chains), "subtasks": [<task>, ...] on internal nodes} '
-    "and every LEAF instead adds: "
+    'where every <task> is one atomic leaf: {"id": "71-A" form, '
+    '"feature_id": matching positive integer product feature id, '
+    '"description": non-empty str naming ONE concern (no \'and then\' '
+    'chains), '
     '"kind": one of ' + str(list(TASK_KINDS)) + ', '
-    '"size_est": estimated minutes (integer, max ' + str(MAX_SIZE_EST)
-    + '), "writes": [1-' + str(MAX_WRITES) + ' files or areas], '
+    '"size_est": estimated minutes (integer 1-' + str(MAX_SIZE_EST)
+    + '; target 10-15; 1-2 accepted with warning), "writes": [1-'
+    + str(MAX_WRITES) + ' non-empty files or areas], '
     '"depends_on": [task ids] (optional), '
     '"flags": subset of ' + str(list(HARD_STOP_FLAGS)) + ' (optional), '
     '"verification": {"kind": one of '
     + str([k.value for k in VerificationKind])
-    + ', "detail": a concrete command or check}'
+    + ', "detail": a concrete command or check}}'
 )
 
 
@@ -367,8 +417,9 @@ def build_planning_prompt(spec_text: str, *,
     the rejected plan for re-splitting."""
     lines = [
         "You are the DANZA planner. Decompose the spec below into an",
-        "ordered task tree: sections (app areas) -> features -> leaf",
-        "tasks of 20-30 minutes each. Every leaf must be independently",
+        "flat ordered list of product-linked atomic leaves. Target",
+        "10-15 minute leaves; every estimate must be 1-20 minutes.",
+        "Every leaf must be independently",
         "verifiable. Test-first where behavior is specified (business",
         "logic, endpoints, data rules); scaffold/config verify at tier",
         "0-1 (build passes, lint, boots).", ""]
@@ -442,7 +493,7 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
             violations = (f"reply was not a valid plan object: {exc}",)
             prior_plan = None
             continue
-        found = validate_plan(tasks)
+        found = validate_plan(tasks, require_atomic=True)
         ordered: tuple[Task, ...] = ()
         if not found:
             try:
@@ -456,6 +507,7 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
         payload = plan_payload(str(compiler.SPEC_RELPATH), tasks, ordered)
         json_path, md_path = write_plan(root, payload, ordered)
         return {"plan": payload, "order": payload["order"],
+                "warnings": plan_warnings(tasks),
                 "rounds": round_num, "plan_json": str(json_path),
                 "plan_md": str(md_path)}
     raise PlanningError(

@@ -75,7 +75,7 @@ class Ordering(unittest.TestCase):
 
 
 class FeatureNodes(unittest.TestCase):
-    def test_features_are_first_two_segments_in_order(self):
+    def test_every_ordered_legacy_leaf_counts_independently(self):
         tasks = tree(
             {"id": "1", "description": "a", "subtasks": [
                 {"id": "1.1", "description": "f", "subtasks": [
@@ -83,7 +83,7 @@ class FeatureNodes(unittest.TestCase):
                 leaf("1.2")]},
             {"id": "2", "description": "b", "subtasks": [leaf("2.1")]})
         self.assertEqual(feature_nodes(order_tasks(tasks)),
-                         ("1.1", "1.2", "2.1"))
+                         ("1.1.1", "1.1.2", "1.2", "2.1"))
 
     def test_section_level_leaf_counts_as_own_feature(self):
         tasks = tree(leaf("1"))
