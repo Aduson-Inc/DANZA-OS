@@ -249,7 +249,7 @@ ALWAYS_UNCLEAR_STUB = (
 
 
 class FinishTests(unittest.TestCase):
-    """Spec section 7 acceptance: full hermetic run compiles spec + plan."""
+    """Task 6: onboarding finish stops after PROJECT discovery evidence."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -289,14 +289,16 @@ class FinishTests(unittest.TestCase):
         post(self.port, "/api/onboard/checkpoint", {"step_id": "cp_final"})
         post(self.port, "/api/onboard/approve", {"step_id": "cp_final"})
 
-    def test_full_run_compiles_spec_and_plan(self):
+    def test_full_run_compiles_spec_and_stops_before_scope_and_plan(self):
         self._onboard_everything()
         status, out = post(self.port, "/api/onboard/finish", {})
         self.assertEqual(status, 200, out)
         spec = (self.root / ".danza" / "spec.md").read_text(encoding="utf-8")
         self.assertIn("# Spec — Dogly", spec)
-        self.assertTrue((self.root / ".danza" / "plan.json").exists())
-        self.assertTrue((self.root / ".danza" / "plan.md").exists())
+        self.assertEqual(out["project"]["mode"], "new")
+        self.assertFalse((self.root / ".danza" / "features.json").exists())
+        self.assertFalse((self.root / ".danza" / "plan.json").exists())
+        self.assertFalse((self.root / ".danza" / "plan.md").exists())
         status, _ = post(self.port, "/api/onboard/finish", {})
         self.assertEqual(status, 200)  # regeneration is idempotent
 

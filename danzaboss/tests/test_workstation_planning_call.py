@@ -8,6 +8,12 @@ from pathlib import Path
 
 import _bootstrap  # noqa
 from danzaboss.workstation import compiler
+from danzaboss.workstation.product_scope import (
+    approve_scope,
+    new_scope,
+    revise_scope,
+    write_scope,
+)
 from danzaboss.workstation.planner import (PLAN_JSON_RELPATH, PlanningError,
                                            PlanningUnavailable, run_planning)
 
@@ -22,6 +28,14 @@ OVERSIZED_PLAN = {"spec_ref": ".danza/spec.md", "tasks": [
      "kind": "backend", "size_est": 90, "writes": ["src/log.py"],
      "verification": {"kind": "automated_test",
                       "detail": "pytest tests/test_log.py"}}]}
+
+UNKNOWN_FEATURE_PLAN = {"spec_ref": ".danza/features.json#revision-1",
+                        "tasks": [{
+    "id": "72-A", "feature_id": 72, "description": "log a session",
+    "kind": "backend", "size_est": 12, "writes": ["src/log.py"],
+    "verification": {"kind": "automated_test",
+                     "detail": "pytest tests/test_log.py"},
+}]}
 
 # Stub boss CLI: replies from replies.json in call order, records each
 # prompt so tests can assert on bounce-back content.
@@ -46,6 +60,14 @@ class PlanningCall(unittest.TestCase):
         spec = self.root / compiler.SPEC_RELPATH
         spec.parent.mkdir(parents=True)
         spec.write_text("# Spec — DrumLog\n\n## 1. Intent\nTrack practice.\n")
+        self.scope_feature = {
+            "id": 71,
+            "summary": "Users can track practice sessions.",
+            "acceptance_criteria": ["A valid practice session is saved."],
+            "status": "pending",
+        }
+        write_scope(self.root, new_scope([self.scope_feature]))
+        approve_scope(self.root, expected_revision=1)
         self.stub_dir = self.root / "stub"
         self.stub_dir.mkdir()
         self.stub = self.stub_dir / "stub.py"
@@ -71,7 +93,7 @@ class PlanningCall(unittest.TestCase):
 
     def test_prompt_contains_spec(self):
         run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
-        self.assertIn("Track practice.", self.prompt(0))
+        self.assertIn("Users can track practice sessions.", self.prompt(0))
 
     def test_stack_testing_defaults_in_prompt(self):
         answers = self.root / ".danza" / "onboarding" / "answers.json"
@@ -88,6 +110,12 @@ class PlanningCall(unittest.TestCase):
         self.assertIn("size_est", self.prompt(1))
         self.assertIn("REJECTED", self.prompt(1))
 
+    def test_decomposition_covers_only_approved_product_features(self):
+        result = run_planning(self.root, self.command(
+            json.dumps(UNKNOWN_FEATURE_PLAN), json.dumps(VALID_PLAN)))
+        self.assertEqual(result["rounds"], 2)
+        self.assertIn("approved product scope", self.prompt(1))
+
     def test_garbage_reply_costs_a_round(self):
         result = run_planning(self.root, self.command(
             "not json at all", json.dumps(VALID_PLAN)))
@@ -100,10 +128,11 @@ class PlanningCall(unittest.TestCase):
         self.assertIn("2 rounds", str(ctx.exception))
         self.assertFalse((self.root / PLAN_JSON_RELPATH).exists())
 
-    def test_missing_spec_fails_closed(self):
+    def test_legacy_spec_is_not_decomposition_authority(self):
         (self.root / compiler.SPEC_RELPATH).unlink()
-        with self.assertRaises(PlanningError):
-            run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
+        result = run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
+        self.assertEqual(result["plan"]["spec_ref"],
+                         ".danza/features.json#revision-1")
 
     def test_unreachable_cli_raises_unavailable(self):
         with self.assertRaises(PlanningUnavailable):
@@ -119,7 +148,8 @@ class PlanningCall(unittest.TestCase):
         result = run_planning(self.root, self.command(json.dumps(raw)))
         on_disk = json.loads(
             (self.root / PLAN_JSON_RELPATH).read_text(encoding="utf-8"))
-        self.assertEqual(on_disk["spec_ref"], str(compiler.SPEC_RELPATH))
+        self.assertEqual(on_disk["spec_ref"],
+                         ".danza/features.json#revision-1")
         self.assertEqual(set(on_disk),
                          {"spec_ref", "tasks", "order", "execution",
                           "calibration"})
@@ -138,6 +168,19 @@ class PlanningCall(unittest.TestCase):
         with self.assertRaisesRegex(PlanningError, "max_rounds"):
             run_planning(self.root, self.command(json.dumps(VALID_PLAN)),
                          max_rounds=0)
+
+    def test_decomposition_requires_and_references_exact_approved_scope(self):
+        feature = dict(self.scope_feature)
+        feature["summary"] = "Users can log a practice session."
+        revise_scope(self.root, expected_revision=1, features=[feature])
+        with self.assertRaisesRegex(PlanningError, "approved product scope"):
+            run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
+
+        approve_scope(self.root, expected_revision=2)
+        result = run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
+        self.assertEqual(result["plan"]["spec_ref"],
+                         ".danza/features.json#revision-2")
+        self.assertIn("Users can log a practice session.", self.prompt(0))
 
 
 if __name__ == "__main__":

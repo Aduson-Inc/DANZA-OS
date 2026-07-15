@@ -1,6 +1,6 @@
 """W1 decomposition bridge (design spec section 6).
 
-spec.md -> headless planning call -> plan.json/plan.md -> machine
+approved features.json -> headless planning call -> plan.json/plan.md -> machine
 validation -> deterministic order -> button armed. New plans are flat,
 product-linked atomic leaves; legacy dotted task trees remain readable.
 The AI proposes and this module refuses invalid breakdowns.
@@ -15,7 +15,8 @@ from pathlib import Path
 from danzaboss.planning.decompose import (HARD_STOP_FLAGS, TASK_KINDS, Task,
                                           Verification, VerificationKind)
 from danzaboss.workstation import checkpoints
-from danzaboss.workstation import compiler
+from danzaboss.workstation import project as project_mod
+from danzaboss.workstation import product_scope as product_scope_mod
 from danzaboss.workstation import templates as templates_mod
 from danzaboss.workstation.wizard import Wizard
 
@@ -220,6 +221,29 @@ def plan_warnings(tasks: tuple[Task, ...]) -> list[str]:
             "3-minute calibration floor"
             for task in _leaves(tasks)
             if isinstance(task.size_est, int) and task.size_est < 3]
+
+
+def validate_scope_coverage(tasks: tuple[Task, ...], scope: dict) -> list[str]:
+    """Require decomposition to cover each incomplete approved feature only."""
+    approved_ids = {
+        feature["id"] for feature in scope["features"]
+        if feature["status"] != "completed"
+    }
+    planned_ids = {task.feature_id for task in _leaves(tasks)}
+    violations = []
+    unknown = sorted(planned_ids - approved_ids, key=lambda value: (value is None,
+                                                                    value or 0))
+    missing = sorted(approved_ids - planned_ids)
+    if unknown:
+        violations.append(
+            f"atomic units reference product features outside the approved "
+            f"product scope: {unknown!r}"
+        )
+    if missing:
+        violations.append(
+            f"approved product scope features have no atomic units: {missing!r}"
+        )
+    return violations
 
 
 def _id_key(task_id: str) -> tuple[int, ...]:
@@ -450,7 +474,7 @@ def build_planning_prompt(spec_text: str, *,
 def run_planning(root: str | os.PathLike, command: list[str], *,
                  timeout: int = 600, max_rounds: int = MAX_ROUNDS,
                  template_dir: str | Path = templates_mod.DEFAULT_DIR) -> dict:
-    """spec.md -> validated plan artifacts (design spec section 6).
+    """Exact approved product scope -> validated plan artifacts.
 
     Calls the boss CLI headless (same injectable-argv seam as
     checkpoints.run_headless), machine-validates each proposal, bounces
@@ -460,11 +484,12 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
     without a valid plan."""
     if max_rounds < 1:
         raise PlanningError(f"max_rounds must be at least 1, got {max_rounds}")
-    spec_path = Path(root) / compiler.SPEC_RELPATH
-    if not spec_path.exists():
-        raise PlanningError(f"no approved spec at {spec_path}; planning "
-                            "runs only after final approval")
-    spec_text = spec_path.read_text(encoding="utf-8")
+    try:
+        scope = project_mod.require_approved_scope(root)
+    except project_mod.ProjectGateConflict as exc:
+        raise PlanningError(f"approved product scope required: {exc}") from exc
+    spec_text = product_scope_mod.render_feature_list_md(scope)
+    spec_ref = project_mod.scope_ref(scope)
     try:
         answers = Wizard(root).answers
     except PlanningError:
@@ -500,6 +525,7 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
             prior_plan = None
             continue
         found = validate_plan(tasks, require_atomic=True)
+        found.extend(validate_scope_coverage(tasks, scope))
         ordered: tuple[Task, ...] = ()
         if not found:
             try:
@@ -510,7 +536,7 @@ def run_planning(root: str | os.PathLike, command: list[str], *,
             violations = tuple(found)
             prior_plan = data
             continue
-        payload = plan_payload(str(compiler.SPEC_RELPATH), tasks, ordered)
+        payload = plan_payload(spec_ref, tasks, ordered)
         json_path, md_path = write_plan(root, payload, ordered)
         return {"plan": payload, "order": payload["order"],
                 "warnings": plan_warnings(tasks),

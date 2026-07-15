@@ -31,6 +31,18 @@
    integration tests, 279 bounded call-graph regressions, 84 dashboard/onboarding
    HTTP regressions, and the 8/8 cold-start self-test all passed.
 6. **PROJECT backend.** Split finish flow into discovery → draft scope → approval → decomposition. Add new/existing modes, deterministic takeover audit, coverage/gap acknowledgement, fingerprint caching, and server endpoints with revision conflicts.
+
+   **Completion evidence — 2026-07-15:** PROJECT now persists explicit new or
+   existing discovery state. Existing-project discovery deterministically audits
+   repository/Git state, manifests, source dependencies, tests, config, docs,
+   Git history, DANZA artifacts, and analyzer coverage; material analyzer gaps
+   require exact acknowledgement, and audit results cache by HEAD plus tracked
+   worktree content. Separate discover, scope-draft, exact-revision approval,
+   and decomposition endpoints return revision conflicts as HTTP 409. Planning
+   consumes and covers only the exact approved `features.json` revision, while
+   BUILD rejects missing, draft, stale, or mismatched scope/plan revisions.
+   Verification: 23 focused PROJECT/planning tests and 268 cumulative Task 3–6
+   backend/regression tests passed; changed production Python files compiled.
 7. **PROJECT UI.** Rename ONBOARD, present Create New/Continue Existing, audit progress/results/gaps, interview continuation, concise draft scope, expandable acceptance details, and exact-revision approval.
 8. **BUILD backend.** Add live scope/unit payloads, transactional progress updates, feature status derivation, immutable completed work, draft additions, approval/replanning of pending work, and next-handoff queueing.
 9. **BUILD UI.** Add compact live crossed-off features, expandable criteria and A/B/C units, quota progress, approval states, additions, blocks, and hard stops without adding a FEATURES tab.

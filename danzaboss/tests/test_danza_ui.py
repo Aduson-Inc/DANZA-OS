@@ -18,6 +18,7 @@ from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
 from danzaboss.workstation import server as server_mod
 from danzaboss.workstation import execution as execution_mod
+from danzaboss.workstation import project as project_mod
 from danzaboss.workstation.conductor import (PIDFILE_RELPATH as
                                              CONDUCTOR_PIDFILE, session_name)
 from danzaboss.workstation.routing import (ROUTING_RELPATH,
@@ -58,7 +59,7 @@ TEAM_STATE = {
 }
 
 PLAN = {
-    "spec_ref": ".danza/spec.md",
+    "spec_ref": ".danza/features.json#revision-1",
     "tasks": [
         {"id": "1", "description": "Walking skeleton",
          "subtasks": [
@@ -823,8 +824,16 @@ class TestBuildApi(unittest.TestCase):
         path.write_text(f"{pid}\n")
 
     def _pass_start_gate(self):
-        """Confirmed setup + a plan — the two server-side start conditions."""
+        """Confirmed setup + exact approved scope + matching plan."""
         seed_confirmed_setup(self.root)
+        project_mod.discover_project(self.root, mode="new")
+        project_mod.draft_scope(self.root, features=[{
+            "id": 71,
+            "summary": "Users can run the prepared build plan.",
+            "acceptance_criteria": ["The matching plan can start."],
+            "status": "pending",
+        }])
+        project_mod.approve_project_scope(self.root, expected_revision=1)
         (Path(self.root) / ".danza" / "plan.json").write_text(json.dumps(PLAN))
 
     def _get(self, port, path):

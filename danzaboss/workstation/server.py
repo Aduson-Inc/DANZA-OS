@@ -38,6 +38,8 @@ from ..kernel.state import StateError, StateManager, TeamState
 from . import checkpoints as checkpoints_mod
 from . import execution as execution_mod
 from . import interview as interview_mod
+from . import project as project_mod
+from . import product_scope as product_scope_mod
 from . import research as research_mod
 from . import routing as routing_mod
 from . import templates as templates_mod
@@ -420,7 +422,10 @@ def snapshot_token(root: str) -> str:
     parts = []
     for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH,
                 RUNNERS_RELPATH, routing_mod.ROUTING_RELPATH,
-                STATE_RELPATH, interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH):
+                STATE_RELPATH, interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH,
+                project_mod.PROJECT_STATE_RELPATH,
+                project_mod.TAKEOVER_AUDIT_RELPATH,
+                product_scope_mod.FEATURES_JSON_RELPATH):
         try:
             st = (Path(root) / rel).stat()
             parts.append(f"{st.st_mtime_ns}:{st.st_size}")
@@ -431,8 +436,7 @@ def snapshot_token(root: str) -> str:
 
 # -- write-side actions (pure functions of root+body, unit-testable) --------
 
-class GateConflict(Exception):
-    """A write that must wait: open grill, missing verdict, wrong order."""
+GateConflict = project_mod.ProjectGateConflict
 
 
 def _require(body: dict, key: str, kind: type):
@@ -561,10 +565,12 @@ def post_approve(root: str, body: dict) -> dict:
 
 
 def finish_onboarding(root: str, command: Optional[list]) -> dict:
-    """Compile spec.md from approved answers, then run validated planning
-    (spec section 7 'Finish'). Deliberately gate-checked, fail-closed:
-    planning has no degraded mode — nothing downstream can proceed
-    without a valid plan."""
+    """Finish discovery and compile the interview evidence.
+
+    Task 6 deliberately stops before product-scope drafting. Approval and
+    decomposition are separate PROJECT writes; this endpoint can no longer
+    create a build plan before exact-revision scope approval.
+    """
     wiz = Wizard(root)
     if wiz.project_type() not in APP_PROJECT_TYPES:
         raise WizardError("this project saved an idea — only website or "
@@ -578,9 +584,6 @@ def finish_onboarding(root: str, command: Optional[list]) -> dict:
         raise GateConflict(
             f"the {blocking} step still has open questions — "
             "answer those first")
-    if command is None:
-        raise PlanningUnavailable(
-            f"{checkpoints_mod.NO_BOSS_REASON} — planning needs an AI agent")
     answers = wiz.answers
     template = None
     chosen = answers.get("stack_template")
@@ -598,15 +601,67 @@ def finish_onboarding(root: str, command: Optional[list]) -> dict:
                         research=research_result, checkpoints=verdicts,
                         open_questions=interview_mod.open_questions(root, wiz))
     spec_path = write_spec(root, text)
-    out = run_planning(root, command)
-    out["spec"] = str(spec_path)
-    return out
+    discovery = project_mod.discover_project(root, mode="new")
+    return {"spec": str(spec_path), "project": discovery}
 
 
 def post_finish(root: str, body: dict) -> dict:
     _require_setup(root)
     out = finish_onboarding(root, _headless_command(root))
     out.update({"ok": True, "onboarding": onboarding_summary(root)})
+    return out
+
+
+def post_project_discover(root: str, body: dict) -> dict:
+    _require_setup(root)
+    mode = _require(body, "mode", str)
+    return {"ok": True,
+            "project": project_mod.discover_project(root, mode=mode)}
+
+
+def post_project_scope(root: str, body: dict) -> dict:
+    _require_setup(root)
+    features = _require(body, "features", list)
+    expected_revision = body.get("expected_revision")
+    if expected_revision is not None and type(expected_revision) is not int:
+        raise ValueError("body.expected_revision must be int")
+    fingerprint = body.get("audit_fingerprint")
+    if fingerprint is not None and not isinstance(fingerprint, str):
+        raise ValueError("body.audit_fingerprint must be str")
+    acknowledgements = body.get("acknowledged_gaps")
+    if acknowledgements is not None:
+        if (not isinstance(acknowledgements, list)
+                or not all(isinstance(item, str) for item in acknowledgements)):
+            raise ValueError("body.acknowledged_gaps must be list[str]")
+    scope = project_mod.draft_scope(
+        root, features=features, expected_revision=expected_revision,
+        audit_fingerprint=fingerprint,
+        acknowledged_gaps=acknowledgements,
+    )
+    return {"ok": True, "scope": scope,
+            "project": project_mod.project_summary(root)}
+
+
+def post_project_approve(root: str, body: dict) -> dict:
+    _require_setup(root)
+    expected_revision = body.get("expected_revision")
+    if type(expected_revision) is not int:
+        raise ValueError("body.expected_revision must be int")
+    scope = project_mod.approve_project_scope(
+        root, expected_revision=expected_revision)
+    return {"ok": True, "scope": scope,
+            "project": project_mod.project_summary(root)}
+
+
+def post_project_decompose(root: str, body: dict) -> dict:
+    _require_setup(root)
+    project_mod.require_approved_scope(root)
+    command = _headless_command(root)
+    if command is None:
+        raise PlanningUnavailable(
+            f"{checkpoints_mod.NO_BOSS_REASON} — decomposition needs an AI agent")
+    out = run_planning(root, command)
+    out.update({"ok": True, "project": project_mod.project_summary(root)})
     return out
 
 
@@ -627,7 +682,11 @@ def post_build_start(root: str, body: dict,
     _require_setup(root)
     if not (Path(root) / PLAN_JSON_RELPATH).is_file():
         raise GateConflict(
-            "finish Onboarding first — there is no build plan yet")
+            "finish PROJECT decomposition first — there is no build plan yet")
+    plan, plan_error = _read_json(Path(root) / PLAN_JSON_RELPATH)
+    if plan_error:
+        raise GateConflict(f"build plan is corrupt: {plan_error}")
+    project_mod.require_plan_matches_scope(root, plan)
     pid = _conductor_pid(root)
     if pid is not None and alive(pid):
         raise GateConflict("the build crew is already running")
@@ -684,6 +743,10 @@ _POST_ROUTES = {
     "/api/onboard/checkpoint": post_checkpoint,
     "/api/onboard/approve": post_approve,
     "/api/onboard/finish": post_finish,
+    "/api/project/discover": post_project_discover,
+    "/api/project/scope": post_project_scope,
+    "/api/project/approve": post_project_approve,
+    "/api/project/decompose": post_project_decompose,
 }
 
 
@@ -739,6 +802,8 @@ class DanzaUIHandler(CortexUIHandler):
                 self._json(setup_summary(self.root))
             elif route == "/api/onboarding":
                 self._json(onboarding_summary(self.root))
+            elif route == "/api/project":
+                self._json(project_mod.project_summary(self.root))
             elif route == "/api/plan":
                 self._json(plan_detail(self.root))
             elif route == "/api/runners":
@@ -793,7 +858,7 @@ class DanzaUIHandler(CortexUIHandler):
             with _POST_LOCK:
                 result = handler(self.root, body)
             self._json(result)
-        except GateConflict as e:
+        except (GateConflict, product_scope_mod.RevisionConflict) as e:
             self._json({"error": str(e)}, 409)
         except ValueError as e:
             # WizardError / InterviewError / CheckpointError / ResearchError
