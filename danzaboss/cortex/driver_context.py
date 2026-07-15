@@ -30,8 +30,9 @@ from typing import Optional
 from .assemble import Package
 # Both tables live in budgets.py since P4 T4 (the single budget home);
 # re-exported here so existing importers keep working unchanged.
-from .budgets import DRIVER_BUDGETS, DRIVER_CORTEX, resolve_budget  # noqa: F401
-from .quality import build_package
+from .budgets import (  # noqa: F401
+    DRIVER_BUDGETS, DRIVER_CORTEX, resolve_budget, resolve_policy)
+from .quality import build_package, select_adaptive_package
 from .store import ObservationStore
 
 # Unknown drivers fall back here: no forced intent (let the classifier decide),
@@ -55,6 +56,7 @@ class DriverContext:
     used: int                   # tokens the package actually consumed (<= budget)
     package: Package
     profile_source: str         # "driver_map" | "fallback"
+    adaptation: dict = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     def render(self) -> str:
@@ -73,6 +75,7 @@ class DriverContext:
             "budget": self.budget,
             "used": self.used,
             "profile_source": self.profile_source,
+            "adaptation": self.adaptation,
             "notes": self.notes,
             "observations": [
                 {"id": i.observation.id, "type": i.observation.type,
@@ -99,14 +102,47 @@ def compile_driver_context(store: ObservationStore, driver: str, task: str,
     hybrid retrieval, budgeted assembly and the single quality re-plan.
     `budget=None` resolves the driver's role default via `default_budget`.
     """
-    if budget is None:
-        budget = default_budget(driver)
+    policy = resolve_policy(driver)
+    explicit = budget is not None
+    selected_budget = budget if explicit else policy.base
     prof, source = driver_profile(driver)
-    bundle = build_package(store, task, project, budget=budget,
+    bundle = build_package(store, task, project, budget=selected_budget,
                            types=prof["types"],
                            intent_override=prof["intent"],
                            workspace=workspace, graph=graph)
+    if explicit:
+        adaptation = {
+            "requested_budget": selected_budget,
+            "policy_base": policy.base,
+            "policy_ceiling": policy.ceiling,
+            "explicit_budget": True,
+            "selected_mode": "explicit",
+            "initial_budget": selected_budget,
+            "initial_used": bundle.package.used,
+            "base_used": None,
+            "base_consumed_85_percent": None,
+            "pressure_reasons": [],
+            "expansion_considered": False,
+            "expansion_qualified": False,
+            "expansion_attempted": False,
+            "expansion_accepted": False,
+            "base_relevance": bundle.report.relevance,
+            "base_coverage": bundle.report.coverage,
+            "candidate": None,
+            "new_top_five_ids": [],
+            "acceptance_reason": "explicit_budget_bypass",
+            "selected_budget": selected_budget,
+            "selected_used": bundle.package.used,
+        }
+    else:
+        selection = select_adaptive_package(
+            bundle, base_budget=policy.base, ceiling=policy.ceiling)
+        bundle = selection.bundle
+        adaptation = selection.evidence
+        selected_budget = adaptation["selected_budget"]
     return DriverContext(
         driver=driver, task=task, project=project,
-        intent=bundle.intent.name, budget=budget, used=bundle.package.used,
-        package=bundle.package, profile_source=source, notes=list(bundle.notes))
+        intent=bundle.intent.name, budget=selected_budget,
+        used=bundle.package.used, package=bundle.package,
+        profile_source=source, adaptation=adaptation,
+        notes=list(bundle.notes))

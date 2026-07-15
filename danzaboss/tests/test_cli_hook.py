@@ -41,6 +41,15 @@ def _task_payload(prompt: str) -> dict:
                            "prompt": prompt}}
 
 
+def _task_payload_at_tokens(tokens: int) -> dict:
+    payload = _task_payload("")
+    tool_input = payload["tool_input"]
+    overhead = len(json.dumps(tool_input))
+    tool_input["prompt"] = "x" * (tokens * 4 - overhead)
+    assert _dispatch_tokens("Task", tool_input) == tokens
+    return payload
+
+
 class TestDispatchTokenEstimate(unittest.TestCase):
     def test_non_dispatch_tools_are_zero(self):
         self.assertEqual(_dispatch_tokens("Edit", {"file_path": "a.py"}), 0)
@@ -68,6 +77,14 @@ class TestContextBudgetWiring(unittest.TestCase):
         root = _app_build_root()
         decision, _ = _hook_decision(_task_payload("build feature X"), root)
         self.assertEqual(decision, "allow")
+
+    def test_app_build_allows_6000_and_denies_6001(self):
+        root = _app_build_root()
+        allowed, _ = _hook_decision(_task_payload_at_tokens(6000), root)
+        denied, reason = _hook_decision(_task_payload_at_tokens(6001), root)
+        self.assertEqual(allowed, "allow")
+        self.assertEqual(denied, "deny")
+        self.assertIn("6000", reason)
 
     def test_os_dev_never_blocks_dispatch(self):
         # Layer 0 edits the factory; token discipline is a build-flow concern.

@@ -9,6 +9,7 @@ Stdlib only.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import re
 import sqlite3
@@ -62,7 +63,16 @@ class CaptureLog:
         self.conn.execute("""CREATE TABLE IF NOT EXISTS context_reads (
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
             project TEXT NOT NULL, driver TEXT NOT NULL,
-            tokens INTEGER NOT NULL, budget INTEGER NOT NULL)""")
+            tokens INTEGER NOT NULL, budget INTEGER NOT NULL,
+            adaptation TEXT NOT NULL DEFAULT '{}')""")
+        context_read_columns = {
+            row["name"] for row in self.conn.execute(
+                "PRAGMA table_info(context_reads)").fetchall()
+        }
+        if "adaptation" not in context_read_columns:
+            self.conn.execute(
+                "ALTER TABLE context_reads ADD COLUMN adaptation "
+                "TEXT NOT NULL DEFAULT '{}'")
         self.conn.commit()
 
     # -- sessions --------------------------------------------------------------
@@ -120,14 +130,18 @@ class CaptureLog:
 
     # -- context reads (P4 T11 telemetry) ----------------------------------------
     def record_context_read(self, project: str, driver: str,
-                            tokens: int, budget: int) -> int:
+                            tokens: int, budget: int,
+                            adaptation: Optional[dict] = None) -> int:
         """One driver-context compile: what `driver` just read vs its cap.
         The compile seat is the only path every driver context passes, so
         this table is the per-agent spend ledger the dashboard renders."""
+        encoded = json.dumps(
+            adaptation or {}, sort_keys=True, separators=(",", ":"))
         cur = self.conn.execute(
-            "INSERT INTO context_reads (ts, project, driver, tokens, budget) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (_utcnow(), project, driver, int(tokens), int(budget)))
+            "INSERT INTO context_reads "
+            "(ts, project, driver, tokens, budget, adaptation) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (_utcnow(), project, driver, int(tokens), int(budget), encoded))
         self.conn.commit()
         return int(cur.lastrowid)
 

@@ -11,6 +11,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 import _bootstrap  # noqa
 
@@ -201,25 +202,63 @@ class TestDefaultBudgets(unittest.TestCase):
     when the caller/CLI passes no explicit budget."""
 
     def test_default_budget_jonathan_builder(self):
-        self.assertEqual(default_budget("jonathan-builder"), 900)
+        self.assertEqual(default_budget("jonathan-builder"), 2400)
 
     def test_default_budget_bonnie_qa(self):
-        self.assertEqual(default_budget("bonnie-qa"), 800)
+        self.assertEqual(default_budget("bonnie-qa"), 2000)
 
     def test_default_budget_unknown_driver_falls_back_to_generic_cap(self):
-        self.assertEqual(default_budget("nobody"), 1200)
+        self.assertEqual(default_budget("nobody"), 2400)
 
     def test_compile_driver_context_no_budget_resolves_role_default_jonathan(self):
         ctx = compile_driver_context(app_build_store(), "jonathan-builder",
                                      TASK, "userapp")
-        self.assertEqual(ctx.budget, 900)
-        self.assertLessEqual(ctx.used, 900)
+        self.assertEqual(ctx.budget, 2400)
+        self.assertLessEqual(ctx.used, 2400)
+        self.assertEqual(ctx.adaptation["selected_mode"], "base")
+        self.assertEqual(ctx.adaptation["initial_budget"], 2400)
+        self.assertEqual(ctx.adaptation["selected_budget"], 2400)
+        self.assertTrue(ctx.adaptation["expansion_considered"])
 
     def test_compile_driver_context_no_budget_resolves_role_default_bonnie(self):
         ctx = compile_driver_context(app_build_store(), "bonnie-qa",
                                      TASK, "userapp")
-        self.assertEqual(ctx.budget, 800)
-        self.assertLessEqual(ctx.used, 800)
+        self.assertEqual(ctx.budget, 2000)
+        self.assertLessEqual(ctx.used, 2000)
+
+    def test_explicit_budget_is_exact_and_bypasses_adaptation(self):
+        with patch("danzaboss.cortex.driver_context.select_adaptive_package") \
+                as adaptive:
+            ctx = compile_driver_context(app_build_store(), "jonathan-builder",
+                                         TASK, "userapp", budget=600)
+        adaptive.assert_not_called()
+        evidence = ctx.adaptation
+        self.assertEqual(ctx.budget, 600)
+        self.assertEqual(evidence["requested_budget"], 600)
+        self.assertEqual(evidence["initial_budget"], 600)
+        self.assertEqual(evidence["selected_budget"], 600)
+        self.assertEqual(evidence["selected_mode"], "explicit")
+        self.assertFalse(evidence["expansion_considered"])
+        self.assertFalse(evidence["expansion_attempted"])
+        self.assertEqual(evidence["acceptance_reason"],
+                         "explicit_budget_bypass")
+
+    def test_empty_store_stays_at_base_without_expansion(self):
+        store = ObservationStore(SqliteBackend(":memory:"))
+        ctx = compile_driver_context(store, "jonathan-builder", TASK, "userapp")
+        self.assertEqual(ctx.used, 0)
+        self.assertEqual(ctx.budget, 2400)
+        self.assertFalse(ctx.adaptation["expansion_qualified"])
+        self.assertFalse(ctx.adaptation["expansion_attempted"])
+
+    def test_quality_retry_does_not_duplicate_adaptive_base_build(self):
+        store = ObservationStore(SqliteBackend(":memory:"))
+        with patch("danzaboss.cortex.driver_context.build_package",
+                   wraps=driver_context.build_package) as build:
+            ctx = compile_driver_context(
+                store, "jonathan-builder", TASK, "userapp")
+        self.assertEqual(build.call_count, 1)
+        self.assertTrue(ctx.adaptation["expansion_considered"])
 
 
 class TestDriverContextCLI(unittest.TestCase):
@@ -260,6 +299,8 @@ class TestDriverContextCLI(unittest.TestCase):
         self.assertEqual(data["budget"], 600)
         self.assertLessEqual(data["used"], 600)
         self.assertEqual(data["profile_source"], "driver_map")
+        self.assertEqual(data["adaptation"]["selected_mode"], "explicit")
+        self.assertEqual(data["adaptation"]["selected_budget"], 600)
 
     def test_cli_default_renders_text_block(self):
         code, out = self._run(["context", "--driver", "bonnie-qa",
@@ -281,8 +322,11 @@ class TestDriverContextCLI(unittest.TestCase):
                                "--task", TASK, "--json"])
         self.assertEqual(code, 0)
         data = json.loads(out)
-        self.assertEqual(data["budget"], 800)
-        self.assertLessEqual(data["used"], 800)
+        self.assertEqual(data["budget"], 2000)
+        self.assertLessEqual(data["used"], 2000)
+        self.assertIn(data["adaptation"]["selected_mode"], ("base", "expanded"))
+        self.assertEqual(data["adaptation"]["policy_base"], 2000)
+        self.assertEqual(data["adaptation"]["policy_ceiling"], 3500)
 
 
 if __name__ == "__main__":

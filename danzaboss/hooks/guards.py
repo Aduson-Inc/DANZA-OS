@@ -33,7 +33,7 @@ class GuardConfig:
     log_files: list[str] = field(default_factory=lambda: ["decision-log.md", "turn-log.md", "self-assessment-log.md", "build-history.md", "onboarding-misses.md", "patterns.md"])
     state_files: list[str] = field(default_factory=lambda: ["team-state.json", "handoff.md"])
     # context budget for sub-agent dispatch
-    max_dispatch_tokens: int = 4000
+    max_dispatch_tokens: int = 6000
 
 
 def _matches_any(text: str, patterns: list[str]) -> bool:

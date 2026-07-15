@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sqlite3
 import tempfile
@@ -96,6 +97,23 @@ class TestContextReadTelemetry(unittest.TestCase):
     def test_stats_empty_on_fresh_db(self):
         self.assertEqual(CaptureLog(":memory:").context_read_stats("danza-os"), {})
 
+    def test_four_argument_call_persists_empty_adaptation(self):
+        log = CaptureLog(":memory:")
+        log.record_context_read("danza-os", "jonathan-builder", 400, 2400)
+        row = log.conn.execute(
+            "SELECT adaptation FROM context_reads").fetchone()
+        self.assertEqual(json.loads(row["adaptation"]), {})
+
+    def test_structured_adaptation_round_trip(self):
+        log = CaptureLog(":memory:")
+        evidence = {"selected_mode": "expanded", "selected_budget": 4000}
+        log.record_context_read(
+            "danza-os", "jonathan-builder", 3000, 4000, evidence)
+        row = log.conn.execute(
+            "SELECT tokens, budget, adaptation FROM context_reads").fetchone()
+        self.assertEqual((row["tokens"], row["budget"]), (3000, 4000))
+        self.assertEqual(json.loads(row["adaptation"]), evidence)
+
     def test_old_db_upgrades_in_place(self):
         # a DB created before the context_reads table existed must gain it
         # on open (CREATE TABLE IF NOT EXISTS idiom), not crash on record.
@@ -120,6 +138,36 @@ class TestContextReadTelemetry(unittest.TestCase):
             stats = log.context_read_stats("danza-os")
             self.assertEqual(stats["samantha-mapper"],
                              {"reads": 1, "tokens": 500})
+
+    def test_old_context_reads_schema_migrates_rows_idempotently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "cortex.db")
+            conn = sqlite3.connect(path)
+            conn.execute("""CREATE TABLE context_reads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                project TEXT NOT NULL, driver TEXT NOT NULL,
+                tokens INTEGER NOT NULL, budget INTEGER NOT NULL)""")
+            conn.execute(
+                "INSERT INTO context_reads (ts, project, driver, tokens, budget) "
+                "VALUES ('old', 'danza-os', 'bonnie-qa', 123, 800)")
+            conn.commit()
+            conn.close()
+
+            first = CaptureLog(path)
+            second = CaptureLog(path)
+            columns = [r["name"] for r in second.conn.execute(
+                "PRAGMA table_info(context_reads)").fetchall()]
+            self.assertEqual(columns.count("adaptation"), 1)
+            rows = second.conn.execute(
+                "SELECT tokens, budget, adaptation FROM context_reads").fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual((rows[0]["tokens"], rows[0]["budget"]), (123, 800))
+            self.assertEqual(json.loads(rows[0]["adaptation"]), {})
+            self.assertEqual(
+                second.context_read_stats("danza-os")["bonnie-qa"],
+                {"reads": 1, "tokens": 123})
+            first.conn.close()
+            second.conn.close()
 
 
 class TestDriverContextCLIRecordsRead(unittest.TestCase):
@@ -150,6 +198,23 @@ class TestDriverContextCLIRecordsRead(unittest.TestCase):
         stats = CaptureLog(commands.db_path(self.root)).context_read_stats(project)
         self.assertEqual(stats["jonathan-builder"]["reads"], 1)
         self.assertGreaterEqual(stats["jonathan-builder"]["tokens"], 0)
+
+    def test_cli_json_adaptation_matches_persisted_row(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = commands.main(
+                ["context", "--driver", "jonathan-builder",
+                 "--task", "wire adaptive telemetry", "--budget", "600",
+                 "--json"], root=self.root, stdin=io.StringIO(""))
+        self.assertEqual(code, 0)
+        data = json.loads(out.getvalue())
+        log = CaptureLog(commands.db_path(self.root))
+        row = log.conn.execute(
+            "SELECT tokens, budget, adaptation FROM context_reads "
+            "ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["budget"], data["budget"])
+        self.assertEqual(row["tokens"], data["used"])
+        self.assertEqual(json.loads(row["adaptation"]), data["adaptation"])
 
 
 if __name__ == "__main__":

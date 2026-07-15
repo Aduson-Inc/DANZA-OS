@@ -318,7 +318,7 @@ def _cmd_driver_context(argv: list[str], root: str) -> int:
     # P4 T11: the compile seat is the one place every driver context passes,
     # so this is where per-agent spend telemetry gets its row.
     CaptureLog(db_path(root)).record_context_read(
-        _project(root), driver, ctx.used, ctx.budget)
+        _project(root), driver, ctx.used, ctx.budget, ctx.adaptation)
     print(json.dumps(ctx.to_dict(), indent=2) if as_json
           else (ctx.render() or "(no relevant observations)"))
     return 0

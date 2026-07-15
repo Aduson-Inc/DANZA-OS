@@ -1,27 +1,25 @@
-"""Tests for danzaboss.cortex.budgets — single home for driver budgets.
+"""Tests for the authoritative adaptive per-driver CORTEX budget policy.
 
-Covers the P4 T4 contract as slimmed 2026-07-14 (dial/overrides/persistence
-removed — CORTEX self-budgets): tables byte-identical to their previous homes
-(cortex/driver_context.py, context/pipeline.py), floor-clamped one-arg
-resolution, and re-export compatibility for the two modules that previously
-owned the tables.
+Covers the Phase 4.1 Task 10 base/ceiling policy while retaining the dial-free
+one-argument resolution and re-export compatibility established in Phase 4.
 """
 import _bootstrap  # noqa
 import inspect
 import unittest
 
 from danzaboss.cortex.budgets import (
+    DEFAULT_CEILING,
     DEFAULT_BUDGET,
     DRIVER_BUDGETS,
+    DRIVER_CEILINGS,
     DRIVER_CORTEX,
     DRIVER_FLOORS,
     resolve_budget,
+    resolve_policy,
 )
 
-# Literal copies of the tables as they lived in cortex/driver_context.py
-# (DRIVER_CORTEX, DRIVER_BUDGETS, _DEFAULT_BUDGET) before this module became
-# their single home. The move must be byte-identical — any drift here changes
-# retrieval or budget behavior silently.
+# The retrieval profile remains byte-identical to its pre-policy source. The
+# budget tables below pin the binding Phase 4.1 Task 10 bases and ceilings.
 _EXPECTED_DRIVER_CORTEX = {
     "jonathan-builder":    {"intent": "write_code",
                             "types": ["convention", "decision",
@@ -43,18 +41,30 @@ _EXPECTED_DRIVER_CORTEX = {
 }
 
 _EXPECTED_DRIVER_BUDGETS = {
-    "jonathan-builder": 900,
-    "samantha-mapper": 900,
-    "angela-auditor": 900,
-    "bonnie-qa": 800,
-    "billy-security": 800,
-    "hank-designer": 800,
-    "carmella-researcher": 800,
+    "tony-d-orchestrator": 2400,
+    "jonathan-builder": 2400,
+    "samantha-mapper": 2400,
+    "angela-auditor": 2400,
+    "bonnie-qa": 2000,
+    "billy-security": 2000,
+    "hank-designer": 2000,
+    "carmella-researcher": 2000,
+}
+
+_EXPECTED_DRIVER_CEILINGS = {
+    "tony-d-orchestrator": 4000,
+    "jonathan-builder": 4000,
+    "samantha-mapper": 4000,
+    "angela-auditor": 4000,
+    "bonnie-qa": 3500,
+    "billy-security": 3500,
+    "hank-designer": 3500,
+    "carmella-researcher": 3500,
 }
 
 
-class TestTablesVerbatim(unittest.TestCase):
-    """The moved tables are byte-identical to their previous homes."""
+class TestPolicyTables(unittest.TestCase):
+    """Retrieval profiles stay stable while role budget policy is adaptive."""
 
     def test_driver_cortex_moved_verbatim(self):
         self.assertEqual(DRIVER_CORTEX, _EXPECTED_DRIVER_CORTEX)
@@ -63,7 +73,11 @@ class TestTablesVerbatim(unittest.TestCase):
         self.assertEqual(DRIVER_BUDGETS, _EXPECTED_DRIVER_BUDGETS)
 
     def test_default_budget_constant(self):
-        self.assertEqual(DEFAULT_BUDGET, 1200)
+        self.assertEqual(DEFAULT_BUDGET, 2400)
+        self.assertEqual(DEFAULT_CEILING, 4000)
+
+    def test_driver_ceilings_match_binding_policy(self):
+        self.assertEqual(DRIVER_CEILINGS, _EXPECTED_DRIVER_CEILINGS)
 
     def test_floors_jonathan_600_others_400(self):
         self.assertEqual(set(DRIVER_FLOORS), set(DRIVER_BUDGETS))
@@ -98,6 +112,14 @@ class TestResolveBudget(unittest.TestCase):
         params = inspect.signature(resolve_budget).parameters
         self.assertEqual(list(params), ["driver"])
 
+    def test_policy_resolves_exact_role_pairs_and_unknown_fallback(self):
+        for driver, base in _EXPECTED_DRIVER_BUDGETS.items():
+            policy = resolve_policy(driver)
+            self.assertEqual((policy.base, policy.ceiling),
+                             (base, _EXPECTED_DRIVER_CEILINGS[driver]))
+        unknown = resolve_policy("nobody")
+        self.assertEqual((unknown.base, unknown.ceiling), (2400, 4000))
+
 
 class TestReExportCompat(unittest.TestCase):
     """The previous table homes keep working for existing importers."""
@@ -110,7 +132,7 @@ class TestReExportCompat(unittest.TestCase):
 
     def test_default_budget_delegates_to_resolve(self):
         from danzaboss.cortex.driver_context import default_budget
-        self.assertEqual(default_budget("jonathan-builder"), 900)
+        self.assertEqual(default_budget("jonathan-builder"), 2400)
         self.assertEqual(default_budget("nobody"), DEFAULT_BUDGET)
 
     def test_pipeline_imports_shared_table(self):

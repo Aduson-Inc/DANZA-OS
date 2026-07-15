@@ -4,12 +4,12 @@ Why this module exists: the per-driver tables lived in two places —
 ``DRIVER_CORTEX`` was duplicated in both ``cortex/driver_context.py`` and
 ``context/pipeline.py``, and ``DRIVER_BUDGETS`` sat next to one copy — so a
 budget or profile change had to be made twice or it silently diverged. This
-module is the one authoritative table; both previous homes import from here
-and the values moved verbatim.
+module is the one authoritative table; both previous homes import from here.
 
 Budgets are internal constants, not user settings: CORTEX self-budgets each
-driver's context from these tested defaults, and the floors are the
-never-starve guarantee (context quality is never compromised to save tokens).
+driver's context from tested role bases and one qualified expansion ceiling.
+The floors retain the older compatibility contract but do not affect the
+larger Phase 4.1 bases.
 The Phase 4 Normal/Full-Power dial and per-role overrides that briefly lived
 here were removed 2026-07-14 — they persisted a budgets.json that no runtime
 path ever read, and the user-facing knob that matters (how much each turn
@@ -18,6 +18,8 @@ builds) lives in routing.json ``features_per_turn`` instead.
 Stdlib only.
 """
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -46,16 +48,29 @@ DRIVER_CORTEX: dict[str, dict] = {
     "tony-d-orchestrator": {"intent": "planning", "types": None},
 }
 
-# Per-driver default context token budgets. Moved verbatim from
-# cortex/driver_context.py. Unknown drivers get DEFAULT_BUDGET.
+# Per-driver adaptive context policy. DRIVER_BUDGETS retains its historical
+# import contract and represents the base values; DRIVER_CEILINGS supplies the
+# single qualified expansion cap. Unknown drivers use the default pair.
 DRIVER_BUDGETS: dict[str, int] = {
-    "jonathan-builder": 900,
-    "samantha-mapper": 900,
-    "angela-auditor": 900,
-    "bonnie-qa": 800,
-    "billy-security": 800,
-    "hank-designer": 800,
-    "carmella-researcher": 800,
+    "tony-d-orchestrator": 2400,
+    "jonathan-builder": 2400,
+    "samantha-mapper": 2400,
+    "angela-auditor": 2400,
+    "bonnie-qa": 2000,
+    "billy-security": 2000,
+    "hank-designer": 2000,
+    "carmella-researcher": 2000,
+}
+
+DRIVER_CEILINGS: dict[str, int] = {
+    "tony-d-orchestrator": 4000,
+    "jonathan-builder": 4000,
+    "samantha-mapper": 4000,
+    "angela-auditor": 4000,
+    "bonnie-qa": 3500,
+    "billy-security": 3500,
+    "hank-designer": 3500,
+    "carmella-researcher": 3500,
 }
 
 # Floors — the minimum context a driver can ever be handed. The builder
@@ -67,7 +82,14 @@ DRIVER_FLOORS: dict[str, int] = {
 }
 _UNKNOWN_FLOOR = 400
 
-DEFAULT_BUDGET = 1200  # unknown drivers (was driver_context._DEFAULT_BUDGET)
+DEFAULT_BUDGET = 2400
+DEFAULT_CEILING = 4000
+
+
+@dataclass(frozen=True)
+class BudgetPolicy:
+    base: int
+    ceiling: int
 
 
 # ---------------------------------------------------------------------------
@@ -80,3 +102,11 @@ def resolve_budget(driver: str) -> int:
     table entry to consult."""
     value = DRIVER_BUDGETS.get(driver, DEFAULT_BUDGET)
     return max(DRIVER_FLOORS.get(driver, _UNKNOWN_FLOOR), value)
+
+
+def resolve_policy(driver: str) -> BudgetPolicy:
+    """Resolve the deterministic base/ceiling pair for one driver."""
+    return BudgetPolicy(
+        base=resolve_budget(driver),
+        ceiling=DRIVER_CEILINGS.get(driver, DEFAULT_CEILING),
+    )

@@ -86,6 +86,24 @@
    dashboard/onboarding HTTP tests passed. JavaScript syntax and diff checks
    passed. No FEATURES tab or browser-level Playwright run was added.
 10. **Adaptive CORTEX.** Implement base/ceiling policy, one-time qualified expansion, explicit-budget bypass, acceptance comparison, 6000 dispatch guard, and additive context-read telemetry migration.
+
+   **Completion evidence — 2026-07-15:** Driver-default CORTEX context now
+   resolves the binding `2400→4000` or `2000→3500` role policy, including
+   Tony and the unknown-role fallback. A base package qualifies only at 85%
+   consumption plus dropped relevant context or a missing top-three intent
+   category with candidates; the selected retrieval ranking is reassembled at
+   most once at the ceiling and accepted only without relevance loss plus
+   improved coverage or a newly admitted fused top-five item. Explicit budgets
+   remain exact and bypass adaptation. CLI JSON and the additive, idempotently
+   migrated `context_reads.adaptation` JSON column record the requested,
+   initial, candidate, acceptance, and final selection evidence while old rows
+   and four-argument writers remain compatible. The live estimated Task/Agent
+   dispatch boundary now allows 6000 and denies 6001 in runtime profiles.
+   Verification: 59 focused policy/selection/driver tests, 29 telemetry/CLI
+   tests, 34 guard/live-hook tests, 323 all-CORTEX tests with 13 optional skips,
+   136 cumulative Tasks 3–8 backend/lifecycle regressions, and 74 dashboard/
+   Task 9 regressions passed; changed production Python files compiled and diff
+   checks passed. Existing dashboard socket warnings remained non-failing.
 11. **Compatibility and documentation.** Update active prompts/scaffolds/docs, generated artifact contracts, top-level status/test counts, and historical supersession banners. Remove active dial references; retain historical text only behind banners.
 12. **Whole-product verification.** Run focused suites, full unit/integration suite, lint/static/package/install checks, and full Playwright. Diagnose and fix regressions test-first. Perform final active-reference and repository-status audits.
 
