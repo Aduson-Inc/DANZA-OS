@@ -466,8 +466,7 @@ const SEAT_VERBS = {
 };
 
 function initPick(s) {
-  return { seats: { conductor: "builtin", ...s.seats },
-           dial: s.dial, overrides: { ...s.overrides } };
+  return { seats: { conductor: "builtin", ...s.seats } };
 }
 
 function agentChip(a) {
@@ -505,20 +504,6 @@ function seatRow(seat, agents, pick) {
     <select data-seat="${esc(seat)}">${builtin}${current || builtin ? ""
       : '<option value="" selected disabled>choose…</option>'}${opts}</select>
   </div>`;
-}
-
-function dialCard(value, title, blurb, pick) {
-  return `<button class="dial-card${pick.dial === value ? " active" : ""}"
-    data-dial="${value}"><b>${title}</b><span>${blurb}</span></button>`;
-}
-
-function overrideRows(s, pick) {
-  return Object.entries(s.floors).map(([driver, floor]) => `
-    <div class="field"><label>${esc(driver)}
-      <span class="dim">(minimum ${esc(floor)})</span></label>
-    <input type="number" data-override="${esc(driver)}" min="${esc(floor)}"
-      value="${esc(pick.overrides[driver] ?? "")}"
-      placeholder="dial default"></div>`).join("");
 }
 
 // The confirm payload's lineup: every distinct agent holding a seat, in
@@ -563,7 +548,6 @@ function renderSetup() {
     setup.notice ? `<p class="ok">${esc(setup.notice)}</p>` : "",
     setup.busy ? `<p class="dim">saving your team…</p>` : "",
     s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : "",
-    s.budgets_error ? `<p class="warn mono">${esc(s.budgets_error)}</p>` : "",
   ].join("");
   const agents = panel("Your AI agents",
     `<div class="agent-grid">${s.agents.map(agentCard).join("")}</div>
@@ -574,16 +558,6 @@ function renderSetup() {
         Object.keys(SEAT_INFO).map((k) => seatRow(k, s.agents, pick)).join(""))
     : panel("Who does what", `<p class="dim">No agents are connected yet —
         install and log in to at least one AI CLI above.</p>`);
-  const dial = panel("Power", `<div class="dial-row">
-    ${dialCard("normal", "Normal (recommended)",
-               "Balanced memory for every seat — right for most projects.", pick)}
-    ${dialCard("full_power", "Full Power",
-               "Twice the memory for every seat — better recall, higher token cost.", pick)}
-    </div>`);
-  const advanced = `<details class="panel advanced"><summary>Advanced</summary>
-    <p class="dim">Per-role memory budgets in tokens. Leave blank to use the
-    dial. Per-seat model and effort overrides arrive with safe flags.</p>
-    ${overrideRows(s, pick)}</details>`;
   const sentences = teamSentences(pick, s.agents);
   const team = panel("Your team", `
     ${s.setup_complete ? `<p class="ok">Team confirmed — onboarding is
@@ -592,7 +566,7 @@ function renderSetup() {
       ? sentences.map((t) => `<p>${esc(t)}</p>`).join("")
       : `<p class="dim">Pick at least one agent to see your team.</p>`}
     <button id="confirm-team" class="chip">Confirm team</button>`);
-  $("#setup-panel").innerHTML = banner + agents + seats + dial + advanced + team;
+  $("#setup-panel").innerHTML = banner + agents + seats + team;
   wireSetup();
 }
 
@@ -620,15 +594,6 @@ function wireSetup() {
     pick.seats[sel.dataset.seat] = sel.value;
     renderSetup();                       // team sentences follow the seats
   }));
-  $$("[data-dial]").forEach((b) => b.addEventListener("click", () => {
-    pick.dial = b.dataset.dial;
-    renderSetup();
-  }));
-  $$("[data-override]").forEach((inp) => inp.addEventListener("change", () => {
-    const v = parseInt(inp.value, 10);
-    if (Number.isFinite(v)) pick.overrides[inp.dataset.override] = v;
-    else delete pick.overrides[inp.dataset.override];
-  }));
   const confirm = $("#confirm-team");
   if (confirm) confirm.addEventListener("click", () => {
     const lineup = pickLineup(pick);
@@ -641,9 +606,7 @@ function wireSetup() {
       setup.error = "a team holds at most 5 agents — share some seats";
       return renderSetup();
     }
-    setupAction(() => post("api/setup", {
-      lineup, seats: pick.seats, dial: pick.dial,
-      overrides: pick.overrides }));
+    setupAction(() => post("api/setup", { lineup, seats: pick.seats }));
   });
 }
 

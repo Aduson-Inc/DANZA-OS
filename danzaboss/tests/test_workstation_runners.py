@@ -252,7 +252,7 @@ class TestCatalogV2(unittest.TestCase):
     schema version bump fails closed on stale configs."""
 
     V2_KEYS = ("display_name", "strengths", "suggested_seats",
-               "activation", "full_power_extra_argv")
+               "activation")
 
     def test_catalog_has_five_real_runners_plus_generic(self):
         self.assertEqual(
@@ -270,7 +270,8 @@ class TestCatalogV2(unittest.TestCase):
             self.assertIsInstance(entry["display_name"], str)
             self.assertIsInstance(entry["strengths"], str)
             self.assertIn(entry["activation"], ("argv", "typed"))
-            for list_key in ("suggested_seats", "full_power_extra_argv"):
+            self.assertNotIn("full_power_extra_argv", entry)
+            for list_key in ("suggested_seats",):
                 self.assertIsInstance(entry[list_key], list)
                 self.assertTrue(
                     all(isinstance(s, str) for s in entry[list_key]),

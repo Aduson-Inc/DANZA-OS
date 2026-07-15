@@ -27,7 +27,6 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Optional
 
-from ..cortex import budgets as budgets_mod
 from ..cortex import commands as cortex_commands
 from ..cortex.events import CaptureLog
 from ..cortex.identity import resolve_project
@@ -164,17 +163,13 @@ def _runner_summary(root: str) -> Optional[dict]:
                "detected": sorted(n for n, e in config.get("runners", {}).items()
                                   if e.get("detected"))}
     # Phase 4: OVERVIEW's runners block covers the whole confirmed team.
-    # Absent or invalid routing/budgets just omit the keys here — the SETUP
-    # tab (setup_summary) is where the reasons surface.
+    # Absent or invalid routing just omits the team keys here — the SETUP
+    # tab (setup_summary) is where the reason surfaces.
     try:
         routing = routing_mod.load_routing(root)
         summary["lineup"] = routing["lineup"]
         summary["seats"] = routing["seats"]
     except (RunnerError, routing_mod.RoutingError):
-        pass
-    try:
-        summary["dial"] = budgets_mod.load_budgets(root)["dial"]
-    except budgets_mod.BudgetError:
         pass
     return summary
 
@@ -310,8 +305,7 @@ def _headless_command(root: str) -> Optional[list]:
 def setup_complete(root: str) -> bool:
     """The hard setup-first gate's condition (Phase 4 Decision 1/7):
     runners.json and routing.json both load valid and the lineup is
-    non-empty. budgets.json may be absent — defaults are a valid power
-    setting, so it is deliberately not part of the gate."""
+    non-empty."""
     try:
         # load_routing validates runners.json too (it re-checks the lineup
         # against the current registry), so one call covers both files
@@ -323,7 +317,7 @@ def setup_complete(root: str) -> bool:
 
 def setup_summary(root: str) -> dict:
     """Everything the SETUP tab needs: live agent registry, persisted (or
-    suggested) seats, dial + overrides, floors, and the gate state."""
+    suggested) seats, conductor, and the gate state."""
     config = _live_registry()
     agents = [{"name": name, "display_name": entry["display_name"],
                "strengths": entry["strengths"],
@@ -347,21 +341,11 @@ def setup_summary(root: str) -> dict:
                       if name in set(seats.values())]
         except routing_mod.RoutingError:
             pass  # nothing connected: no team to suggest — honest emptiness
-    dial, overrides = "normal", {}
-    budgets_error = ""
-    try:
-        budgets = budgets_mod.load_budgets(root)
-        dial, overrides = budgets["dial"], budgets["overrides"]
-    except budgets_mod.BudgetError as e:
-        budgets_error = str(e)
-    out = {"agents": agents, "lineup": lineup, "seats": seats, "dial": dial,
+    out = {"agents": agents, "lineup": lineup, "seats": seats,
            "conductor": seats.get("conductor", routing_mod.BUILTIN_CONDUCTOR),
-           "floors": dict(budgets_mod.DRIVER_FLOORS), "overrides": overrides,
            "setup_complete": setup_complete(root)}
     if routing_error:
         out["routing_error"] = routing_error
-    if budgets_error:
-        out["budgets_error"] = budgets_error
     return out
 
 
@@ -432,8 +416,7 @@ def snapshot_token(root: str) -> str:
     parts = []
     for rel in (TEAM_STATE_RELPATH, LOG_RELPATH, PLAN_JSON_RELPATH,
                 RUNNERS_RELPATH, routing_mod.ROUTING_RELPATH,
-                budgets_mod.BUDGETS_RELPATH, STATE_RELPATH,
-                interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH):
+                STATE_RELPATH, interview_mod.INTERVIEW_RELPATH, SPEC_RELPATH):
         try:
             st = (Path(root) / rel).stat()
             parts.append(f"{st.st_mtime_ns}:{st.st_size}")
@@ -466,16 +449,11 @@ def _require_setup(root: str) -> None:
 
 def post_setup(root: str, body: dict) -> dict:
     """Confirm the team: one validated write of runners.json + routing.json
-    + budgets.json (Decision 7). Always re-probes fresh — a confirm must
-    never validate seats against stale auth. All three payloads validate
-    BEFORE anything is written, so a rejected confirm leaves no torn
-    multi-file state."""
+    (Decision 7). Always re-probes fresh — a confirm must never validate
+    seats against stale auth. Both payloads validate BEFORE anything is
+    written, so a rejected confirm leaves no torn multi-file state."""
     lineup = _require(body, "lineup", list)
     seats = _require(body, "seats", dict)
-    dial = _require(body, "dial", str)
-    overrides = body.get("overrides", {})
-    if not isinstance(overrides, dict):
-        raise ValueError("body.overrides must be dict")
     config = _live_registry(fresh=True)
     try:
         # keep host settings the user already chose; absence means defaults
@@ -487,13 +465,9 @@ def post_setup(root: str, body: dict) -> dict:
     config["boss"] = lineup[0] if lineup else None
     routing = {"version": routing_mod.SCHEMA_VERSION,
                "lineup": lineup, "seats": seats}
-    budgets = {"version": budgets_mod.SCHEMA_VERSION,
-               "dial": dial, "overrides": overrides}
     routing_mod.validate_routing(routing, config)
-    budgets_mod.validate_budgets(budgets)
     save_runners(root, config)
     routing_mod.save_routing(root, routing, config)
-    budgets_mod.save_budgets(root, budgets)
     return {"ok": True, "setup": setup_summary(root)}
 
 

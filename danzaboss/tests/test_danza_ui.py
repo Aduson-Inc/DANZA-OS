@@ -12,7 +12,6 @@ from pathlib import Path
 
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
-from danzaboss.cortex.budgets import BUDGETS_RELPATH
 from danzaboss.cortex.events import CaptureLog
 from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
@@ -25,6 +24,9 @@ from danzaboss.workstation.runners import (KNOWN_RUNNERS, RUNNERS_RELPATH,
                                            SCHEMA_VERSION, default_config)
 from danzaboss.workstation.server import (conductor_tail, overview,
                                           serve_in_thread, snapshot_token)
+
+
+STALE_BUDGETS_RELPATH = Path(".danza") / "runtime" / "budgets.json"
 
 
 def get(port, path):
@@ -520,9 +522,12 @@ class TestDashboardStatic(unittest.TestCase):
         js = body.decode()
         for marker in ("api/setup", "loadSetup", "Confirm team",
                        "Built-in (recommended)", "Connected",
-                       "Found, not logged in", "Full Power",
+                       "Found, not logged in",
                        "Set up your AI team first"):
             self.assertIn(marker, js)
+        for removed in ("Full Power", "data-dial", "data-override",
+                        "dial: pick.dial", "overrides: pick.overrides"):
+            self.assertNotIn(removed, js)
         # the read-only Phase-2 MODELS view is fully replaced
         self.assertNotIn("loadModels", js)
         self.assertNotIn("lineup selection and the routing table land", js)
@@ -534,8 +539,9 @@ class TestDashboardStatic(unittest.TestCase):
     def test_setup_css_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         css = body.decode()
-        for token in (".agent-card", ".seat-row", ".dial-card"):
+        for token in (".agent-card", ".seat-row"):
             self.assertIn(token, css)
+        self.assertNotIn(".dial-card", css)
 
     def test_build_ui_wiring_present(self):
         _, _, body = get(self.port, "/static/app.js")
@@ -638,31 +644,41 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(o["seats"]["build"], "claude")
         self.assertEqual(o["seats"]["research"], "gemini")
         self.assertEqual(o["seats"]["map"], "gemini")
-        self.assertEqual(o["dial"], "normal")
         self.assertEqual(o["conductor"], "builtin")
-        self.assertEqual(o["overrides"], {})
-        self.assertEqual(o["floors"]["jonathan-builder"], 600)
-        self.assertEqual(o["floors"]["bonnie-qa"], 400)
+        for removed in ("dial", "overrides", "floors", "budgets_error"):
+            self.assertNotIn(removed, o)
         self.assertFalse(o["setup_complete"])
 
-    def test_post_setup_writes_all_three_files(self):
+    def test_post_setup_writes_only_runners_and_routing(self):
         body = {"lineup": ["claude", "gemini"],
                 "seats": team_seats("claude", research="gemini",
-                                    map="gemini"),
-                "dial": "full_power", "overrides": {"bonnie-qa": 1000}}
+                                    map="gemini")}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 200, out)
         self.assertTrue(out["ok"])
         self.assertTrue(out["setup"]["setup_complete"])
-        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH, BUDGETS_RELPATH):
+        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH):
             self.assertTrue((Path(self.root) / rel).exists(), rel)
+        self.assertFalse((Path(self.root) / STALE_BUDGETS_RELPATH).exists())
         saved = json.loads((Path(self.root) / RUNNERS_RELPATH).read_text())
         self.assertEqual(saved["boss"], "claude")  # boss = lineup[0]
 
+    def test_post_setup_ignores_and_preserves_stale_budgets_file(self):
+        stale = Path(self.root) / STALE_BUDGETS_RELPATH
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        original = '{"dial":"full_power","overrides":{"bonnie-qa":1}}\n'
+        stale.write_text(original)
+        body = {"lineup": ["claude"], "seats": team_seats("claude"),
+                "dial": "not-a-real-setting", "overrides": ["invalid"]}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 200, out)
+        self.assertEqual(stale.read_text(), original)
+        for removed in ("dial", "overrides", "floors", "budgets_error"):
+            self.assertNotIn(removed, out["setup"])
+
     def test_persisted_seats_win_over_suggestion(self):
         body = {"lineup": ["claude", "gemini"],
-                "seats": team_seats("gemini", plan="claude"),
-                "dial": "normal"}
+                "seats": team_seats("gemini", plan="claude")}
         status, _ = post(self.port, "/api/setup", body)
         self.assertEqual(status, 200)
         _, _, raw = get(self.port, "/api/setup")
@@ -674,7 +690,7 @@ class TestSetupApi(unittest.TestCase):
     def test_post_rejects_six_runner_lineup(self):
         body = {"lineup": ["claude", "codex", "gemini", "grok", "opencode",
                            "generic"],
-                "seats": team_seats("claude"), "dial": "normal"}
+                "seats": team_seats("claude")}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
         self.assertIn("1-5", out["error"])
@@ -683,21 +699,19 @@ class TestSetupApi(unittest.TestCase):
         server_mod._BUILD_REGISTRY = \
             lambda: fake_registry(auth={"claude": "unauthenticated"})
         server_mod._reset_registry_cache()
-        body = {"lineup": ["claude"], "seats": team_seats("claude"),
-                "dial": "normal"}
+        body = {"lineup": ["claude"], "seats": team_seats("claude")}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
         self.assertIn("not logged in", out["error"])
 
-    def test_post_rejects_sub_floor_override_and_writes_nothing(self):
-        body = {"lineup": ["claude"], "seats": team_seats("claude"),
-                "dial": "normal", "overrides": {"bonnie-qa": 100}}
+    def test_post_rejects_invalid_seats_and_writes_nothing(self):
+        body = {"lineup": ["claude"], "seats": {"build": "claude"}}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
-        self.assertIn("floor", out["error"])
+        self.assertIn("seats keys", out["error"])
         # every payload validates BEFORE anything is written: a rejected
         # confirm must leave no torn multi-file state
-        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH, BUDGETS_RELPATH):
+        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH):
             self.assertFalse((Path(self.root) / rel).exists(), rel)
 
     def test_registry_cache_ttl_and_post_reprobes(self):
@@ -718,8 +732,7 @@ class TestSetupApi(unittest.TestCase):
         server_mod.setup_summary(self.root)
         self.assertEqual(len(calls), 2)   # TTL expired: rebuilt
         server_mod.post_setup(self.root, {
-            "lineup": ["claude"], "seats": team_seats("claude"),
-            "dial": "normal"})
+            "lineup": ["claude"], "seats": team_seats("claude")})
         self.assertEqual(len(calls), 3)   # POST always re-probes fresh
 
     def test_onboarding_posts_409_until_setup_confirmed(self):
@@ -746,17 +759,17 @@ class TestSetupApi(unittest.TestCase):
         runners = overview(self.root)["runners"]
         self.assertEqual(runners["lineup"], ["stub"])
         self.assertEqual(runners["seats"]["build"], "stub")
-        self.assertEqual(runners["dial"], "normal")
+        self.assertNotIn("dial", runners)
 
-    def test_snapshot_token_moves_on_routing_and_budgets_writes(self):
+    def test_snapshot_token_moves_on_routing_but_ignores_stale_budgets(self):
         t0 = snapshot_token(self.root)
         runtime = Path(self.root) / ".danza" / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
         (Path(self.root) / ROUTING_RELPATH).write_text("{}")
         t1 = snapshot_token(self.root)
         self.assertNotEqual(t0, t1)
-        (Path(self.root) / BUDGETS_RELPATH).write_text("{}")
-        self.assertNotEqual(t1, snapshot_token(self.root))
+        (Path(self.root) / STALE_BUDGETS_RELPATH).write_text("{}")
+        self.assertEqual(t1, snapshot_token(self.root))
 
 
 class TestBuildApi(unittest.TestCase):

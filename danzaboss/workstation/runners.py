@@ -38,9 +38,7 @@ RUNNERS_RELPATH: Path = Path(".danza") / "runtime" / "runners.json"
 # v2 fields: display_name/strengths feed the SETUP tab's plain-English agent
 # cards; suggested_seats drives seat auto-suggestion; activation says how an
 # ignited session receives its kickoff phrase ("argv" = appended to the command,
-# "typed" = typed into the session after launch); full_power_extra_argv is the
-# Full-Power dial's per-runner extra flags — shipped empty until each vendor
-# flag is verified safe (Decision 6, Phase 4 grilling).
+# "typed" = typed into the session after launch).
 KNOWN_RUNNERS: dict[str, dict] = {
     "claude": {
         "kind": "cli", "binary": "claude",
@@ -48,7 +46,6 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "strengths": "Deep reasoning, complex building, careful review",
         "suggested_seats": ["plan", "build", "review", "security"],
         "activation": "argv",
-        "full_power_extra_argv": [],
         "interactive": ["claude"],
         "headless": ["claude", "-p", "--output-format", "json"],
     },
@@ -62,7 +59,6 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "strengths": "Fast, focused code edits",
         "suggested_seats": ["build", "qa"],
         "activation": "argv",
-        "full_power_extra_argv": [],
         "interactive": ["codex"],
         "headless": [],
     },
@@ -72,7 +68,6 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "strengths": "Long-context research and summarizing",
         "suggested_seats": ["research", "map"],
         "activation": "argv",
-        "full_power_extra_argv": [],
         "interactive": ["gemini"],
         "headless": [],
     },
@@ -82,7 +77,6 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "strengths": "Quick answers and fast iteration",
         "suggested_seats": ["qa", "research"],
         "activation": "argv",
-        "full_power_extra_argv": [],
         "interactive": ["grok"],
         "headless": [],
     },
@@ -92,7 +86,6 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "strengths": "Flexible open-source coding",
         "suggested_seats": ["build", "design"],
         "activation": "argv",
-        "full_power_extra_argv": [],
         "interactive": ["opencode"],
         "headless": [],
     },
@@ -104,7 +97,6 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "strengths": "",
         "suggested_seats": [],
         "activation": "argv",
-        "full_power_extra_argv": [],
         "interactive": [],
         "headless": [],
     },
@@ -121,7 +113,7 @@ _PROBE_PROMPT = "Reply with the single word: pong"
 _PROBE_TIMEOUT_SECONDS = 30
 _REQUIRED_RUNNER_KEYS = ("kind", "binary", "display_name", "strengths",
                          "suggested_seats", "activation",
-                         "full_power_extra_argv", "interactive", "headless")
+                         "interactive", "headless")
 
 
 # ---------------------------------------------------------------------------
@@ -281,8 +273,7 @@ def validate_config(config: object) -> dict:
                 f"runner {name!r}.activation {entry['activation']!r} not in "
                 f"{_VALID_ACTIVATIONS!r}"
             )
-        for argv_key in ("interactive", "headless",
-                         "suggested_seats", "full_power_extra_argv"):
+        for argv_key in ("interactive", "headless", "suggested_seats"):
             argv = entry[argv_key]
             if not isinstance(argv, list):
                 raise RunnerError(
