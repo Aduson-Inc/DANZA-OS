@@ -1,68 +1,59 @@
 # DANZA-OS Runbook
 
-DANZA-OS is currently a real Python-based agent governance and memory toolkit with a functioning CORTEX memory subsystem. It is not yet a finished turnkey app-building OS. The end-to-end multi-agent app-building loop still needs verification and hardening.
+## Develop the OS
 
-This runbook describes the current local toolkit surface. It is not a clean-install or production deployment guide.
-
-## Current Layout
-
-```
-CLAUDE.md            Entry doc every AI reads first
-.claude/             Live agent layer — 8 agents + constitution + "Who's the Boss?" skill
-  settings.json      Current Claude Code hook settings; do not edit casually
-.danza/              Runtime state + local CORTEX data
-danzaboss/           Python toolkit: CLI, CORTEX, kernel, hooks, planning, research, workstation
-  kernel/ planning/ memory/ context/ security/ observability/ orchestration/ selftest/
-  cortex/ hooks/ research/ workstation/
-  runtime/   scan (learn any repo) · verify (run real tests) · runner
-  cli.py     the `danza` command the agents + hooks call
-  tests/  run_tests.sh
-docs/                Design docs (architecture, ADRs, research)
-tools/research-pipeline/   YouTube→NotebookLM research helper
-```
-
-## Prove The Local Toolkit Works
+Work from the source checkout in `OS_DEV`. Confirm the boundary before a task:
 
 ```bash
-# from the repo root
+git status --short
+python3 -m danzaboss.cli profile
+python3 -m danzaboss.cli selftest
+```
+
+The profile must be `OS_DEV`. Do not initialize this repository as APP_BUILD
+and do not trust root customer `.claude/` or bootstrap `.danza/` files.
+
+Use focused tests first and the full suite before a task commit:
+
+```bash
+python3 -m unittest danzaboss.tests.test_product_payload
 ./danzaboss/run_tests.sh
-PYTHONPATH=. python3 -m danzaboss.cli selftest
 ```
 
-Recent run evidence: `selftest` passed 8/8. The full unittest suite runs **733 tests, green (14 optional skips)** in this environment. Treat test counts as current-run evidence rather than a fixed documentation claim.
-
-## Current CLI Surfaces
+## Operate a target project
 
 ```bash
-# Learn a target app profile from heuristics
-PYTHONPATH=. python3 -m danzaboss.cli scan /path/to/your/app --domain "what it is"
-
-# Run a target app verification command
-PYTHONPATH=. python3 -m danzaboss.cli verify "npm test" /path/to/your/app
-
-# Inspect active execution profile
-PYTHONPATH=. python3 -m danzaboss.cli profile
-
-# Use CORTEX memory commands
-PYTHONPATH=. python3 -m danzaboss.cli cortex <search|get|observe|retrieve|context|age|learn|stats|index|graph|ui|mcp>
-
-# Workstation: runner registry + conductor relay loop (against a project root)
-PYTHONPATH=. python3 -m danzaboss.cli runners /path/to/project
-PYTHONPATH=. python3 -m danzaboss.cli conduct /path/to/project
+cd /path/to/target-app
+danza init .
+danza doctor .
+danza ui . --port 33100
 ```
 
-## Claude Code Agent Loop
+In the dashboard:
 
-The Claude Code operational layer is PARTIAL. The files exist, and `.claude/settings.json` is present in this repository, but the full turnkey app-building loop is still UNVERIFIED from the current audit baseline.
+1. SETUP detects runner CLIs and maps them to the named DANZABOSS cast.
+2. PROJECT discovers or interviews the app, audits an existing codebase,
+   obtains scope approval, and decomposes the executable plan.
+3. BUILD starts or stops execution and shows team state, unit progress,
+   session output, and runtime events.
 
-Do not assume this is production-safe or unattended. Treat any real target-app run as a controlled validation exercise.
+Tony-D — The Boss selects and spawns the authoritative specialists. The turn
+quota is 2–5 verified atomic units. It does not control CORTEX tokens; CORTEX
+chooses an adaptive context budget for each agent and task.
 
-## Honest Status
+Useful diagnostics:
 
-- REAL: Python toolkit, CLI, selftest, kernel state, hooks logic, CORTEX local memory.
-- REAL: CORTEX dashboard and MCP read surface exist.
-- PARTIAL: Packaging and installability.
-- PARTIAL: Workstation/onboarding library stack.
-- SCAFFOLD: Live research providers.
-- UNVERIFIED: Clean install and end-to-end multi-agent app-building reliability.
-- DOCUMENTATION DRIFT: Older docs may still contain stale test counts or old CORTEX status claims.
+```bash
+danza profile
+danza runners .
+danza cortex stats
+danza cortex search "query"
+danza tier path/to/changed-file --commit
+```
+
+If state is inconsistent, stop BUILD and inspect `.danza/plan.json`,
+`.danza/features.json`, `.danza/runtime/team-state.json`, recent logs, and
+CORTEX evidence before resuming. Never repair target state by editing the
+packaged canonical payload.
+
+Formal browser qualification and release qualification remain future work.

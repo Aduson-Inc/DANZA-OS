@@ -1,12 +1,7 @@
-"""Phase-1 T2 scaffold payload: the bundled .claude/.danza templates exist,
-are reachable via importlib.resources, and stay byte-identical to the live
-repo sources they were copied from.
+"""Canonical packaged APP_BUILD payload integrity.
 
-Parity matters: the constitution/agents evolve in .claude/ (the authoritative
-source); this test forces every such edit to consciously re-sync the shipped
-payload instead of silently drifting. settings.json is intentionally NOT
-parity-checked - the shipped one invokes the installed `danza` console script,
-while the OS repo's uses PYTHONPATH module invocation.
+The package resource is the sole product authority.  Layer-0 OS_DEV must not
+carry a second live ``.claude``/``.danza`` copy that needs parity maintenance.
 """
 import json
 import unittest
@@ -22,40 +17,21 @@ AGENTS = ["tony-d-orchestrator", "jonathan-builder", "samantha-mapper",
           "angela-auditor", "bonnie-qa", "carmella-researcher",
           "hank-designer", "billy-security"]
 
-CLAUDE_PARITY = ([f"agents/{a}.md" for a in AGENTS]
-                 + ["rules/constitution.md", "skills/danza/SKILL.md"])
-
-DANZA_PARITY = ["audit-report-template.md", "build-history.md",
-                "build-orders.md", "decision-log.md", "feature-list.md",
-                "handoff.md", "onboarding-answers.md", "onboarding-misses.md",
-                "onboarding-template.md", "patterns.md",
-                "self-assessment-log.md", "stack-philosophy.md",
-                "system-map.md", "turn-log.md", "checkpoints.json",
-                "design-tokens.json", "rankings.json",
-                "design/README.md", "onboarding/README.md"]
-
-
-@unittest.skipUnless((REPO / ".claude").is_dir(),
-                     "parity checks need the source repo")
-class PayloadParity(unittest.TestCase):
-    def test_claude_payload_matches_repo_source(self):
-        for rel in CLAUDE_PARITY:
-            with self.subTest(rel=rel):
-                bundled = (PAYLOAD / "claude" / rel).read_bytes()
-                source = (REPO / ".claude" / rel).read_bytes()
-                self.assertEqual(bundled, source,
-                                 f"payload drifted from .claude/{rel} - re-sync it")
-
-    def test_danza_payload_matches_repo_source(self):
-        for rel in DANZA_PARITY:
-            with self.subTest(rel=rel):
-                bundled = (PAYLOAD / "danza" / rel).read_bytes()
-                source = (REPO / ".danza" / rel).read_bytes()
-                self.assertEqual(bundled, source,
-                                 f"payload drifted from .danza/{rel} - re-sync it")
-
-
 class PayloadStructure(unittest.TestCase):
+    def test_package_payload_is_the_only_live_product_source(self):
+        for rel in ("agents", "rules", "skills", "settings.json",
+                    "settings.example.json"):
+            self.assertFalse((REPO / ".claude" / rel).exists(), rel)
+        for rel in ("handoff.md", "feature-list.md", "decision-log.md",
+                    "system-map.md", "onboarding-template.md"):
+            self.assertFalse((REPO / ".danza" / rel).exists(), rel)
+
+    def test_exact_active_agent_prompt_set(self):
+        actual = sorted(child.name[:-3]
+                        for child in (PAYLOAD / "claude" / "agents").iterdir()
+                        if child.name.endswith(".md"))
+        self.assertEqual(actual, sorted(AGENTS))
+
     def test_retired_agent_not_shipped(self):
         self.assertFalse(
             (PAYLOAD / "claude" / "agents" / "mona-historian.md").is_file(),
@@ -91,8 +67,29 @@ class PayloadStructure(unittest.TestCase):
                       "D8 auto-resume hook missing from SessionStart")
         self.assertIn("danza cortex hook session-start", session_start,
                       "CORTEX injection hook missing from SessionStart")
+        self.assertIn("danza cortex hook post-tool-use", commands)
+        self.assertIn("danza cortex hook stop", commands)
+
+    def test_tony_prompt_uses_current_atomic_unit_contract(self):
+        text = (PAYLOAD / "claude" / "agents" /
+                "tony-d-orchestrator.md").read_text(encoding="utf-8")
+        for required in ("# Tony-D — The Boss", ".danza/features.json",
+                         ".danza/plan.json", "danza unit start",
+                         "danza unit verify", "danza unit block",
+                         "danza unit conclude", "verified atomic units"):
+            self.assertIn(required, text)
+        for stale in ("2-feature", "2 features", "next 2 features",
+                      "Update `.danza/feature-list.md`"):
+            self.assertNotIn(stale, text)
+
+    def test_carmella_prompt_uses_installed_capabilities_only(self):
+        text = (PAYLOAD / "claude" / "agents" /
+                "carmella-researcher.md").read_text(encoding="utf-8")
+        self.assertNotIn("tools/research-pipeline", text)
 
     def test_managed_block_template_exists(self):
-        body = (files("danzaboss.product") / "templates"
-                / "claude-md-managed-block.md").read_text(encoding="utf-8")
+        body = (PAYLOAD / "claude-md-managed-block.md").read_text(
+            encoding="utf-8")
         self.assertIn("Who's the Boss?", body)
+        self.assertFalse((files("danzaboss.product") / "templates"
+                          / "claude-md-managed-block.md").is_file())

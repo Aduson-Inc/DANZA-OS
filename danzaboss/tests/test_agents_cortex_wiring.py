@@ -15,6 +15,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from importlib.resources import files
 
 import _bootstrap  # noqa
 
@@ -26,10 +27,8 @@ from danzaboss.cortex.store import ObservationStore
 from danzaboss.kernel.profile import PROFILE_ENV_VAR, active_profile
 
 
-# commands.__file__ is .../danzaboss/cortex/commands.py; three dirnames up = repo root.
-AGENTS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(commands.__file__))),
-    ".claude", "agents")
+AGENTS_DIR = (files("danzaboss.product") / "templates" / "scaffold" /
+              "claude" / "agents")
 
 SPECIALISTS = [
     "jonathan-builder", "samantha-mapper", "angela-auditor", "bonnie-qa",
@@ -40,8 +39,7 @@ TASK = "build the login endpoint"
 
 
 def _read_agent(name):
-    with open(os.path.join(AGENTS_DIR, name + ".md"), encoding="utf-8") as fh:
-        return fh.read()
+    return (AGENTS_DIR / (name + ".md")).read_text(encoding="utf-8")
 
 
 def obs(title, summary, typ, project="userapp", **kw):

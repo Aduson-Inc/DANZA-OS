@@ -17,10 +17,11 @@ from danzaboss.workstation.templates import StackTemplate
 SPEC_RELPATH = Path(".danza") / "spec.md"
 
 CADENCE_LABELS = {
-    "relay": "relay — 2 features per turn, alternate environments",
+    "relay": "relay — configured verified atomic units, alternate environments",
     "continuous": ("continuous-checkpointed — fresh session per turn, "
                    "pause for user approval every N features"),
-    "supervised": "supervised — 2 features per turn, explicit user continue",
+    "supervised": ("supervised — configured verified atomic units, "
+                   "explicit user continue"),
 }
 
 HARD_STOP_CAPS = ("accounts_auth", "payments")

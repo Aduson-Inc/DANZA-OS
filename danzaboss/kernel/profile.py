@@ -2,7 +2,7 @@
 
 DANZABOSS behaves differently depending on WHY it is running:
 
-  OS_DEV        Layer 0 — Fable/Claude improving DANZABOSS itself. Speed and
+  OS_DEV        Layer 0 — developing the DANZA-OS application itself. Speed and
                 judgment. Runtime ceremony is OFF; the Constitution is source
                 material being edited, not binding law.
   OS_BOOT_TEST  Layer 2 boot validation in a disposable repo. Full governance
@@ -71,7 +71,7 @@ class Profile:
 PROFILES: dict[str, Profile] = {
     "OS_DEV": Profile(
         name="OS_DEV", layer=0,
-        description="Fable improving DANZABOSS itself — changing the factory",
+        description="Developing the DANZA-OS application — Layer 0 OS_DEV",
         constitution_binding=False, ceremony="minimal",
         claude_write_approval=True, domain_ask_active=False,
         destructive_deny_active=True,

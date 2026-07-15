@@ -69,6 +69,12 @@ class CompileSpec(unittest.TestCase):
         self.assertIn("continuous", self.text)
         self.assertIn("N=4", self.text)
 
+    def test_relay_cadence_uses_configured_atomic_units_not_fixed_features(self):
+        answers = {**ANSWERS, "cadence": "relay"}
+        text = compile_spec(answers=answers, template=_template("saas-ts"))
+        self.assertIn("configured verified atomic units", text)
+        self.assertNotIn("2 features per turn", text)
+
     def test_research_verdict_in_intent(self):
         self.assertIn("crowded_but_viable", self.text)
 

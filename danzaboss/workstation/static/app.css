@@ -26,7 +26,8 @@
 body {
   /* user-supplied artwork fills the stage; cards float above it on shadows.
      Missing image degrades silently to the void color. */
-  background: url("background.png") center / cover fixed no-repeat, var(--void);
+  background: url("../cortex/static/background.png") center / cover fixed no-repeat,
+              var(--void);
   color: var(--text);
   font-family: var(--font-body);
   font-size: 14.5px;

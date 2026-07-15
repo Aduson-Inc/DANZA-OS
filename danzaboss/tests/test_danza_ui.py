@@ -134,6 +134,8 @@ class TestOverview(unittest.TestCase):
         self.assertIsNone(o["runners"])  # no runners.json seeded
         self.assertEqual(o["cortex"]["observations_stored"], 1)
         self.assertGreater(o["cortex"]["read_tokens"], 0)
+        self.assertEqual(o["roster"][0]["name"], "Tony-D")
+        self.assertEqual(o["roster"][0]["role"], "The Boss")
         self.assertTrue(o["project"])
 
     def test_overview_carries_token_telemetry(self):
@@ -477,9 +479,14 @@ class TestDashboardStatic(unittest.TestCase):
         self.assertIn("text/html", ctype)
         self.assertIn(b"DANZA-OS", body)
         for asset in ("/static/app.css", "/static/app.js",
-                      "/static/background.png"):
+                      "/cortex/static/background.png"):
             status, _, _ = get(self.port, asset)
             self.assertEqual(status, 200, asset)
+        _, _, css = get(self.port, "/static/app.css")
+        self.assertIn(b'url("../cortex/static/background.png")', css)
+        local_background = (Path(__file__).resolve().parents[1] /
+                            "workstation" / "static" / "background.png")
+        self.assertFalse(local_background.exists())
 
     def test_all_five_tabs_present(self):
         _, _, html = get(self.port, "/")
@@ -559,16 +566,22 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
         for marker in ("api/setup", "loadSetup", "Confirm team",
-                       "Built-in (recommended)", "Connected",
+                       "Connected", "Who Does What", "characterRow",
+                       "s.roster.map(characterRow)",
                        "Found, not logged in",
                        "Set up your AI team first", "features-per-turn",
-                       "independently completed build features per AI turn",
+                       "verified atomic units per AI turn",
                        "features_per_turn: pick.features_per_turn"):
             self.assertIn(marker, js)
+        self.assertIn("driverName(id, o.roster)", js)
         for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
             self.assertIn(value, js)
         for removed in ("Full Power", "data-dial", "data-override",
-                        "dial: pick.dial", "overrides: pick.overrides"):
+                        "dial: pick.dial", "overrides: pick.overrides",
+                        '["Conductor",', '["Planner",', '["Tester",',
+                        '["Reviewer",', '["Security Checker",',
+                        "The built-in conductor", "What the conductor did",
+                        "the conductor is watching"):
             self.assertNotIn(removed, js)
         # the read-only Phase-2 MODELS view is fully replaced
         self.assertNotIn("loadModels", js)
@@ -711,6 +724,18 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(o["seats"]["map"], "gemini")
         self.assertEqual(o["conductor"], "builtin")
         self.assertEqual(o["features_per_turn"], 2)
+        self.assertIn("roster", o)
+        self.assertEqual(
+            [(item["name"], item["role"]) for item in o["roster"]],
+            [("Tony-D", "The Boss"), ("Jonathan", "Builder"),
+             ("Samantha", "Mapper"), ("Angela", "Auditor"),
+             ("Bonnie", "QA"), ("Carmella", "Researcher"),
+             ("Hank", "Designer"), ("Billy", "Security")])
+        self.assertEqual(len({item["id"] for item in o["roster"]}), 8)
+        self.assertNotIn("mona-historian",
+                         {item["id"] for item in o["roster"]})
+        self.assertTrue(all(item["responsibility"]
+                            for item in o["roster"]))
         for removed in ("dial", "overrides", "floors", "budgets_error"):
             self.assertNotIn(removed, o)
         self.assertFalse(o["setup_complete"])

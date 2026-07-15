@@ -31,9 +31,10 @@ class TestClassifyPath(unittest.TestCase):
         self.assertEqual(classify_path("danzaboss/kernel/state.py"), 4)
 
     def test_boot_surface_is_tier_five(self):
-        self.assertEqual(classify_path(".claude/agents/tony-d-orchestrator.md"), 5)
-        self.assertEqual(classify_path(".claude/rules/constitution.md"), 5)
-        self.assertEqual(classify_path(".claude/skills/danza/SKILL.md"), 5)
+        base = "danzaboss/product/templates/scaffold/claude"
+        self.assertEqual(classify_path(f"{base}/agents/tony-d-orchestrator.md"), 5)
+        self.assertEqual(classify_path(f"{base}/rules/constitution.md"), 5)
+        self.assertEqual(classify_path(f"{base}/skills/danza/SKILL.md"), 5)
 
 
 class TestRecommendTier(unittest.TestCase):
@@ -49,7 +50,9 @@ class TestRecommendTier(unittest.TestCase):
         self.assertEqual(t.level, 4)
 
     def test_commit_boundary_does_not_downgrade_boot(self):
-        t = recommend_tier([".claude/agents/jonathan-builder.md"],
+        t = recommend_tier([
+            "danzaboss/product/templates/scaffold/claude/agents/"
+            "jonathan-builder.md"],
                            commit_boundary=True)
         self.assertEqual(t.level, 5)
 

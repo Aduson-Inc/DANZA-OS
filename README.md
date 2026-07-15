@@ -1,43 +1,50 @@
 # DANZA-OS
 
-DANZA-OS is currently a real Python-based agent governance and memory toolkit with a functioning CORTEX memory subsystem. It is not yet a finished turnkey app-building OS. The end-to-end multi-agent app-building loop still needs verification and hardening.
+DANZA-OS is an unreleased Python application for building software with a
+named AI team, governed project state, executable plans, verified work units,
+and CORTEX memory. Tony-D — The Boss orchestrates Jonathan, Samantha, Angela,
+Bonnie, Carmella, Hank, and Billy.
 
-## Current Status
+The repository has three deliberate layers:
 
-- REAL: `danzaboss/` contains executable Python modules for CLI commands, CORTEX memory, governance hooks, kernel state, planning, verification, research seams, and workstation/onboarding libraries.
-- REAL: CORTEX has a local SQLite-backed observation store, capture log, retrieval pipeline, graph store, read-only dashboard, and MCP read surface.
-- PARTIAL: The full Claude Code multi-agent app-building loop exists mainly through `.claude/` prompts and hooks, and has not been proven as a clean turnkey product path.
-- PARTIAL: Workstation/onboarding code exists as tested libraries, but not as a finished product UI.
-- SCAFFOLD: Live research lanes and external integrations need provider wiring and real environment validation.
-- UNVERIFIED: Clean install, production deployment, and unattended app-building reliability.
+- Layer 0 `OS_DEV`: this source checkout, its tests, and contributor guidance.
+- Layer 1 packaged DANZA-OS: the `danza-os` package, `danza` CLI, dashboard,
+  runners, hooks, schemas, CORTEX, and one canonical APP_BUILD payload.
+- Layer 2 `APP_BUILD`: a real target repository initialized with `danza init`.
 
-See [STATUS.md](STATUS.md), [ARCHITECTURE.md](ARCHITECTURE.md), [CORTEX.md](CORTEX.md), and [ROADMAP.md](ROADMAP.md) for the current truth map.
+The source checkout does not ship or activate a root customer-agent roster.
+Generated projects receive their `.claude/` runtime and project-scoped
+`.danza/` state from `danzaboss/product/templates/scaffold/`.
 
-## Repository Shape
+## Product flow
 
-```text
-danzaboss/      Python toolkit: CLI, CORTEX, kernel, hooks, planning, research, workstation
-.claude/        Claude Code operational prompt/hook layer
-.danza/         Runtime state and local CORTEX data for this repo
-docs/           Design notes, historical plans, and strategy documents
-tools/          Auxiliary research tooling
+SETUP connects supported AI CLIs and assigns them to the named cast. PROJECT
+discovers or interviews the application, audits existing projects, obtains
+scope approval, and creates canonical `features.json` and `plan.json` state.
+BUILD executes verified atomic units, displays live progress, and hands work
+between configured runners. CORTEX captures and retrieves project memory with
+an adaptive budget based on the active task and available evidence.
+
+## Start locally
+
+Python 3.10+ is required.
+
+```bash
+python3 -m pip install -e .
+danza selftest
+danza ui . --no-open
 ```
 
-## Quick Verification
+To create an activated project, run `danza init` inside a separate target
+repository. See [INSTALL.md](INSTALL.md) and [RUNBOOK.md](RUNBOOK.md).
 
-The repository currently uses stdlib `unittest` through:
+## Development verification
 
 ```bash
 ./danzaboss/run_tests.sh
-PYTHONPATH=. python3 -m danzaboss.cli selftest
+python3 -m danzaboss.cli selftest
 ```
 
-Recent run: `selftest` passed 8/8. The full unittest suite runs **733 tests, green (14 optional skips)** in this environment. Treat exact test counts as current-run evidence, not a hardcoded product claim.
-
-## Installation Reality
-
-Packaging/installability is PARTIAL. There is no confirmed clean install story yet and no package manifest such as `pyproject.toml` in the current repo. Most commands assume running from the repo root with `PYTHONPATH=.`.
-
-## Product Reality
-
-DANZA-OS is useful today as an internal/local toolkit for agent governance, CORTEX memory, verification helpers, and Claude Code orchestration experiments. It is not production-ready and should not be marketed as a finished app-building operating system without those caveats.
+DANZA-OS remains under active development. Formal browser qualification,
+release qualification, licensing, tags, and public release work are future
+steps, not completed product claims.

@@ -63,7 +63,7 @@ function teamPanel(o) {
     ${row("taking this turn", `<b>${esc(t.current_boss)}</b>`)}
     ${row("turn", esc(t.turn_number))}
     ${row("status", `<span class="chip mono">${esc(t.status)}</span>`)}
-    ${row("features this turn",
+    ${row("verified units this turn",
           `${esc(t.features_completed_this_turn)} / ${esc(t.max_features_per_turn)}`)}
     ${row("handoff required", t.handoff_required ? "yes" : "no")}
   </table>`);
@@ -94,9 +94,10 @@ function cortexPanel(o) {
   <p><a class="chip" href="cortex/">open CORTEX →</a></p>`);
 }
 
-/* P4 T11: plain name for a fixed driver id — "jonathan-builder" ->
-   "Jonathan (builder)", "tony-d-orchestrator" -> "Tony D (orchestrator)". */
-function driverName(id) {
+/* Character identity for CORTEX read accounting comes from canonical prompts. */
+function driverName(id, roster) {
+  const character = (roster || []).find((item) => item.id === id);
+  if (character) return `${character.name} — ${character.role}`;
   const parts = String(id).split("-");
   const role = parts.pop();
   const name = parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
@@ -108,7 +109,7 @@ function tokensPanel(o) {
   const agents = Object.entries(c.per_agent || {});
   const spent = agents.reduce((n, [, t]) => n + t.tokens, 0);
   const agentRows = agents.map(([id, t]) =>
-    row(esc(driverName(id)),
+    row(esc(driverName(id, o.roster)),
         `<b>~${esc(t.tokens)}t</b> <span class="dim">· ${esc(t.reads)}
          read${t.reads === 1 ? "" : "s"}</span>`)).join("");
   const turnRows = Object.entries(c.per_turn || {}).map(([turn, n]) =>
@@ -691,20 +692,6 @@ async function loadProject() {
 let setupData = null;                    // last /api/setup payload
 const setup = { pick: null, error: "", notice: "", busy: false };
 
-// Seat work types -> plain-English names + one-sentence job descriptions
-// (Phase 4 Decision 9: no jargon on the SETUP tab).
-const SEAT_INFO = {
-  conductor: ["Conductor", "Passes finished work to the next AI."],
-  plan:      ["Planner", "Turns your idea into a build plan."],
-  build:     ["Builder", "Writes the code."],
-  map:       ["Mapper", "Keeps the map of your codebase current."],
-  qa:        ["Tester", "Checks that finished features really work."],
-  review:    ["Reviewer", "Tracks decisions and catches the team looping."],
-  research:  ["Researcher", "Looks things up before the team commits."],
-  design:    ["Designer", "Handles the look — colors, fonts, layout."],
-  security:  ["Security Checker", "Reviews the work for security problems."],
-};
-
 const SEAT_VERBS = {
   plan: "plan", build: "build", map: "map the codebase", qa: "test",
   review: "review decisions", research: "research",
@@ -736,30 +723,28 @@ function agentCard(a) {
 const seatable = (agents) =>
   agents.filter((a) => a.detected && a.auth !== "unauthenticated");
 
-function seatRow(seat, agents, pick) {
-  const [label, blurb] = SEAT_INFO[seat];
-  const current = pick.seats[seat] ?? "";
-  const opts = seatable(agents).map((a) =>
+function characterRow(character) {
+  const current = setup.pick.seats[character.work_type] ?? "";
+  const available = seatable(setupData.agents);
+  const opts = available.map((a) =>
     `<option value="${esc(a.name)}"${a.name === current ? " selected" : ""}>
      ${esc(a.display_name)}</option>`).join("");
-  const builtin = seat === "conductor"
-    ? `<option value="builtin"${current === "builtin" ? " selected" : ""}>
-       Built-in (recommended)</option>` : "";
   return `<div class="seat-row">
-    <div class="seat-name"><b>${esc(label)}</b>
-      <span class="dim">${esc(blurb)}</span></div>
-    <select data-seat="${esc(seat)}">${builtin}${current || builtin ? ""
-      : '<option value="" selected disabled>choose…</option>'}${opts}</select>
+    <div class="seat-name"><b>${esc(character.name)}</b>
+      <span>${esc(character.role)}</span>
+      <span class="dim">${esc(character.responsibility)}</span></div>
+    <select data-seat="${esc(character.work_type)}"${available.length ? "" : " disabled"}>
+      ${current ? "" : '<option value="" selected disabled>choose a connected AI…</option>'}
+      ${opts}</select>
   </div>`;
 }
 
-// The confirm payload's lineup: every distinct agent holding a seat, in
-// seat order (the server makes lineup[0] the boss, so the conductor —
-// when it is a real runner — or the planner leads).
+// The confirm payload's lineup follows canonical character hierarchy. The
+// internal runtime controller remains a hidden built-in seat.
 function pickLineup(pick) {
   const lineup = [];
-  for (const seat of Object.keys(SEAT_INFO)) {
-    const who = pick.seats[seat];
+  for (const character of setupData.roster) {
+    const who = pick.seats[character.work_type];
     if (who && who !== "builtin" && !lineup.includes(who)) lineup.push(who);
   }
   return lineup;
@@ -779,11 +764,6 @@ function teamSentences(pick, agents) {
     ? `${v.slice(0, -1).join(", ")} and ${v[v.length - 1]}` : v[0];
   const lines = [...jobs].map(([who, verbs]) =>
     `${nameOf(who)} will ${list(verbs)}.`);
-  if (pick.seats.conductor === "builtin") {
-    lines.push("The built-in conductor passes finished work to the next AI.");
-  } else if (pick.seats.conductor) {
-    lines.push(`${nameOf(pick.seats.conductor)} will conduct the relay.`);
-  }
   return lines;
 }
 
@@ -796,25 +776,22 @@ function renderSetup() {
     setup.busy ? `<p class="dim">saving your team…</p>` : "",
     s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : "",
   ].join("");
-  const agents = panel("Your AI agents",
+  const agents = panel("Connected AI tools",
     `<div class="agent-grid">${s.agents.map(agentCard).join("")}</div>
      <p class="dim">Log in to an agent in your terminal, then come back —
      this list updates on its own.</p>`);
-  const seats = seatable(s.agents).length
-    ? panel("Who does what",
-        Object.keys(SEAT_INFO).map((k) => seatRow(k, s.agents, pick)).join(""))
-    : panel("Who does what", `<p class="dim">No agents are connected yet —
-        install and log in to at least one AI CLI above.</p>`);
-  const turnSize = panel("Features per turn", `
-    <label class="field" for="features-per-turn">How many features each AI completes</label>
+  const seats = panel("Who Does What",
+    s.roster.map(characterRow).join(""));
+  const turnSize = panel("Units per turn", `
+    <label class="field" for="features-per-turn">Verified atomic units per AI turn</label>
     <select id="features-per-turn">
       <option value="2"${pick.features_per_turn === 2 ? " selected" : ""}>2</option>
       <option value="3"${pick.features_per_turn === 3 ? " selected" : ""}>3</option>
       <option value="4"${pick.features_per_turn === 4 ? " selected" : ""}>4</option>
       <option value="5"${pick.features_per_turn === 5 ? " selected" : ""}>5</option>
     </select>
-    <p class="dim">These are independently completed build features per AI turn —
-    not tokens or power.</p>`);
+    <p class="dim">These are verified atomic units per AI turn — not tokens
+    or power.</p>`);
   const sentences = teamSentences(pick, s.agents);
   const team = panel("Your team", `
     ${s.setup_complete ? `<p class="ok">Team confirmed — Project is
@@ -884,21 +861,20 @@ let buildData = null;              // {plan, tree, plan_md, live, setup_complete
 const build = { error: "", busy: false, advanced: false,
   additions: null, additionsRevision: null, additionsDirty: false };
 
-// Runner ids -> plain names for event lines (the conductor logs internal
-// ids; the catalog's display_name is what a human should read).
+// Runner ids -> plain names for event lines. The event API retains its
+// internal implementation name; the catalog name is what a human reads.
 const RUNNER_NAMES = { claude: "Claude Code", codex: "Codex",
   gemini: "Gemini CLI", grok: "Grok CLI", opencode: "OpenCode" };
 const runnerName = (n) => RUNNER_NAMES[n] || n || "the next AI";
 
-// One friendly sentence per conductor event (Phase 4 Decision 9: plain
-// English first — the raw JSONL stays behind the Advanced toggle).
+// One friendly sentence per runtime event; raw JSONL stays under Advanced.
 function friendlyEvent(e) {
   switch (e.event) {
     case "ignite":
       return `Handed the baton to ${runnerName(e.runner)} (turn ${e.turn_number}).`;
     case "session_end":
       return e.orphaned_turn
-        ? `A session died mid-turn (turn ${e.turn_number}) — the conductor is watching.`
+        ? `A session died mid-turn (turn ${e.turn_number}) — Tony-D will reassess it.`
         : `Turn ${e.turn_number} wrapped up and its session closed.`;
     case "stall":
       return `Nothing has moved for ${e.minutes} minutes — the crew may be stuck.`;
@@ -930,7 +906,7 @@ function teamStripHTML(live) {
       <b>${esc(runnerName(t.current_boss))}</b></span>
     <span><span class="dim">turn</span> <b>${esc(t.turn_number)}</b></span>
     <span class="chip mono">${esc(t.status)}</span>
-    <span><span class="dim">features this turn</span>
+    <span><span class="dim">verified units this turn</span>
       ${esc(t.features_completed_this_turn)} / ${esc(t.max_features_per_turn)}</span>
   </div>`;
 }
@@ -953,7 +929,7 @@ function controlsHTML(live) {
        <pre class="session-tail mono">${esc(live.session.tail)}</pre>`
     : "";
   const events = live.conductor.length
-    ? `<h2 class="section-label">What the conductor did</h2>
+    ? `<h2 class="section-label">Build activity</h2>
        ${live.conductor.map((e) => `<div class="log-line">
          <span class="dim">${esc(e.ts || "")}</span> ${esc(friendlyEvent(e))}</div>`).join("")}
        <details class="advanced" id="build-advanced"${build.advanced ? " open" : ""}>

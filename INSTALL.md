@@ -1,40 +1,42 @@
-# DANZA-OS Install Reality
+# Installing DANZA-OS
 
-DANZA-OS is currently a real Python-based agent governance and memory toolkit with a functioning CORTEX memory subsystem. It is not yet a finished turnkey app-building OS. The end-to-end multi-agent app-building loop still needs verification and hardening.
+DANZA-OS is packaged by `pyproject.toml`, requires Python 3.10 or newer, and
+installs the `danza` console command. It is unreleased, so install from a local
+checkout while developing or evaluating it.
 
-## Current Install Status
-
-Status: PARTIAL/UNVERIFIED.
-
-There is no confirmed clean install story yet and no package manifest such as `pyproject.toml`. Most commands assume running from the repository root with `PYTHONPATH=.`.
-
-## Local Requirement
-
-Python 3.10+ is expected. The OS-level Python code is intended to stay stdlib-only, though optional adapters and external tools may require separate setup.
-
-## Current Local Command Pattern
-
-From the repo root:
-
-```
-PYTHONPATH=. python3 -m danzaboss.cli selftest
-PYTHONPATH=. python3 -m danzaboss.cli profile
-PYTHONPATH=. python3 -m danzaboss.cli cortex <command>
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e /path/to/DANZA-OS
+danza selftest
 ```
 
-## Claude Code Operational Files
+Optional Neon support is available with `python3 -m pip install -e
+'/path/to/DANZA-OS[neon]'`.
 
-`.claude/`, `.danza/`, and `CLAUDE.md` are operational files for the current Claude Code setup. Treat them as runtime context, not disposable documentation.
+## Initialize a target application
 
-This docs-only stabilization did not change Claude Code settings, agent prompts, rules, hooks, runtime state, source code, or tests.
+Run initialization only inside a real target project or disposable fixture:
 
-## Verification Reality
-
-Use:
-
+```bash
+cd /path/to/target-app
+danza init .
+danza doctor .
+danza ui .
 ```
-./danzaboss/run_tests.sh
-PYTHONPATH=. python3 -m danzaboss.cli selftest
-```
 
-Do not rely on old hardcoded counts such as 124 or 401. The suite currently runs **733 tests, green (14 optional skips)** in this environment; `selftest` passed 8/8. Some CORTEX UI endpoint tests may skip where localhost socket binding is restricted.
+`danza init` deterministically copies the packaged APP_BUILD payload, adds a
+managed block to the target's `CLAUDE.md`, preserves user-modified files, and
+records payload hashes in `.danza/.scaffold-version`. The target receives the
+eight named character prompts, activation skill, runtime constitution, Claude
+settings and hooks, and bootstrap `.danza` files. Mona is retired and is not
+installed.
+
+The SessionStart hooks restore DANZA state and inject adaptive CORTEX context.
+PostToolUse captures eligible observations and Stop performs CORTEX processing
+and runtime checks. These hooks belong to the target APP_BUILD project, never
+the Layer 0 OS_DEV checkout.
+
+Supported runner CLIs are detected and configured from the dashboard SETUP
+view or with `danza runners`. PROJECT approval and decomposition must complete
+before BUILD can start.

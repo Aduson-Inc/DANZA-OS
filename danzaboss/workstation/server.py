@@ -35,6 +35,7 @@ from ..cortex.sqlite_backend import SqliteBackend
 from ..cortex.ui.server import CortexUIHandler, cross_origin_reason
 from ..kernel.profile import active_profile
 from ..kernel.state import StateError, StateManager, TeamState
+from ..product.payload import agent_roster
 from . import build as build_mod
 from . import checkpoints as checkpoints_mod
 from . import execution as execution_mod
@@ -218,6 +219,7 @@ def overview(root: str) -> dict:
            "plan": _plan_summary(root),
            "spec_exists": (Path(root) / ".danza" / "spec.md").exists(),
            "runners": _runner_summary(root),
+           "roster": agent_roster(),
            "cortex": _cortex_stats(root)}
     if team_err:
         out["team_state_error"] = team_err
@@ -354,7 +356,8 @@ def setup_summary(root: str) -> dict:
                       if name in set(seats.values())]
         except routing_mod.RoutingError:
             pass  # nothing connected: no team to suggest — honest emptiness
-    out = {"agents": agents, "lineup": lineup, "seats": seats,
+    out = {"agents": agents, "roster": agent_roster(),
+           "lineup": lineup, "seats": seats,
            "conductor": seats.get("conductor", routing_mod.BUILTIN_CONDUCTOR),
            "features_per_turn": features_per_turn,
            "setup_complete": setup_complete(root)}

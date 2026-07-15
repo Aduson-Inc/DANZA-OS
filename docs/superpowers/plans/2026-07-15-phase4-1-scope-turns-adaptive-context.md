@@ -104,7 +104,34 @@
    136 cumulative Tasks 3–8 backend/lifecycle regressions, and 74 dashboard/
    Task 9 regressions passed; changed production Python files compiled and diff
    checks passed. Existing dashboard socket warnings remained non-failing.
-11. **Compatibility and documentation.** Update active prompts/scaffolds/docs, generated artifact contracts, top-level status/test counts, and historical supersession banners. Remove active dial references; retain historical text only behind banners.
+11. **Compatibility, OS_DEV boundary, identity, documentation, and cleanup.**
+    Establish the packaged scaffold as the single shipped payload authority;
+    remove root APP_BUILD activation copies; derive the dashboard roster from
+    canonical named prompts; present Tony-D — The Boss and the seven
+    authoritative specialists; align prompts with PROJECT, BUILD, verified
+    atomic units, installed CLI/hook behavior, and adaptive CORTEX; consolidate
+    current documentation; and remove the revalidated forensic cleanup set.
+
+    **Completion evidence — 2026-07-15:** The sole shipped product payload is
+    `danzaboss/product/templates/scaffold/`; both `danza init` and the dashboard
+    roster resolve it through `danzaboss.product.payload`. Layer 0 now retains
+    concise tracked OS_DEV guidance without root customer agents, runtime
+    settings, activation skill, constitution, or duplicate bootstrap state.
+    Temporary targets receive the exact eight active prompts, installed
+    SessionStart/PostToolUse/Stop hook commands, managed APP_BUILD guidance,
+    and bootstrap `.danza` files; Mona is excluded. SETUP renders all eight
+    character names and authoritative roles under “Who Does What,” with
+    Tony-D shown as “The Boss” and internal runtime infrastructure hidden.
+    The current docs describe the installable package, CLI, dashboard,
+    PROJECT, BUILD, runners, CORTEX, scaffolder, three layers, and Task 12 as
+    future work. Cleanup removed 82 tracked files: the audit's unchanged
+    81-file candidate set plus one byte-identical duplicate dashboard image;
+    the repository-local forensic skill was preserved byte-for-byte outside
+    the product tree, and ignored local CORTEX data was untouched.
+    Verification passed 46 focused non-HTTP Task 11 tests, 74 dashboard tests,
+    106 PROJECT/BUILD regressions, 102 CORTEX/hook regressions, 71 product and
+    CLI tests, JavaScript syntax checking, a clean wheel build/install/scaffold
+    smoke, and the full 1084-test Python suite with 14 optional skips.
 12. **Whole-product verification.** Run focused suites, full unit/integration suite, lint/static/package/install checks, and full Playwright. Diagnose and fix regressions test-first. Perform final active-reference and repository-status audits.
 
 ## Acceptance

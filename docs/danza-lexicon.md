@@ -1,30 +1,45 @@
 # DANZA Lexicon
 
-Canonical vocabulary of the DANZA Stack. Any AI taking a DANZA turn should use these terms as
-defined here rather than reinventing them.
+## DANZA-OS
 
----
+The installable Python application and CLI that governs named-agent software
+development, project state, verified execution, and CORTEX context.
 
-## STACKRONYM (n.)
-An acronym whose expansion is defined by — and only fully makes sense within — the DANZA Stack it
-belongs to. Unlike a generic backronym, a stackronym names a first-class layer of the stack and its
-expansion maps to real subsystems.
+## OS_DEV
 
-**Canonical expansion (coined by Tre):**
-**S.T.A.C.K.R.O.N.Y.M.** — *Slowing Token Allowance, Compounding Knowledge Returns On Newly
-Yieldable Migrations.*
+The permanent Layer 0 mode for developing DANZA-OS. It has no active customer
+agents or project runtime state.
 
-It is self-referential: it encodes the three pillars every DANZA memory component sits on —
-1. **Slowing Token Allowance** → token efficiency (smallest-possible context).
-2. **Compounding Knowledge Returns** → evolutionary memory (L3/L5 + Learning Engine improve with use).
-3. **On Newly Yieldable Migrations** → portability of knowledge across stack/DB migrations
-   (the ports-and-adapters architecture; e.g. TypeScript + Neon).
+## APP_BUILD
 
-## CORTEX (n.)
-The DANZA cognitive memory & context system. First stackronym in the stack.
-**Cognitive Observation, Retrieval & Token-Efficient eXchange.**
-Spec: `docs/cognitive-memory-architecture.md`.
+An activated target application repository created by `danza init`. It owns
+its `.claude/` payload, `.danza/` state, PROJECT and BUILD data, application
+source, and project-scoped CORTEX data.
 
----
+## DANZABOSS
 
-*New stackronyms get appended here as the stack grows.*
+The named product cast: Tony-D, Jonathan, Samantha, Angela, Bonnie, Carmella,
+Hank, and Billy. Tony-D — The Boss orchestrates; the specialists perform their
+authoritative work.
+
+## PROJECT
+
+The product phase that discovers or interviews an app, audits existing code,
+obtains explicit scope approval, and produces canonical `features.json` and
+`plan.json` state.
+
+## BUILD
+
+The execution phase that advances the approved plan through verified atomic
+units using configured runners and named specialists.
+
+## CORTEX
+
+The canonical DANZA-OS memory and context subsystem: Cognitive Observation,
+Retrieval & Token-Efficient eXchange. It captures project evidence, retrieves
+relevant memory, learns over time, and uses an adaptive per-task context budget.
+
+## Stackronym
+
+A product-specific acronym whose expansion maps to real DANZA-OS subsystems.
+CORTEX is the first canonical stackronym.

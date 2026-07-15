@@ -35,7 +35,11 @@ TIERS: dict[int, Tier] = {
 }
 
 # boot-image surface: files that change what "Who's the Boss?" does at Layer 2
-_BOOT_PREFIXES = (".claude/skills/", ".claude/agents/", ".claude/rules/")
+_BOOT_PREFIXES = (
+    "danzaboss/product/templates/scaffold/claude/skills/",
+    "danzaboss/product/templates/scaffold/claude/agents/",
+    "danzaboss/product/templates/scaffold/claude/rules/",
+)
 # core surfaces where a slip corrupts state or safety: full suite, always
 _FULL_MARKERS = ("danzaboss/security/", "danzaboss/kernel/state",
                  "run_tests.sh", "team_state.schema.json")

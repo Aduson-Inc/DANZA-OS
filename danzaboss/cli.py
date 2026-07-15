@@ -8,7 +8,7 @@ Commands:
   danzaboss.cli hook stop                       Claude Code Stop hook
   danzaboss.cli hook session-start              D8 auto-resume: CONTINUE-MODE context block
   danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|learn|stats|ui|index|graph|mcp>
-                                                CORTEX memory (docs/superpowers/specs/2026-07-03-cortex-design.md)
+                                                CORTEX memory and adaptive context
   danzaboss.cli profile                         print the active execution profile (OS_DEV|OS_BOOT_TEST|APP_BUILD)
   danzaboss.cli tier <paths...> [--commit]      cheapest safe verification tier for a change set
   danzaboss.cli runners <root>                  detect/show the runner registry for a project root
@@ -463,7 +463,7 @@ def _cmd_init(argv: list[str]) -> int:
     print()
     print("Next steps:")
     print("  1. cd into the repo and open your AI CLI (claude, codex, ...)")
-    print("  2. Say \"Who's the Boss?\" to activate the orchestrator")
+    print("  2. Say \"Who's the Boss?\" to activate Tony-D — The Boss")
     print("  3. Re-check health any time with: danza doctor")
     return rc
 

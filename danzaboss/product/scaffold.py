@@ -21,6 +21,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import danzaboss
+from danzaboss.product.payload import PayloadError, payload_root
 
 SCAFFOLD_VERSION_RELPATH = Path(".danza") / ".scaffold-version"
 CLAUDE_MD_BEGIN = ("<!-- DANZA:BEGIN managed by `danza init` "
@@ -50,15 +51,6 @@ class FileResult:
     reason: str = ""   # "" | "up-to-date" | "user-modified"
 
 
-def _payload_root():
-    root = files("danzaboss.product") / "templates" / "scaffold"
-    if not root.is_dir():
-        raise ScaffoldError(
-            "bundled scaffold payload missing - broken installation; "
-            "reinstall danza-os")
-    return root
-
-
 def _walk(node, rel: Path):
     """Yield (relative Path, bytes) for every file under a Traversable."""
     for child in node.iterdir():
@@ -72,7 +64,10 @@ def _iter_payload():
     """Every file the scaffold owns: (target-relative Path, content bytes),
     deterministically sorted. Includes the generated .gitkeep entries."""
     entries: list[tuple[Path, bytes]] = []
-    root = _payload_root()
+    try:
+        root = payload_root()
+    except PayloadError as exc:
+        raise ScaffoldError(str(exc)) from exc
     for src_name, dst_name in _PAYLOAD_DIRS.items():
         base = root / src_name
         if not base.is_dir():
@@ -128,7 +123,7 @@ def scaffold(target: str | os.PathLike) -> list[FileResult]:
 
 
 def _managed_block() -> str:
-    body = (files("danzaboss.product") / "templates"
+    body = (payload_root()
             / "claude-md-managed-block.md").read_text(encoding="utf-8").strip()
     return f"{CLAUDE_MD_BEGIN}\n{body}\n{CLAUDE_MD_END}"
 

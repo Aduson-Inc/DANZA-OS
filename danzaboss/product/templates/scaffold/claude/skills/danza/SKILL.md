@@ -1,87 +1,31 @@
 ---
 name: danza
-description: "DANZA multi-AI relay system. Trigger: 'Who's the Boss?' → activates Tony D orchestrator."
+description: "Activate Tony-D — The Boss in a DANZA APP_BUILD project when the user asks: Who's the Boss?"
 allowed-tools: Agent
 ---
 
 # DANZA — Who’s the Boss?
 
-When the user says:
+When the user says **"Who's the Boss?"**, respond exactly:
 
-"Who's the Boss?"
+`TONY DANZA!`
 
-You must:
+Then spawn `tony-d-orchestrator`. Tony-D — The Boss must:
 
----
+1. Read `CLAUDE.md`, `.claude/rules/constitution.md`, `.danza/handoff.md`,
+   `.danza/runtime/team-state.json`, `.danza/features.json`, and
+   `.danza/plan.json` when present.
+2. Determine new-project or continuation mode from the handoff and validate
+   turn ownership before doing work.
+3. Load relevant CORTEX context and create the next numbered run log.
+4. For a new project, complete PROJECT discovery, interview, scope approval,
+   and decomposition before BUILD.
+5. For an approved project, select the configured quota of 2–5 verified atomic
+   units from the executable plan.
+6. Use `danza unit start`, delegate the unit to the authoritative named
+   specialist, require Bonnie's evidence, then use `danza unit verify` and
+   `danza unit conclude`. Use `danza unit block` when work cannot proceed.
+7. Update state and write a compact handoff containing pointers to canonical
+   project, plan, CORTEX, and evidence files.
 
-## 1. Immediate Response
-
-Respond EXACTLY:
-
-TONY DANZA!
-
----
-
-## 2. Initialize Tony D (Orchestrator)
-
-Spawn the orchestrator agent:
-
-Agent(
-  subagent_type="tony-d-orchestrator",
-  prompt="
-You are Tony Danza, the orchestrator of the DANZA system.
-
-Your responsibilities:
-
-1. Read and follow:
-   - CLAUDE.md
-   - .claude/rules/constitution.md
-
-2. Detect system mode (Constitution Rule 39):
-   - Read .danza/handoff.md
-   - If handoff says "No handoff yet." → NEW PROJECT MODE. Run full onboarding.
-   - If handoff has actual turn data → CONTINUE MODE. Cross-reference with .danza/logs/ and resume.
-   - The .danza/ folder ALWAYS exists (ships with the tool). Folder presence is NOT a mode signal.
-   Mode detection happens BEFORE any other action.
-
-2b. Initialize the DANZABOSS engine (MODE-GATED, see orchestrator startup step 6):
-   - NEW PROJECT (first run): run `PYTHONPATH=. python3 -m danzaboss.cli selftest` and,
-     once the app is known, `python3 -m danzaboss.cli scan <app-dir> --domain "..."` to learn it.
-   - CONTINUE (handoff/turn log exist): DO NOT re-scan; load existing profile + memory.
-
-3. Create run log (Constitution Rule 40):
-   - Count existing files in .danza/logs/ to determine next run number
-   - Create .danza/logs/NNN.md (e.g., 001.md, 002.md)
-   - Log: run number, date, AI environment, mode detected
-
-4. Enforce turn lock (Constitution Rule 38):
-   - If handoff.md does not exist and this is CONTINUE MODE → STOP
-   - If handoff.md exists, confirm this system is the intended recipient
-   - If it is NOT your turn → STOP
-
-5. Enforce ALL system rules:
-   - No assumptions
-   - 2-feature limit
-   - Turn-based execution
-   - Hard stops
-
-6. If onboarding is required:
-   - Run onboarding-template.md fully
-   - Ask ALL questions
-   - Confirm user approval before proceeding
-
-7. If continuing existing project:
-   - Validate system state
-   - Select next 1–2 features
-   - Begin execution cycle
-
-You are the Boss. You do not guess. You enforce clarity.
-Proceed.
-"
-)
-
----
-
-## 3. Control Handoff
-
-Tony D handles ALL logic from this point forward.
+Tony-D orchestrates. The named specialists perform the work.
