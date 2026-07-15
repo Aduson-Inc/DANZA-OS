@@ -1,7 +1,7 @@
 /* DANZA-OS dashboard — vanilla JS, no build step. OVERVIEW is live;
-   SETUP confirms the AI team (Phase 4); ONBOARD runs the wizard + the
-   grill (Phase 3, locked until setup completes); BUILD starts/stops the
-   relay and shows live team state over the plan (Phase 4). */
+   SETUP confirms the AI team; PROJECT owns discovery, interview, takeover
+   audit, and product-scope approval; BUILD starts/stops the relay and shows
+   live team state over the plan. */
 "use strict";
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -72,7 +72,7 @@ function teamPanel(o) {
 function planPanel(o) {
   const p = o.plan;
   if (!p) return panel("Plan", `<p class="dim">No build plan yet — finish
-    onboarding to create one.</p>`);
+    Project scope approval and decomposition to create one.</p>`);
   if (p.error) return panel("Plan", `<p class="warn mono">${esc(p.error)}</p>`);
   return panel("Plan", `<table class="kv">
     ${row("brief", `<span class="mono dim">${esc(p.spec_ref)}</span>`)}
@@ -147,9 +147,12 @@ async function loadOverview() {
        Build tab.</p>`;
 }
 
-/* ---------- onboard (Phase 3: live forms + the grill) ---------- */
+/* ---------- project (Phase 4.1: discovery + interview + scope) ---------- */
 let onboardData = null;                       // last /api/onboarding payload
+let projectData = null;                       // last /api/project payload
 const onboard = { edit: null, error: "", busy: false };
+const projectUI = { error: "", notice: "", busy: false,
+  features: null, scopeRevision: null, acknowledged: new Set(), dirty: false };
 
 function showIfMet(q, values) {
   return (q.show_if || []).every(([qid, ok]) => ok.includes(values[qid]));
@@ -297,11 +300,11 @@ function finishPanel(o) {
   if (!o.app_project) return panel("Finish",
     `<p class="dim">Your idea is saved — idea projects don't need a
      build brief.</p>`);
-  return panel("Finish — create your brief + plan", `
-    <p>All steps complete. Finishing writes your project brief
-    (<span class="mono">.danza/spec.md</span>) and asks your AI team for a
-    step-by-step build plan (may take a few minutes).</p>
-    <button id="finish-onboarding" class="chip">Create brief + plan</button>`);
+  return panel("Finish the project interview", `
+    <p>All steps complete. Continue to write the interview evidence to
+    <span class="mono">.danza/spec.md</span>, then review the concise product
+    scope before any internal build units are created.</p>
+    <button id="finish-onboarding" class="chip">Create project brief</button>`);
 }
 
 function activeStep(o) {
@@ -310,14 +313,156 @@ function activeStep(o) {
   return o.steps.find((s) => s.id === o.current_step);
 }
 
+function projectChoices() {
+  return `<div class="project-choices">
+    <button class="project-choice" data-project-mode="new">
+      <b>Create New</b>
+      <span>Interview the idea, write a brief, and approve a concise scope.</span>
+    </button>
+    <button class="project-choice" data-project-mode="existing">
+      <b>Continue Existing</b>
+      <span>Audit this repository before describing the work to continue.</span>
+    </button>
+  </div>`;
+}
+
+function evidenceSummary(value) {
+  if (Array.isArray(value)) return `${value.length} found`;
+  if (!value || typeof value !== "object") return String(value ?? "none");
+  if (value.percent != null) return `${esc(value.percent)}% covered`;
+  if (value.tracked_files != null) return `${esc(value.tracked_files)} tracked files`;
+  if (value.nodes) return `${esc(value.nodes.length)} files · ${esc((value.edges || []).length)} links`;
+  return `${Object.keys(value).length} checks`;
+}
+
+function auditPanel(audit) {
+  if (!audit) return "";
+  const results = Object.entries(audit.evidence || {}).map(([name, value]) => `
+    <div class="audit-result"><span class="mono dim">${esc(name.replaceAll("_", " "))}</span>
+    <b>${evidenceSummary(value)}</b></div>`).join("");
+  const gaps = audit.gaps || [];
+  const gapHTML = gaps.length ? `<h3>Material coverage gaps</h3>
+    <p class="dim">Acknowledge every current gap before saving scope. The
+    acknowledgement is tied to this audit fingerprint.</p>
+    ${gaps.map((gap) => `<label class="gap-check"><input type="checkbox"
+      data-gap-id="${esc(gap.id)}"${projectUI.acknowledged.has(gap.id) ? " checked" : ""}>
+      <span><b>${esc(gap.id)}</b><br>${esc(gap.detail)}</span></label>`).join("")}`
+    : `<p class="ok">No material analyzer coverage gaps.</p>`;
+  return panel("Audit results", `<p class="mono dim">HEAD ${esc(audit.head || "unavailable")}</p>
+    <div class="audit-grid">${results}</div>${gapHTML}`);
+}
+
+function blankFeature(id) {
+  return { id, summary: "", acceptance_criteria: [""], status: "pending" };
+}
+
+function seedScopeEditor(scope) {
+  if (projectUI.features !== null && projectUI.scopeRevision === (scope?.revision ?? null)) return;
+  projectUI.features = scope ? scope.features.map((feature) => ({
+    ...feature, acceptance_criteria: [...feature.acceptance_criteria],
+  })) : [blankFeature(1)];
+  projectUI.scopeRevision = scope?.revision ?? null;
+}
+
+function collectScopeFeatures() {
+  return $$(".scope-feature", $("#project-panel")).map((card) => ({
+    id: Number(card.dataset.featureId),
+    summary: $("[name=summary]", card).value.trim(),
+    acceptance_criteria: $("[name=criteria]", card).value.split("\n")
+      .map((line) => line.trim()).filter(Boolean),
+    status: card.dataset.status,
+  }));
+}
+
+function featureEditorHTML(feature, editable) {
+  const remove = editable && projectUI.features.length > 1
+    ? `<button type="button" class="chip remove-feature"
+       data-feature-id="${esc(feature.id)}">Remove</button>` : "";
+  const summary = editable
+    ? `<input type="text" name="summary" maxlength="300"
+       value="${esc(feature.summary)}" placeholder="One or two concise sentences">`
+    : `<p>${esc(feature.summary)}</p>`;
+  const criteria = editable
+    ? `<textarea name="criteria" rows="3" placeholder="One acceptance criterion per line">${esc(feature.acceptance_criteria.join("\n"))}</textarea>`
+    : `<ul>${feature.acceptance_criteria.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+  return `<article class="scope-feature" data-feature-id="${esc(feature.id)}"
+    data-status="${esc(feature.status)}">
+    <div class="scope-feature-head"><b>Feature ${esc(feature.id)}</b>
+      <span class="chip mono">${esc(feature.status)}</span>${remove}</div>
+    <div class="field"><label>Concise product feature</label>${summary}</div>
+    <details><summary>Acceptance criteria</summary>
+      <div class="field">${criteria}</div></details></article>`;
+}
+
+function scopePanel(project) {
+  const scope = project.scope;
+  seedScopeEditor(scope);
+  const editable = !scope || scope.approval.state === "draft";
+  const audit = project.audit;
+  const gapIds = (audit?.gaps || []).map((gap) => gap.id);
+  const gapsReady = gapIds.every((id) => projectUI.acknowledged.has(id));
+  const features = projectUI.features.map((feature) =>
+    featureEditorHTML(feature, editable)).join("");
+  let actions = "";
+  if (editable) {
+    actions = `<div class="scope-actions">
+      <button type="button" id="add-scope-feature" class="chip">Add feature</button>
+      <button type="button" id="save-project-scope" class="chip"
+        ${gapsReady ? "" : "disabled"}>Save draft scope</button></div>`;
+    if (scope) actions += `<p><button type="button" id="approve-project-scope"
+      class="chip" ${projectUI.dirty ? "disabled" : ""}>Approve exact revision ${esc(scope.revision)}</button>
+      <span class="dim">Approval applies only to the revision shown above.</span></p>`;
+  } else {
+    actions = `<p class="ok">Revision ${esc(scope.revision)} is approved exactly.</p>
+      <button type="button" id="decompose-project" class="chip">Create internal build units</button>`;
+  }
+  const revision = scope
+    ? `revision ${esc(scope.revision)} · ${esc(scope.approval.state)}`
+    : "not saved";
+  return panel("Draft product scope", `<p class="dim">Review product outcomes here.
+    Internal A/B/C build units are created only after approval.</p>
+    <p class="mono">${revision}</p><div class="scope-list">${features}</div>${actions}`);
+}
+
+function renderProjectLifecycle() {
+  const audit = projectData.mode === "existing" ? auditPanel(projectData.audit) : "";
+  $("#project-panel").innerHTML = `${projectUI.notice ? `<p class="ok">${esc(projectUI.notice)}</p>` : ""}
+    ${projectUI.error ? `<p class="warn mono">${esc(projectUI.error)}</p>` : ""}
+    ${projectUI.busy ? `<p class="dim">${esc(projectUI.notice || "Working…")}</p>` : ""}
+    ${audit}${scopePanel(projectData)}`;
+  wireProjectLifecycle();
+}
+
+function renderProject() {
+  if (!onboardData) return;
+  if (!onboardData.setup_complete) {
+    renderOnboard();
+    return;
+  }
+  if (!projectData || projectData.mode === null) {
+    $("#project-panel").innerHTML = `${projectUI.error ? `<p class="warn mono">${esc(projectUI.error)}</p>` : ""}
+      ${projectUI.busy ? `<p class="dim">${esc(projectUI.notice)}</p>` : ""}
+      ${panel("Choose how to begin", projectChoices())}`;
+    wireProjectChoices();
+    return;
+  }
+  if (projectData.mode === "new" && (!onboardData.complete || !projectData.briefReady)) {
+    renderOnboard();
+    $("#project-panel").insertAdjacentHTML("afterbegin",
+      `<p class="dim">Continue the project interview before drafting scope.</p>`);
+    return;
+  }
+  renderProjectLifecycle();
+}
+
 function renderOnboard() {
   const o = onboardData;
   // Hard setup-first gate (Phase 4 Decision 1): the server 409s every
   // onboarding write until the team is confirmed — render that honestly.
   if (!o.setup_complete) {
-    $("#onboard-panel").innerHTML = `<div class="locked">
+    $("#project-panel").innerHTML = `<div class="locked">
       <h3>Set up your AI team first</h3>
-      <p class="dim">Onboarding unlocks once your team is confirmed —
+      <p class="dim">Project discovery unlocks once your team is confirmed —
         pick who plans, builds and tests on the Setup tab.</p>
       <button id="goto-setup" class="chip">Go to Setup</button></div>`;
     $("#goto-setup").addEventListener("click", () =>
@@ -345,7 +490,7 @@ function renderOnboard() {
     o.boss_available ? "" : `<p class="warn">No AI agent is connected —
       reviews and follow-up questions will be skipped. Open Setup to
       connect one.</p>`].join("");
-  $("#onboard-panel").innerHTML = `<table class="kv">
+  $("#project-panel").innerHTML = `<table class="kv">
     ${row("project type", esc(o.project_type ?? "not chosen yet"))}
     ${row("answers stored", esc(o.answered))}
     ${row("complete", o.complete ? "yes" : "no")}
@@ -356,26 +501,124 @@ function renderOnboard() {
   wireOnboard(step, o);
 }
 
+async function projectAction(notice, fn) {
+  if (projectUI.busy) return;
+  projectUI.busy = true;
+  projectUI.error = "";
+  projectUI.notice = notice;
+  renderProject();
+  try {
+    const out = await fn();
+    if (out.project) {
+      const briefReady = projectData?.briefReady || false;
+      projectData = { ...out.project, briefReady };
+      projectUI.scopeRevision = null;
+      projectUI.dirty = false;
+    }
+    projectUI.notice = out.notice || "Saved.";
+  } catch (e) {
+    projectUI.error = e.message;
+    projectUI.notice = "";
+  }
+  projectUI.busy = false;
+  renderProject();
+}
+
+function wireProjectChoices() {
+  $$('[data-project-mode]').forEach((button) => button.addEventListener("click", () => {
+    const mode = button.dataset.projectMode;
+    const notice = mode === "existing" ? "Auditing repository…" : "Starting a new project…";
+    projectAction(notice, async () => {
+      const out = await post("api/project/discover", { mode });
+      out.notice = mode === "existing" ? "Repository audit complete." : "New project started.";
+      return out;
+    });
+  }));
+}
+
+function wireProjectLifecycle() {
+  $$(".scope-feature input, .scope-feature textarea").forEach((input) =>
+    input.addEventListener("input", () => {
+      projectUI.dirty = true;
+      const approve = $("#approve-project-scope");
+      if (approve) approve.disabled = true;
+    }));
+  $$('[data-gap-id]').forEach((box) => box.addEventListener("change", () => {
+    if (box.checked) projectUI.acknowledged.add(box.dataset.gapId);
+    else projectUI.acknowledged.delete(box.dataset.gapId);
+    projectUI.features = collectScopeFeatures();
+    renderProjectLifecycle();
+  }));
+  const add = $("#add-scope-feature");
+  if (add) add.addEventListener("click", () => {
+    projectUI.features = collectScopeFeatures();
+    const nextId = Math.max(0, ...projectUI.features.map((feature) => feature.id)) + 1;
+    projectUI.features.push(blankFeature(nextId));
+    projectUI.dirty = true;
+    renderProjectLifecycle();
+  });
+  $$(".remove-feature").forEach((button) => button.addEventListener("click", () => {
+    projectUI.features = collectScopeFeatures()
+      .filter((feature) => feature.id !== Number(button.dataset.featureId));
+    projectUI.dirty = true;
+    renderProjectLifecycle();
+  }));
+  const save = $("#save-project-scope");
+  if (save) save.addEventListener("click", () => {
+    const features = collectScopeFeatures();
+    const scope = projectData.scope;
+    const body = { features };
+    if (scope) body.expected_revision = scope.revision;
+    if (projectData.mode === "existing") {
+      const audit = projectData.audit;
+      const gapIds = (audit.gaps || []).map((gap) => gap.id);
+      Object.assign(body, { audit_fingerprint: audit.fingerprint,
+        acknowledged_gaps: gapIds });
+    }
+    projectAction("Saving draft scope…", () => post("api/project/scope", body));
+  });
+  const approve = $("#approve-project-scope");
+  if (approve) approve.addEventListener("click", () => {
+    const scope = projectData.scope;
+    projectAction(`Approving exact revision ${scope.revision}…`, () =>
+      post("api/project/approve", { expected_revision: scope.revision }));
+  });
+  const decompose = $("#decompose-project");
+  if (decompose) decompose.addEventListener("click", () =>
+    projectAction("Creating internal build units…", async () => {
+      const out = await post("api/project/decompose", {});
+      $$(".tab[data-view]").find((button) => button.dataset.view === "build")?.click();
+      out.notice = "Approved scope decomposed into build units.";
+      return out;
+    }));
+}
+
 async function onboardAction(fn) {
   if (onboard.busy) return;
   onboard.busy = true;
   onboard.error = "";
-  renderOnboard();
+  renderProject();
   try {
     const out = await fn();
     onboard.edit = null;
     onboardData = out.onboarding;
+    if (out.project) {
+      projectData = { ...out.project, scope: out.project.scope || null,
+        briefReady: true };
+      projectUI.features = null;
+      projectUI.scopeRevision = null;
+    }
   } catch (e) {
     onboard.error = e.message;
   }
   onboard.busy = false;
-  renderOnboard();
+  renderProject();
 }
 
 function wireOnboard(step, o) {
   $$(".edit-step").forEach((b) => b.addEventListener("click", () => {
     onboard.edit = b.dataset.step;
-    renderOnboard();
+    renderProject();
   }));
   const form = $("#onboard-form");
   if (form) {
@@ -391,7 +634,7 @@ function wireOnboard(step, o) {
       step.questions.forEach((q) => {
         if (live[q.id] !== undefined) q.value = live[q.id];
       });
-      renderOnboard();
+      renderProject();
     }));
   }
   const followup = $("#followup-form");
@@ -403,7 +646,7 @@ function wireOnboard(step, o) {
     });
     if (!Object.keys(answers).length) {
       onboard.error = "answer at least one follow-up";
-      renderOnboard();
+      renderProject();
       return;
     }
     onboardAction(() => post("api/onboard/followup",
@@ -429,16 +672,19 @@ function wireOnboard(step, o) {
       { step_id: approve.dataset.step })));
   const finish = $("#finish-onboarding");
   if (finish) finish.addEventListener("click", () =>
-    onboardAction(async () => {
-      const out = await post("api/onboard/finish", {});
-      $$(".tab[data-view]").find((b) => b.dataset.view === "build")?.click();
-      return out;
-    }));
+    onboardAction(() => post("api/onboard/finish", {})));
 }
 
-async function loadOnboard() {
-  onboardData = await api("api/onboarding");
-  renderOnboard();
+async function loadProject() {
+  const [onboarding, project, overview] = await Promise.all(
+    [api("api/onboarding"), api("api/project"), api("api/overview")]);
+  onboardData = onboarding;
+  projectData = { ...project, briefReady: !!overview.spec_exists };
+  if (project.ready_for_scope && project.audit) {
+    projectUI.acknowledged = new Set(
+      (project.audit.gaps || []).map((gap) => gap.id));
+  }
+  renderProject();
 }
 
 /* ---------- setup (Phase 4: confirm your AI team) ---------- */
@@ -571,7 +817,7 @@ function renderSetup() {
     not tokens or power.</p>`);
   const sentences = teamSentences(pick, s.agents);
   const team = panel("Your team", `
-    ${s.setup_complete ? `<p class="ok">Team confirmed — onboarding is
+    ${s.setup_complete ? `<p class="ok">Team confirmed — Project is
       unlocked. Confirm again any time to change it.</p>` : ""}
     ${sentences.length
       ? sentences.map((t) => `<p>${esc(t)}</p>`).join("")
@@ -700,7 +946,7 @@ function controlsHTML(live) {
        <button id="stop-build" class="chip">Stop build</button>`
     : `<button id="start-build" class="chip"${ready ? "" : " disabled"}>
        Start build</button>${ready ? ""
-       : ` <span class="dim">Finish Setup and Onboarding to start building.</span>`}`;
+       : ` <span class="dim">Finish Setup and Project to start building.</span>`}`;
   const tail = live.session.alive
     ? `<h2 class="section-label">Live session — ${esc(live.session.name)}</h2>
        <pre class="session-tail mono">${esc(live.session.tail)}</pre>`
@@ -764,7 +1010,7 @@ function renderBuild() {
   let planHTML;
   if (!buildData.plan) {
     planHTML = `<p class="dim">No plan yet — it appears here once
-      onboarding finishes.</p>`;
+      Project scope is approved and decomposed.</p>`;
   } else if (buildData.plan.error) {
     planHTML = `<p class="warn mono">${esc(buildData.plan.error)}</p>`;
   } else {
@@ -790,15 +1036,16 @@ async function loadBuild() {
 async function refresh() {
   try {
     if (state.view === "overview") await loadOverview();
-    else if (state.view === "onboard") {
-      const panelEl = $("#onboard-panel");
+    else if (state.view === "project") {
+      const panelEl = $("#project-panel");
       // an SSE tick must never wipe a form mid-typing or mid-AI-call
-      if (onboard.busy || (panelEl && panelEl.contains(document.activeElement))) return;
-      await loadOnboard();
+      if (onboard.busy || projectUI.busy
+          || (panelEl && panelEl.contains(document.activeElement))) return;
+      await loadProject();
     }
     else if (state.view === "setup") {
       const panelEl = $("#setup-panel");
-      // same rule as ONBOARD: a poll never wipes a half-picked team
+      // same rule as PROJECT: a poll never wipes a half-picked team
       if (setup.busy || (panelEl && panelEl.contains(document.activeElement))) return;
       await loadSetup();
     }

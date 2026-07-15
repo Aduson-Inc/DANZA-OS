@@ -484,17 +484,19 @@ class TestDashboardStatic(unittest.TestCase):
     def test_all_five_tabs_present(self):
         _, _, html = get(self.port, "/")
         for marker in (b'data-view="overview"', b'data-view="setup"',
-                       b'data-view="onboard"', b'data-view="build"',
+                       b'data-view="project"', b'data-view="build"',
                        b'href="cortex/"'):
             self.assertIn(marker, html)
         # MODELS is gone — the tab and its view became SETUP in Phase 4
         self.assertNotIn(b'data-view="models"', html)
+        self.assertNotIn(b'data-view="onboard"', html)
+        self.assertIn(b'>Project</button>', html)
 
-    def test_tab_order_setup_before_onboard(self):
-        # Phase 4 order: OVERVIEW · SETUP · ONBOARD · BUILD · CORTEX
+    def test_tab_order_setup_before_project(self):
+        # Phase 4.1 order: OVERVIEW · SETUP · PROJECT · BUILD · CORTEX
         _, _, html = get(self.port, "/")
         self.assertLess(html.index(b'data-view="setup"'),
-                        html.index(b'data-view="onboard"'))
+                        html.index(b'data-view="project"'))
         self.assertLess(html.index(b'data-view="overview"'),
                         html.index(b'data-view="setup"'))
 
@@ -520,6 +522,38 @@ class TestDashboardStatic(unittest.TestCase):
     def test_onboard_css_form_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         self.assertIn(".field", body.decode())
+
+    def test_project_ui_wires_modes_audit_scope_and_exact_approval(self):
+        _, _, html = get(self.port, "/")
+        self.assertIn(b'id="view-project"', html)
+        self.assertIn(b'id="project-panel"', html)
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in (
+            "Create New", "Continue Existing", "Auditing repository",
+            "Audit results", "Material coverage gaps",
+            "Continue the project interview", "Draft product scope",
+            "Acceptance criteria", "api/project/discover",
+            "api/project/scope", "api/project/approve",
+            "api/project/decompose", "expected_revision: scope.revision",
+            "audit_fingerprint: audit.fingerprint",
+            "acknowledged_gaps: gapIds",
+            "projectUI.dirty = true", "approve.disabled = true",
+        ):
+            self.assertIn(marker, js)
+        self.assertNotIn('state.view === "onboard"', js)
+        for removed_copy in (
+            "Onboarding unlocks", "finish onboarding to create one",
+            "Finish Setup and Onboarding to start building",
+            "onboarding finishes",
+        ):
+            self.assertNotIn(removed_copy, js)
+
+    def test_project_css_has_bounded_choice_audit_and_scope_styles(self):
+        _, _, body = get(self.port, "/static/app.css")
+        css = body.decode()
+        for token in (".project-choices", ".audit-grid", ".scope-feature"):
+            self.assertIn(token, css)
 
     def test_setup_ui_wiring_present(self):
         _, _, body = get(self.port, "/static/app.js")
@@ -556,7 +590,7 @@ class TestDashboardStatic(unittest.TestCase):
         js = body.decode()
         for marker in ("api/build/start", "api/build/stop", "loadBuild",
                        "Stop the build crew? The current turn finishes safely.",
-                       "Finish Setup and Onboarding to start building",
+                       "Finish Setup and Project to start building",
                        "Handed the baton to"):
             self.assertIn(marker, js)
         # the Phase-2 read-only placeholder is fully replaced

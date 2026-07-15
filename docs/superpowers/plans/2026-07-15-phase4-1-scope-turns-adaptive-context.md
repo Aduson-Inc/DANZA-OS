@@ -44,6 +44,18 @@
    Verification: 23 focused PROJECT/planning tests and 268 cumulative Task 3–6
    backend/regression tests passed; changed production Python files compiled.
 7. **PROJECT UI.** Rename ONBOARD, present Create New/Continue Existing, audit progress/results/gaps, interview continuation, concise draft scope, expandable acceptance details, and exact-revision approval.
+
+   **Completion evidence — 2026-07-15:** The dashboard tab and active UI copy
+   now use PROJECT. Create New continues the gated interview through brief
+   creation; Continue Existing displays audit progress, evidence categories,
+   and exact material-gap acknowledgement before scope drafting. Product
+   features remain concise, acceptance criteria expand in place, unsaved edits
+   disable approval, and approval posts the exact displayed saved revision
+   before decomposition becomes available. Verification: 4 focused Task 7 UI
+   tests, 73 dashboard integration tests, 64 PROJECT/onboarding/product-scope/
+   planning tests, 104 Task 5 lifecycle regressions, and 407 cumulative
+   workstation tests passed with 1 optional skip; JavaScript syntax and diff
+   checks passed.
 8. **BUILD backend.** Add live scope/unit payloads, transactional progress updates, feature status derivation, immutable completed work, draft additions, approval/replanning of pending work, and next-handoff queueing.
 9. **BUILD UI.** Add compact live crossed-off features, expandable criteria and A/B/C units, quota progress, approval states, additions, blocks, and hard stops without adding a FEATURES tab.
 10. **Adaptive CORTEX.** Implement base/ceiling policy, one-time qualified expansion, explicit-budget bypass, acceptance comparison, 6000 dispatch guard, and additive context-read telemetry migration.
