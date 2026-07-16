@@ -42,36 +42,53 @@ whole-product and browser qualification remain part of that task.
   line tool recognized by Setup: Claude Code, Codex, Gemini CLI, Grok CLI, or
   OpenCode.
 
-The commands below were verified on Linux with Bash. DANZABOSS does not yet
-publish an operating-system support matrix, and formal cross-platform
-qualification has not been completed.
+The Linux commands below were verified with Bash. Windows PowerShell commands
+are also provided, but DANZABOSS does not yet publish a formal cross-platform
+support matrix.
 
-## Install DANZABOSS
+## Install the `factory-test` Branch
 
-The current verified installation path is an editable install from this source
-checkout. Start in the DANZA-OS source repository:
+Clone the complete DANZA-OS factory from its dedicated end-user test branch.
+Do not initialize the factory checkout as an application project.
+
+On Linux or macOS:
 
 ```bash
-cd /path/to/DANZA-OS
+git clone --branch factory-test --single-branch \
+  https://github.com/Aduson-Inc/DANZA-OS.git
+cd DANZA-OS
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate
 python3 -m pip install -e .
 danza selftest
 ```
 
-Keep this virtual environment active while using `danza` in a target
-application repository.
+On Windows PowerShell:
+
+```powershell
+git clone --branch factory-test --single-branch https://github.com/Aduson-Inc/DANZA-OS.git
+cd DANZA-OS
+py -3 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e .
+danza selftest
+```
+
+Keep this virtual environment active while using `danza`. If the GitHub
+repository is private, authenticate with GitHub before cloning it.
 
 There is no promoted public-release installation command yet. The repository's
 current `install.sh` can fall back to the GitHub `main` branch, so do not use it
-to install the current development branch.
+for this test. The commands above explicitly install `factory-test`.
 
 ## Start a New App
 
 With the DANZABOSS virtual environment active, create a separate target
-repository. Do not initialize the DANZA-OS source checkout itself.
+repository next to the `DANZA-OS` folder. This separate repository becomes the
+user's `APP_BUILD`; the `DANZA-OS` folder remains the installed factory.
 
 ```bash
+cd ..
 mkdir my-app
 cd my-app
 git init
@@ -79,6 +96,9 @@ danza init .
 danza doctor .
 danza ui .
 ```
+
+Use the same commands in Windows PowerShell after activating the virtual
+environment.
 
 For an application repository that already exists, enter that directory and
 start with `danza init .` instead of creating a new one.
@@ -93,6 +113,12 @@ http://127.0.0.1:33100
 Open Setup first. Confirm the detected AI tools, their work assignments, and
 the number of verified atomic units allowed per turn. PROJECT unlocks after
 Setup is confirmed.
+
+During this factory test, inspect the `profile` and `cortex` lines printed by
+`danza doctor .`. The application repository must be recognized as
+`APP_BUILD`, and CORTEX must be available there. If doctor reports `OS_DEV` or
+says CORTEX is dormant inside `my-app`, stop and save the complete output as a
+factory activation defect.
 
 ## Use PROJECT
 
