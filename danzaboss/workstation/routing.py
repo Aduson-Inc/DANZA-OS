@@ -2,8 +2,8 @@
 runner takes the next turn.
 
 Why this module exists: Phase 4 replaces the single-boss model with a team of
-1-5 connected AI CLI runners, each assigned to plain-English seats (conductor
-plus eight work types). The SETUP tab needs strengths-based seat suggestions,
+1-4 connected AI CLI runners, each taking a sequential boss turn. The SETUP
+tab needs strengths-based seat suggestions for legacy routing,
 a validated persistent record of the confirmed team (routing.json), and the
 conductor needs one pure, testable answer to "who takes this turn?". All
 three live here so seat vocabulary and routing policy have a single home —
@@ -54,7 +54,8 @@ KIND_TO_WORK_TYPE = {"scaffold": "build", "backend": "build",
                      "integration": "build", "config": "build",
                      "design": "design", "test": "qa"}
 
-_MAX_LINEUP = 5
+_MAX_LINEUP = 4
+BOSS_MODES = ("seat_routed", "sequential")
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ def validate_routing(routing: object, config: dict) -> dict:
     """Validate a routing dict against the live runner *config*. Returns the
     routing on success; raises RoutingError describing the first violation.
 
-    Fail-closed: version, lineup of 1-5 unique connected-and-authenticated
+    Fail-closed: version, lineup of 1-4 unique connected-and-authenticated
     runner names, seats keys exactly == SEATS, every non-conductor seat
     held by a lineup member, conductor held by a lineup member or the
     built-in engine. A runner that was uninstalled or logged out since the
@@ -151,6 +152,12 @@ def validate_routing(routing: object, config: dict) -> dict:
         )
     if len(set(lineup)) != len(lineup):
         raise RoutingError(f"lineup has duplicate names: {lineup!r}")
+
+    boss_mode = routing.get("boss_mode", "seat_routed")
+    if boss_mode not in BOSS_MODES:
+        raise RoutingError(
+            f"boss_mode must be one of {BOSS_MODES!r}, got {boss_mode!r}"
+        )
 
     runners = config.get("runners", {})
     for name in lineup:
@@ -195,6 +202,14 @@ def validate_routing(routing: object, config: dict) -> dict:
                 f"seat {seat!r} is assigned to {value!r}, which is not in "
                 f"the lineup (only the conductor seat may be "
                 f"{BUILTIN_CONDUCTOR!r})"
+            )
+
+    if boss_mode == "sequential":
+        active = lineup[0]
+        if any(seats[work_type] != active for work_type in SEAT_WORK_TYPES):
+            raise RoutingError(
+                "sequential boss mode must route every specialist through "
+                f"the active boss {active!r}"
             )
 
     return routing
@@ -272,7 +287,9 @@ def route_turn(routing: dict, plan_data: dict,
     before ignition; the conductor only asks this router where to post the
     selected work.
 
-    An unknown kind raises RoutingError (fail closed). A "builtin" or
+    An unknown kind raises RoutingError (fail closed). In sequential boss
+    mode, the ordered lineup owns the entire turn and specialist seats do not
+    select another model. A "builtin" or
     missing seat value — possible only in a hand-edited file, since
     validate_routing forbids both — falls back to deterministic rotation:
     ``lineup[turn_number % len(lineup)]``."""
@@ -292,6 +309,8 @@ def route_turn(routing: dict, plan_data: dict,
 
     seat = routing.get("seats", {}).get(work_type)
     lineup = routing["lineup"]
+    if routing.get("boss_mode", "seat_routed") == "sequential":
+        return lineup[state.turn_number % len(lineup)], work_type
     if seat is None or seat == BUILTIN_CONDUCTOR:
         return lineup[state.turn_number % len(lineup)], work_type
     return seat, work_type

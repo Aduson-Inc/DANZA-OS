@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .handoff import HandoffMode, classify_handoff
+
 HANDOFF_RELPATH = Path(".danza") / "handoff.md"
 _BOOTSTRAP_MARKER = "No handoff yet."
 
@@ -23,14 +25,24 @@ _CONTINUE_BLOCK = (
     ".danza/runtime/team-state.json, .claude/rules/constitution.md."
 )
 
+_BLOCKED_BLOCK = (
+    "DANZA STOP: runtime handoff validation failed.\n"
+    "Do not start onboarding or agent work. Read .danza/handoff.md and "
+    ".danza/runtime/handoff-state.json, then escalate the mismatch."
+)
+
 
 def session_start_context(root: str | os.PathLike = ".") -> str | None:
     """CONTINUE-MODE context block, or None when there is nothing to resume
     (missing/unreadable handoff, blank file, or the bootstrap marker)."""
-    try:
-        text = (Path(root) / HANDOFF_RELPATH).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None  # missing or unreadable handoff -> stay silent
-    if not text.strip() or _BOOTSTRAP_MARKER in text:
+    # A completely unactivated directory has no runtime boundary yet; the
+    # hook remains quiet there. Once .danza exists, handoff state is mandatory
+    # and classification is fail-closed.
+    if not (Path(root) / ".danza").exists():
         return None
-    return _CONTINUE_BLOCK
+    result = classify_handoff(root)
+    if result.mode is HandoffMode.NEW:
+        return None
+    if result.mode is HandoffMode.CONTINUE:
+        return _CONTINUE_BLOCK
+    return _BLOCKED_BLOCK + f"\nReason: {result.reason}"

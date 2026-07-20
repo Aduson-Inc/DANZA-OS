@@ -1,4 +1,4 @@
-"""DANZA-OS product dashboard — stdlib HTTP server on 127.0.0.1:33100 (Phase 2).
+"""DANZA-OS product dashboard — stdlib HTTP server on localhost:33000.
 
 One process serves the whole product shell (design decision D4): the DANZA
 dashboard at `/` and the complete CORTEX UI mounted under `/cortex/*` against
@@ -36,6 +36,9 @@ from ..cortex.ui.server import CortexUIHandler, cross_origin_reason
 from ..kernel.profile import active_profile
 from ..kernel.state import StateError, StateManager, TeamState
 from ..product.payload import agent_roster
+from ..product.connection import (connection_status, launch_runner,
+                                  verify_runner)
+from ..product.handoff import HandoffMode, classify_handoff
 from . import build as build_mod
 from . import checkpoints as checkpoints_mod
 from . import execution as execution_mod
@@ -59,7 +62,7 @@ from .tree import APP_PROJECT_TYPES
 from .wizard import Wizard, WizardError
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-DEFAULT_PORT = 33100  # CORTEX keeps 33000 (D4)
+DEFAULT_PORT = 33000
 MAX_POST_BYTES = 1_048_576  # nothing the onboarding forms send comes close
 
 # Every onboarding write is a load -> mutate -> save over shared state files
@@ -339,11 +342,13 @@ def setup_summary(root: str) -> dict:
               if entry["binary"]]  # the generic copy-me template is no card
     lineup: list = []
     seats: dict = {}
+    boss_mode = "seat_routed"
     features_per_turn = routing_mod.DEFAULT_FEATURES_PER_TURN
     routing_error = ""
     try:
         persisted = routing_mod.load_routing(root)
         lineup, seats = persisted["lineup"], persisted["seats"]
+        boss_mode = persisted.get("boss_mode", "seat_routed")
         features_per_turn = persisted["features_per_turn"]
     except (RunnerError, routing_mod.RoutingError) as e:
         # a routing file that EXISTS but can't be trusted is reported, never
@@ -356,11 +361,23 @@ def setup_summary(root: str) -> dict:
                       if name in set(seats.values())]
         except routing_mod.RoutingError:
             pass  # nothing connected: no team to suggest — honest emptiness
+    active_boss = lineup[0] if lineup else None
+    if boss_mode == "sequential" and lineup:
+        team_state, _ = _team_state(root)
+        if isinstance(team_state, dict) and type(team_state.get("turn_number")) is int:
+            active_boss = lineup[team_state["turn_number"] % len(lineup)]
+    waiting_bosses = ([name for name in lineup if name != active_boss]
+                      if active_boss else [])
     out = {"agents": agents, "roster": agent_roster(),
            "lineup": lineup, "seats": seats,
            "conductor": seats.get("conductor", routing_mod.BUILTIN_CONDUCTOR),
+           "active_boss": active_boss,
+           "waiting_bosses": waiting_bosses,
+           "specialist_execution": "active_boss",
+           "boss_turns": boss_mode,
            "features_per_turn": features_per_turn,
-           "setup_complete": setup_complete(root)}
+           "setup_complete": setup_complete(root),
+           "connection": connection_status(root)}
     if routing_error:
         out["routing_error"] = routing_error
     return out
@@ -396,8 +413,18 @@ def onboarding_summary(root: str) -> dict:
             entry["interview"] = record
         steps.append(entry)
     project_type = wiz.project_type()
+    connection = connection_status(root)
+    handoff = classify_handoff(root)
     return {"project_type": project_type,
             "setup_complete": setup_complete(root),
+            "connection": connection,
+            "connection_verified": connection.get("status") == "verified",
+            "handoff": {"mode": handoff.mode.value, "valid": handoff.valid,
+                        "reason": handoff.reason, "state": handoff.state},
+            "onboarding_required": handoff.mode is HandoffMode.NEW,
+            "onboarding_ready": (setup_complete(root)
+                                  and connection.get("status") == "verified"
+                                  and handoff.mode is not HandoffMode.BLOCKED),
             "complete": wiz.is_complete(),
             "current_step": current.id if current else None,
             "answered": len(answers),
@@ -468,14 +495,47 @@ def _require_setup(root: str) -> None:
             "finish Setup first — your AI team is not confirmed yet")
 
 
+def _require_onboarding_ready(root: str) -> None:
+    _require_setup(root)
+    # Legacy unit fixtures can exercise the wizard without activation. The
+    # installer always writes installation.json, so the production gate binds
+    # precisely to activated projects while retaining those isolated tests.
+    activated = (Path(root) / ".danza" / "runtime" /
+                 "installation.json").exists()
+    if not activated:
+        return
+    connection = connection_status(root)
+    if connection.get("status") != "verified":
+        raise GateConflict(
+            "verify a connected AI client in Setup before onboarding")
+    handoff = classify_handoff(root)
+    if handoff.mode is HandoffMode.BLOCKED:
+        raise GateConflict(f"runtime handoff is blocked: {handoff.reason}")
+    if handoff.mode is HandoffMode.CONTINUE:
+        raise GateConflict(
+            "a valid runtime handoff exists; resume the assigned turn instead "
+            "of starting onboarding")
+
+
 def post_setup(root: str, body: dict) -> dict:
     """Confirm the team: one validated write of runners.json + routing.json
     (Decision 7). Always re-probes fresh — a confirm must never validate
     seats against stale auth. Both payloads validate BEFORE anything is
     written, so a rejected confirm leaves no torn multi-file state."""
     lineup = _require(body, "lineup", list)
-    seats = _require(body, "seats", dict)
     features_per_turn = _require(body, "features_per_turn", int)
+    # The production UI chooses only the ordered bosses. Every specialist is
+    # executed by the active boss; the old explicit seat map remains accepted
+    # for backwards-compatible routing files and tests.
+    if "seats" in body:
+        seats = _require(body, "seats", dict)
+        boss_mode = body.get("boss_mode", "seat_routed")
+    else:
+        active = lineup[0] if lineup else None
+        seats = {"conductor": routing_mod.BUILTIN_CONDUCTOR}
+        seats.update({work_type: active
+                      for work_type in routing_mod.SEAT_WORK_TYPES})
+        boss_mode = "sequential"
     config = _live_registry(fresh=True)
     try:
         # keep host settings the user already chose; absence means defaults
@@ -487,18 +547,43 @@ def post_setup(root: str, body: dict) -> dict:
     config["boss"] = lineup[0] if lineup else None
     routing = {"version": routing_mod.SCHEMA_VERSION,
                "features_per_turn": features_per_turn,
-               "lineup": lineup, "seats": seats}
+               "lineup": lineup, "seats": seats,
+               "boss_mode": boss_mode}
     routing_mod.validate_routing(routing, config)
     save_runners(root, config)
     routing_mod.save_routing(root, routing, config)
     return {"ok": True, "setup": setup_summary(root)}
 
 
+def post_connection_verify(root: str, body: dict) -> dict:
+    """Turn a detected runner into a verified project connection."""
+    runner = _require(body, "runner", str)
+    proof = verify_runner(root, runner, _live_registry(fresh=True))
+    from ..product.activation import verify_installation
+    installation = verify_installation(root, require_connection=True)
+    return {"ok": True, "connection": proof,
+            "installation": installation,
+            "onboarding": onboarding_summary(root)}
+
+
+def post_connection_launch(root: str, body: dict) -> dict:
+    """Launch the selected interactive client without claiming auth.
+
+    The browser can start the project-scoped tmux session; the user still
+    performs any provider login there, after which Verify creates the proof
+    required by onboarding.
+    """
+    runner = _require(body, "runner", str)
+    launched = launch_runner(root, runner, _live_registry(fresh=True))
+    return {"ok": True, "launch": launched,
+            "setup": setup_summary(root)}
+
+
 def post_submit(root: str, body: dict) -> dict:
     """Phase answers in, grill round out. The submit itself is the wizard's
     (validation + stale-downstream unchanged); the grill starts fresh on
     every (re)submission (P3-D8)."""
-    _require_setup(root)
+    _require_onboarding_ready(root)
     step_id = _require(body, "step_id", str)
     answers = _require(body, "answers", dict)
     wiz = Wizard(root)
@@ -516,7 +601,7 @@ def post_submit(root: str, body: dict) -> dict:
 
 
 def post_followup(root: str, body: dict) -> dict:
-    _require_setup(root)
+    _require_onboarding_ready(root)
     step_id = _require(body, "step_id", str)
     answers = _require(body, "answers", dict)
     interview_mod.record_followup_answers(root, step_id, answers)
@@ -527,7 +612,7 @@ def post_followup(root: str, body: dict) -> dict:
 
 
 def post_resolve(root: str, body: dict) -> dict:
-    _require_setup(root)
+    _require_onboarding_ready(root)
     step_id = _require(body, "step_id", str)
     decision = _require(body, "decision", str)
     record = interview_mod.resolve(root, step_id, decision)
@@ -538,7 +623,7 @@ def post_resolve(root: str, body: dict) -> dict:
 def post_research(root: str, body: dict) -> dict:
     """The POST is the click, and the click IS the user approval external
     research requires in every profile (research.py contract)."""
-    _require_setup(root)
+    _require_onboarding_ready(root)
     command = _headless_command(root)
     provider = None
     if command is not None:
@@ -550,7 +635,7 @@ def post_research(root: str, body: dict) -> dict:
 
 
 def post_checkpoint(root: str, body: dict) -> dict:
-    _require_setup(root)
+    _require_onboarding_ready(root)
     step_id = _require(body, "step_id", str)
     verdict = checkpoints_mod.run_checkpoint(
         root, step_id, _headless_command(root))
@@ -561,7 +646,7 @@ def post_checkpoint(root: str, body: dict) -> dict:
 def post_approve(root: str, body: dict) -> dict:
     """Approval stays a user act (W1 law); the grill gate holds it until
     every submitted phase is clear (spec section 7 clarity gate)."""
-    _require_setup(root)
+    _require_onboarding_ready(root)
     step_id = _require(body, "step_id", str)
     wiz = Wizard(root)
     blocking = interview_mod.blocking_phase(root, wiz)
@@ -619,7 +704,7 @@ def finish_onboarding(root: str, command: Optional[list]) -> dict:
 
 
 def post_finish(root: str, body: dict) -> dict:
-    _require_setup(root)
+    _require_onboarding_ready(root)
     out = finish_onboarding(root, _headless_command(root))
     out.update({"ok": True, "onboarding": onboarding_summary(root)})
     return out
@@ -790,6 +875,8 @@ def post_build_approve(root: str, body: dict, *,
 
 _POST_ROUTES = {
     "/api/setup": post_setup,
+    "/api/connection/launch": post_connection_launch,
+    "/api/connection/verify": post_connection_verify,
     "/api/build/start": post_build_start,
     "/api/build/stop": post_build_stop,
     "/api/build/additions": post_build_additions,
@@ -858,6 +945,8 @@ class DanzaUIHandler(CortexUIHandler):
                 self._json(build_summary(self.root))
             elif route == "/api/setup":
                 self._json(setup_summary(self.root))
+            elif route == "/api/connection":
+                self._json(connection_status(self.root))
             elif route == "/api/onboarding":
                 self._json(onboarding_summary(self.root))
             elif route == "/api/project":

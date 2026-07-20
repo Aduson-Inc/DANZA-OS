@@ -1,8 +1,4 @@
-"""Phase-1 T8 install.sh hardening: structural assertions + bash syntax
-check. The script is never EXECUTED here - it installs from GitHub, and unit
-tests must not touch the network. Each assertion maps to a spec section 5
-requirement.
-"""
+"""Cross-platform installer wrapper contract; never touch the network."""
 import subprocess
 import unittest
 from pathlib import Path
@@ -42,13 +38,16 @@ class InstallShStructure(unittest.TestCase):
         for knob in ("DANZA_VERSION", "DANZA_BIN_DIR", "CONFIGURE"):
             self.assertIn(knob, self.text, f"missing env knob {knob}")
 
-    def test_installs_from_github_via_pipx(self):
-        self.assertIn("pipx install", self.text)
-        # the git+ spec is composed from REPO_URL - assert both halves so the
-        # install source provably stays the D2 GitHub repo
+    def test_installs_from_pinned_production_branch(self):
         self.assertIn('REPO_URL="https://github.com/Aduson-Inc/DANZA-OS"',
                       self.text)
-        self.assertIn('"git+${REPO_URL}@${version}"', self.text)
+        self.assertIn('DANZA_BRANCH="Production-DANZABOSS"', self.text)
+        self.assertNotIn("@main", self.text)
+        self.assertIn("install.py", self.text)
+
+    def test_approval_is_before_download(self):
+        self.assertLess(self.text.index("Approve installation"),
+                        self.text.index("curl -fsSL"))
 
     def test_executable_bit(self):
         self.assertTrue(SCRIPT.stat().st_mode & 0o111,

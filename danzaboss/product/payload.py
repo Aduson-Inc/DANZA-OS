@@ -7,7 +7,6 @@ and visible roster identity is parsed from the shipped prompt definitions.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -39,7 +38,7 @@ _ACTIVE_AGENT_WORK_TYPES = (
     ("hank-designer", "design"),
     ("billy-security", "security"),
 )
-_HEADING = re.compile(r"^#\s+(.+?)\s+—\s+(.+?)\s*$", re.MULTILINE)
+_WORK_TYPES = dict(_ACTIVE_AGENT_WORK_TYPES)
 
 
 def payload_root():
@@ -54,44 +53,34 @@ def payload_root():
     return root
 
 
-def _description(text: str, agent_id: str) -> str:
-    if not text.startswith("---\n") or "\n---\n" not in text[4:]:
-        raise PayloadError(f"agent {agent_id!r} has invalid frontmatter")
-    frontmatter = text.split("\n---\n", 1)[0][4:]
-    for line in frontmatter.splitlines():
-        if line.startswith("description:"):
-            value = line.split(":", 1)[1].strip()
-            try:
-                description = json.loads(value)
-            except json.JSONDecodeError as exc:
-                raise PayloadError(
-                    f"agent {agent_id!r} description must be JSON quoted") from exc
-            if isinstance(description, str) and description.strip():
-                return description.strip()
-    raise PayloadError(f"agent {agent_id!r} has no description")
-
-
 @lru_cache(maxsize=1)
 def _definitions() -> tuple[AgentDefinition, ...]:
-    directory = payload_root() / "claude" / "agents"
-    expected = {f"{agent_id}.md" for agent_id, _ in _ACTIVE_AGENT_WORK_TYPES}
-    actual = {child.name for child in directory.iterdir()
-              if child.name.endswith(".md")}
-    if actual != expected:
+    try:
+        manifest = json.loads(
+            (files("danzaboss.agents") / "definitions.json")
+            .read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PayloadError(f"agent definition manifest unavailable: {exc}") from exc
+    if manifest.get("schema_version") != 1:
+        raise PayloadError("unsupported agent definition manifest schema")
+    entries = {entry.get("id"): entry for entry in manifest.get("agents", [])}
+    expected = set(_WORK_TYPES)
+    if set(entries) != expected:
         raise PayloadError(
-            "active agent prompt set mismatch: "
-            f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")
+            "canonical agent definition set mismatch: "
+            f"missing={sorted(expected - set(entries))}, "
+            f"extra={sorted(set(entries) - expected)}")
     definitions = []
     for agent_id, work_type in _ACTIVE_AGENT_WORK_TYPES:
-        text = (directory / f"{agent_id}.md").read_text(encoding="utf-8")
-        heading = _HEADING.search(text)
-        if heading is None:
-            raise PayloadError(f"agent {agent_id!r} has no Name — Role heading")
+        entry = entries[agent_id]
+        if not all(isinstance(entry.get(key), str) and entry[key].strip()
+                   for key in ("display_name", "role", "responsibility")):
+            raise PayloadError(f"agent {agent_id!r} has invalid identity fields")
         definitions.append(AgentDefinition(
             id=agent_id,
-            name=heading.group(1).strip(),
-            role=heading.group(2).strip(),
-            responsibility=_description(text, agent_id),
+            name=entry["display_name"],
+            role=entry["role"],
+            responsibility=entry["responsibility"],
             work_type=work_type,
         ))
     return tuple(definitions)

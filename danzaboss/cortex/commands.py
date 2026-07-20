@@ -21,6 +21,7 @@ from .learn import learn
 from .inject import build_context
 from .intent import WorkspaceState
 from .observation import Observation
+from .tasks import start_task
 from ..hooks.gates import distillation_gate
 from ..kernel.profile import active_profile, capture_event
 
@@ -346,6 +347,34 @@ def _cmd_stats(argv: list[str], root: str, stdin: TextIO) -> int:
     return 0
 
 
+def _cmd_task_start(argv: list[str], root: str, stdin: TextIO) -> int:
+    """Start a runtime task and apply the first-seed/next-context gate."""
+    def option(flag: str) -> Optional[str]:
+        if flag not in argv:
+            return None
+        index = argv.index(flag)
+        return argv[index + 1] if index + 1 < len(argv) else None
+
+    task_id = option("--task-id")
+    actor = option("--actor")
+    task = option("--task")
+    if not task_id or not actor or not task:
+        print("task-start --task-id ID --actor AGENT --task TEXT "
+              "[--seed-json JSON]", file=sys.stderr)
+        return 2
+    seed = None
+    raw_seed = option("--seed-json")
+    if raw_seed:
+        try:
+            seed = json.loads(raw_seed)
+        except json.JSONDecodeError as exc:
+            print(f"task-start: invalid --seed-json: {exc}", file=sys.stderr)
+            return 2
+    result = start_task(root, task_id, actor, task, seed=seed)
+    print(json.dumps(result.to_dict(), indent=2))
+    return 0
+
+
 def _cmd_index(argv: list[str], root: str, stdin: TextIO) -> int:
     """danza cortex index [--commits N] — rebuild the knowledge graph for this
     repo: scan files, ingest git history, link observations. Deterministic
@@ -426,7 +455,8 @@ def _cmd_mcp(argv: list[str], root: str, stdin: TextIO) -> int:
 _COMMANDS = {"hook": _cmd_hook, "observe": _cmd_observe, "get": _cmd_get,
              "search": _cmd_search, "retrieve": _cmd_retrieve,
              "context": _cmd_context, "age": _cmd_age, "learn": _cmd_learn,
-             "stats": _cmd_stats, "ui": _cmd_ui, "index": _cmd_index,
+             "stats": _cmd_stats, "task-start": _cmd_task_start,
+             "ui": _cmd_ui, "index": _cmd_index,
              "graph": _cmd_graph, "mcp": _cmd_mcp}
 
 
@@ -436,6 +466,6 @@ def main(argv: list[str], *, root: Optional[str] = None,
     stdin = stdin if stdin is not None else sys.stdin
     if not argv or argv[0] not in _COMMANDS:
         print("danza cortex <hook|observe|get|search|retrieve|context|age|learn"
-              "|stats|ui|index|graph|mcp> ...", file=sys.stderr)
+              "|stats|task-start|ui|index|graph|mcp> ...", file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:], root, stdin)

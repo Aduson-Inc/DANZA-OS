@@ -42,77 +42,52 @@ whole-product and browser qualification remain part of that task.
   line tool recognized by Setup: Claude Code, Codex, Gemini CLI, Grok CLI, or
   OpenCode.
 
-The Linux commands below were verified with Bash. Windows PowerShell commands
-are also provided, but DANZABOSS does not yet publish a formal cross-platform
-support matrix.
+The Linux and macOS commands below use Bash. Windows PowerShell has a matching
+installer. The first release contract covers Linux, macOS, and Windows.
 
-## Install the `factory-test` Branch
+## Install the `Production-DANZABOSS` Branch
 
-Clone the complete DANZA-OS factory from its dedicated end-user test branch.
-Do not initialize the factory checkout as an application project.
+The public installer is pinned to the `Production-DANZABOSS` branch. It can be
+run from an empty folder or an existing Git repository.
 
 On Linux or macOS:
 
 ```bash
-git clone --branch factory-test --single-branch \
-  https://github.com/Aduson-Inc/DANZA-OS.git
-cd DANZA-OS
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -e .
-danza selftest
+curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.sh | bash
 ```
 
 On Windows PowerShell:
 
 ```powershell
-git clone --branch factory-test --single-branch https://github.com/Aduson-Inc/DANZA-OS.git
-cd DANZA-OS
-py -3 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e .
-danza selftest
+irm https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.ps1 | iex
 ```
 
-Keep this virtual environment active while using `danza`. If the GitHub
-repository is private, authenticate with GitHub before cloning it.
-
-There is no promoted public-release installation command yet. The repository's
-current `install.sh` can fall back to the GitHub `main` branch, so do not use it
-for this test. The commands above explicitly install `factory-test`.
+The installer detects Python 3.10+, Git, and the Python virtual-environment
+module, explains mandatory dependencies, and requests approval before it
+downloads or installs anything. tmux is optional and is never installed
+automatically.
 
 ## Start a New App
 
-With the DANZABOSS virtual environment active, create a separate target
-repository next to the `DANZA-OS` folder. This separate repository becomes the
-user's `APP_BUILD`; the `DANZA-OS` folder remains the installed factory.
+Create an empty target folder or use an existing Git repository. The target
+becomes the user's `APP_BUILD`.
 
 ```bash
-cd ..
 mkdir my-app
 cd my-app
-git init
-danza init .
-danza doctor .
-danza ui .
+curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.sh | bash
 ```
 
-Use the same commands in Windows PowerShell after activating the virtual
-environment.
-
-For an application repository that already exists, enter that directory and
-start with `danza init .` instead of creating a new one.
-
-`danza ui .` prints the local address and attempts to open it in your browser.
-The default address is:
+For an existing Git repository, enter its root and run the same installer. The
+dashboard opens at:
 
 ```text
-http://127.0.0.1:33100
+http://localhost:33000
 ```
 
-Open Setup first. Confirm the detected AI tools, their work assignments, and
-the number of verified atomic units allowed per turn. PROJECT unlocks after
-Setup is confirmed.
+In Setup, choose or launch an AI client/model and select **Verify connection**.
+Onboarding remains locked until the connection check succeeds. Tony-D runs
+onboarding only when no valid runtime handoff exists.
 
 During this factory test, inspect the `profile` and `cortex` lines printed by
 `danza doctor .`. The application repository must be recognized as
@@ -220,10 +195,10 @@ or `danza build` commands.
 Core commands:
 
 ```bash
-danza init .
+danza activate .
 danza doctor .
 danza ui .
-danza ui . --no-open --port 33101
+danza ui . --no-open --port 33001
 danza runners .
 danza profile
 danza selftest
@@ -282,8 +257,8 @@ the paths point somewhere else.
 ### Running from the DANZA-OS source repository
 
 Stop and move to a separate target application repository. The DANZA-OS source
-checkout is `OS_DEV`; it is not an activated `APP_BUILD` project and must not be
-initialized as one.
+checkout is the product source; it is not an activated `APP_BUILD` project and
+must not be initialized as one.
 
 ### Dashboard does not open automatically
 
@@ -294,12 +269,12 @@ opening explicitly, run:
 danza ui . --no-open
 ```
 
-### Port 33100 is already in use
+### Port 33000 is already in use
 
 Choose another local port:
 
 ```bash
-danza ui . --port 33101
+danza ui . --port 33001
 ```
 
 ### `danza doctor` reports missing setup
@@ -309,7 +284,7 @@ then rerun the scaffold and health check:
 
 ```bash
 git status --short
-danza init .
+danza activate .
 danza doctor .
 ```
 
@@ -330,11 +305,10 @@ details, see:
 - [INSTALL.md](INSTALL.md)
 - [RUNBOOK.md](RUNBOOK.md)
 - [CLAUDE.md](CLAUDE.md)
-- [docs/OS_DEV.md](docs/OS_DEV.md)
 
-Contributors work in the DANZA-OS source repository under `OS_DEV`. End users
-initialize `APP_BUILD` inside a separate target application repository. The
-source repository must never be treated as an activated application project.
+Contributors work in the DANZA-OS source repository. End users initialize
+`APP_BUILD` inside a separate target application repository. The source
+repository must never be treated as an activated application project.
 
 ## License and Release Status
 

@@ -80,6 +80,15 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "interactive": ["grok"],
         "headless": [],
     },
+    "hermes": {
+        "kind": "cli", "binary": "hermes",
+        "display_name": "Hermes Agent",
+        "strengths": "Tool-driven local workflows and delegated tasks",
+        "suggested_seats": ["build", "research", "qa"],
+        "activation": "argv",
+        "interactive": ["hermes"],
+        "headless": [],
+    },
     "opencode": {
         "kind": "cli", "binary": "opencode",
         "display_name": "OpenCode",

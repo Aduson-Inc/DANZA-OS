@@ -168,6 +168,13 @@ class TestValidateRouting(unittest.TestCase):
         with self.assertRaises(RoutingError):
             validate_routing(routing, self.cfg)
 
+    def test_rejects_five_runner_lineup(self):
+        lineup = ["claude", "codex", "gemini", "grok", "opencode"]
+        cfg = _config(dict.fromkeys(lineup, "ok"))
+        routing = _routing(lineup, _full_seats("claude"))
+        with self.assertRaisesRegex(RoutingError, "1-4"):
+            validate_routing(routing, cfg)
+
     def test_rejects_duplicate_lineup_names(self):
         routing = _routing(["claude", "claude"], _full_seats("claude"))
         with self.assertRaises(RoutingError):
@@ -316,6 +323,17 @@ class TestNextBoss(unittest.TestCase):
         state = TeamState(turn_number=2)
         self.assertEqual(next_boss(routing, _completed(_plan(), "1.1", "1.2"), state),
                          routing["lineup"][2 % 2])
+
+    def test_sequential_boss_mode_ignores_specialist_seats(self):
+        routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,
+                   "boss_mode": "sequential",
+                   "lineup": ["claude", "codex"],
+                   "seats": _full_seats("claude")}
+        for turn, expected in ((0, "claude"), (1, "codex"), (2, "claude")):
+            with self.subTest(turn=turn):
+                self.assertEqual(
+                    next_boss(routing, _plan(), TeamState(turn_number=turn)),
+                    expected)
 
     def test_unknown_kind_raises(self):
         state = TeamState(turn_number=0)

@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 RETAINED_DOCS = (
     "README.md", "INSTALL.md", "ARCHITECTURE.md", "RUNBOOK.md", "CLAUDE.md",
-    "AGENTS.md", "docs/OS_DEV.md", "docs/danza-lexicon.md",
+    "AGENTS.md", "docs/danza-lexicon.md",
     "docs/superpowers/specs/2026-07-11-danza-os-product-completion-design.md",
 )
 

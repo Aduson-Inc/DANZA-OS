@@ -12,6 +12,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa
 from danzaboss.cli import main
+from danzaboss.product.handoff import write_handoff_state
 from danzaboss.product.resume import session_start_context
 
 
@@ -35,18 +36,21 @@ class SessionStartContext(unittest.TestCase):
 
     def test_blank_handoff_is_silent(self):
         self._write_handoff("   \n\n")
-        self.assertIsNone(session_start_context(self.root))
+        block = session_start_context(self.root)
+        self.assertIn("DANZA STOP", block)
 
     def test_non_utf8_handoff_is_silent_not_crash(self):
         d = self.root / ".danza"
         d.mkdir(exist_ok=True)
         (d / "handoff.md").write_bytes(b"\xff\xfe garbage \x80")
-        self.assertIsNone(session_start_context(self.root),
-                          "corrupt handoff must degrade to silence")
+        block = session_start_context(self.root)
+        self.assertIn("DANZA STOP", block)
 
     def test_real_handoff_emits_continue_block(self):
         self._write_handoff("# Handoff\n\nTurn 4: claude -> codex. "
                             "Features 7+8 next.\n")
+        write_handoff_state(self.root, turn_number=4, current_boss="claude",
+                            next_boss="codex", verified_unit_ids=["7", "8"])
         block = session_start_context(self.root)
         self.assertIsNotNone(block)
         self.assertIn("CONTINUE MODE", block)
@@ -68,6 +72,8 @@ class SessionStartCli(unittest.TestCase):
         d.mkdir()
         (d / "handoff.md").write_text("# Handoff\n\nTurn 2: resume.\n",
                                       encoding="utf-8")
+        write_handoff_state(self.root, turn_number=2, current_boss="claude",
+                            next_boss="codex", verified_unit_ids=[])
         out = io.StringIO()
         with redirect_stdout(out):
             rc = main(["hook", "session-start"])

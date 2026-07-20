@@ -74,6 +74,11 @@ def _iter_payload():
             raise ScaffoldError(f"payload dir {src_name!r} missing - broken install")
         entries.extend((Path(dst_name) / rel, content)
                        for rel, content in _walk(base, Path()))
+    # Vendor-neutral definitions are copied into the target's private DANZA
+    # runtime namespace. Claude/Gemini/etc. files remain adapters only.
+    canonical = files("danzaboss.agents") / "definitions.json"
+    entries.append((Path(".danza") / "agents" / "definitions.json",
+                    canonical.read_bytes()))
     entries.extend((keep, b"") for keep in _KEEP_FILES)
     return sorted(entries, key=lambda e: e[0].as_posix())
 

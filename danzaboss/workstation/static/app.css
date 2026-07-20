@@ -620,30 +620,92 @@ button.chip { cursor: pointer; }
   gap: 8px; margin-bottom: 6px;
 }
 .agent-card p { font-size: 12.5px; margin: 0; }
+.agent-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-top: 12px;
+}
+.boss-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.boss-toggle {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--silver); font-family: var(--font-mono); font-size: 11px;
+  cursor: pointer;
+}
+.boss-toggle input { accent-color: var(--crimson); }
 .chip-ok { border-color: var(--ember); color: var(--ember); }
 .chip-bad { border-color: var(--crimson); color: var(--crimson); }
 .chip-dim { border-color: var(--silver); color: var(--silver); }
 
-.seat-row {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 16px; padding: 8px 0;
-  border-bottom: 1px solid rgba(58, 61, 68, .35);
+.boss-hero {
+  margin: 8px 0 22px; padding: 38px 42px 34px;
+  background: linear-gradient(135deg, #16161b 0%, #0c0c10 72%);
+  border: 1px solid var(--gunmetal); border-left: 5px solid var(--crimson);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55);
 }
-.seat-row:last-child { border-bottom: none; }
-.seat-row .seat-name b {
-  display: block;
-  font-family: "Chakra Petch", sans-serif;
-  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--silver);
+.boss-kicker {
+  color: var(--ember); font-size: 11px; letter-spacing: .2em;
+  margin-bottom: 10px;
 }
-.seat-row .seat-name .dim { font-size: 12.5px; }
-.seat-row select {
-  min-width: 220px; padding: 8px 10px;
-  background: var(--carbon); color: var(--text);
-  border: 1px solid var(--gunmetal); border-radius: 2px;
-  font-family: "IBM Plex Sans", sans-serif; font-size: 14px;
+.boss-hero h1 {
+  color: var(--glow); font-family: var(--font-display); font-size: clamp(42px, 7vw, 82px);
+  line-height: .95; letter-spacing: .08em; margin-bottom: 18px;
+  text-shadow: 0 0 24px rgba(245, 247, 250, .22);
 }
-.seat-row select:focus { outline: none; border-color: var(--crimson); }
+.boss-lede { max-width: 820px; color: var(--silver); font-size: 19px; line-height: 1.45; }
+.boss-lede b { color: var(--glow); }
+.boss-feature-choice {
+  display: grid; grid-template-columns: auto minmax(190px, 260px) 1fr;
+  align-items: center; gap: 14px; max-width: 900px; margin-top: 26px;
+  padding: 14px 16px; border: 1px solid rgba(155, 161, 171, .25);
+  background: rgba(0, 0, 0, .25);
+}
+.boss-feature-choice label {
+  color: var(--glow); font-family: var(--font-display); letter-spacing: .08em;
+  text-transform: uppercase; font-size: 12px;
+}
+.boss-feature-choice select {
+  padding: 9px 12px; background: var(--carbon); color: var(--glow);
+  border: 1px solid var(--gunmetal); font-size: 14px;
+}
+.boss-feature-choice span, .connection-note { color: var(--dim); font-size: 12.5px; }
+.connection-note { margin-top: 15px; max-width: 760px; }
+
+.boss-lineup { display: grid; gap: 10px; padding: 0; list-style: none; }
+.boss-card {
+  display: grid; grid-template-columns: 42px 1fr auto; align-items: center;
+  gap: 14px; padding: 15px 16px; border: 1px solid var(--gunmetal);
+  background: rgba(10, 10, 12, .72);
+}
+.boss-active { border-color: var(--crimson); box-shadow: inset 4px 0 var(--crimson); }
+.boss-waiting { border-left: 4px solid var(--gunmetal); }
+.boss-rank {
+  display: grid; place-items: center; width: 32px; height: 32px;
+  color: var(--glow); background: var(--graphite); border: 1px solid var(--gunmetal);
+  font-family: var(--font-display); font-size: 18px;
+}
+.boss-card-copy { display: flex; flex-direction: column; gap: 2px; }
+.boss-card-copy b { color: var(--glow); font-size: 17px; }
+.boss-card-copy span { color: var(--dim); font-size: 10px; letter-spacing: .12em; }
+.boss-active .boss-card-copy span { color: var(--ember); }
+.boss-controls { display: flex; gap: 5px; }
+.boss-controls button:disabled { opacity: .28; cursor: not-allowed; }
+.boss-empty { padding: 20px; color: var(--dim); border: 1px dashed var(--gunmetal); }
+.specialist-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.ready-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 16px; }
+.ready-summary b { color: var(--glow); font-size: 19px; }
+.ready-summary span { color: var(--dim); }
+.boss-confirm {
+  width: 100%; padding: 16px 20px; color: var(--glow); background: var(--crimson);
+  border: 1px solid var(--ember); font-family: var(--font-display); font-size: 17px;
+  font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer;
+}
+.boss-confirm:hover { background: var(--ember); }
+
+@media (max-width: 760px) {
+  .boss-hero { padding: 28px 22px; }
+  .boss-feature-choice { grid-template-columns: 1fr; }
+  .boss-card { grid-template-columns: 34px 1fr; }
+  .boss-controls { grid-column: 2; }
+}
 
 details.advanced summary {
   cursor: pointer;

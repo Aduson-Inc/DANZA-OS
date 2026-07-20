@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "agents": [
+    {
+      "id": "tony-d-orchestrator",
+      "display_name": "Tony-D",
+      "role": "The Boss",
+      "responsibility": "Owns onboarding, scope, delegation, state, handoffs, and escalation.",
+      "capabilities": ["read", "write_state", "spawn_agent", "manage_handoff", "memory_read", "memory_write"],
+      "spawn_allowlist": ["jonathan-builder", "samantha-mapper", "angela-auditor", "bonnie-qa", "carmella-researcher", "hank-designer", "billy-security"],
+      "forbidden": ["write_code", "write_design", "run_tests", "research_net", "security_scan"]
+    },
+    {
+      "id": "jonathan-builder",
+      "display_name": "Jonathan",
+      "role": "Builder",
+      "responsibility": "Writes application code within an approved assignment and verifies build dependencies first.",
+      "capabilities": ["read", "write_code", "run_tests", "git_read", "memory_read"],
+      "spawn_allowlist": [],
+      "forbidden": ["spawn_agent", "write_state", "research_net", "security_scan"]
+    },
+    {
+      "id": "samantha-mapper",
+      "display_name": "Samantha",
+      "role": "Mapper",
+      "responsibility": "Maps the actual codebase and maintains the living system blueprint.",
+      "capabilities": ["read", "write_map", "memory_read"],
+      "spawn_allowlist": [],
+      "forbidden": ["write_code", "spawn_agent", "run_tests"]
+    },
+    {
+      "id": "angela-auditor",
+      "display_name": "Angela",
+      "role": "Auditor",
+      "responsibility": "Records decisions, evidence, risks, loops, stalls, and constitution violations.",
+      "capabilities": ["read", "write_audit", "memory_read", "memory_write"],
+      "spawn_allowlist": [],
+      "forbidden": ["write_code", "spawn_agent", "run_tests"]
+    },
+    {
+      "id": "bonnie-qa",
+      "display_name": "Bonnie",
+      "role": "QA",
+      "responsibility": "Runs tests and is the final verification gate for completed work.",
+      "capabilities": ["read", "run_tests", "verify", "memory_read"],
+      "spawn_allowlist": [],
+      "forbidden": ["write_code", "spawn_agent", "write_state"]
+    },
+    {
+      "id": "carmella-researcher",
+      "display_name": "Carmella",
+      "role": "Researcher",
+      "responsibility": "Researches unknowns using only capabilities approved and available in the environment.",
+      "capabilities": ["read", "research_net", "write_research", "memory_read"],
+      "spawn_allowlist": [],
+      "forbidden": ["write_code", "spawn_agent", "run_tests"]
+    },
+    {
+      "id": "hank-designer",
+      "display_name": "Hank",
+      "role": "Designer",
+      "responsibility": "Owns the approved visual system, design tokens, and presentation artifacts.",
+      "capabilities": ["read", "write_design", "memory_read"],
+      "spawn_allowlist": [],
+      "forbidden": ["write_code", "spawn_agent", "run_tests"]
+    },
+    {
+      "id": "billy-security",
+      "display_name": "Billy",
+      "role": "Security",
+      "responsibility": "Reviews security-sensitive work, dependencies, secrets, and release risk.",
+      "capabilities": ["read", "run_tests", "security_scan", "memory_read"],
+      "spawn_allowlist": [],
+      "forbidden": ["write_code", "spawn_agent", "write_state"]
+    }
+  ]
+}

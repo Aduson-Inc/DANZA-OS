@@ -7,7 +7,7 @@ Commands:
   danzaboss.cli hook pretooluse                 Claude Code PreToolUse guard (reads CC JSON on stdin)
   danzaboss.cli hook stop                       Claude Code Stop hook
   danzaboss.cli hook session-start              D8 auto-resume: CONTINUE-MODE context block
-  danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|learn|stats|ui|index|graph|mcp>
+  danzaboss.cli cortex <hook|observe|get|search|retrieve|context|age|learn|stats|task-start|ui|index|graph|mcp>
                                                 CORTEX memory and adaptive context
   danzaboss.cli profile                         print the active execution profile (OS_DEV|OS_BOOT_TEST|APP_BUILD)
   danzaboss.cli tier <paths...> [--commit]      cheapest safe verification tier for a change set
@@ -17,8 +17,9 @@ Commands:
   danzaboss.cli unit <start|verify|block|conclude> <root> [unit-id] --actor NAME
                                                 mutate verified atomic-unit execution state
   danzaboss.cli init [dir]                      scaffold .claude/ + .danza/ into a repo (danza init)
+  danzaboss.cli activate [dir] [--no-open]       activate CORTEX and start the dashboard on port 33000
   danzaboss.cli doctor [dir]                    env + activation health checks (danza doctor)
-  danzaboss.cli ui [dir] [--port N] [--no-open]  DANZA-OS product dashboard on 127.0.0.1:33100
+  danzaboss.cli ui [dir] [--port N] [--no-open]  DANZA-OS product dashboard on localhost:33000
                                                 (CORTEX UI mounted at /cortex/)
 
 Run:  PYTHONPATH=<repo-root> python3 -m danzaboss.cli <command> ...
@@ -426,6 +427,44 @@ def _cmd_ui(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_activate(argv: list[str]) -> int:
+    """Activate a target and start the required dashboard.
+
+    Connection verification is intentionally a separate UI action. Until the
+    user verifies a selected client, activation is pending rather than an
+    end-to-end success claim.
+    """
+    root = "."
+    open_browser = True
+    no_ui = False
+    for arg in argv:
+        if arg == "--no-open":
+            open_browser = False
+        elif arg == "--no-ui":
+            no_ui = True
+        elif not arg.startswith("-"):
+            root = arg
+        else:
+            print(f"unknown argument: {arg}", file=sys.stderr)
+            return 2
+    from .product.activation import activate_project, verify_installation, wait_for_ui
+    try:
+        activate_project(root, start_ui_process=not no_ui,
+                         open_browser=open_browser)
+        if not no_ui and not wait_for_ui():
+            print("activation failed: dashboard did not answer on port 33000",
+                  file=sys.stderr)
+            return 1
+        report = verify_installation(root, require_connection=False)
+    except (OSError, ValueError) as exc:
+        print(f"activation failed: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    if report["status"] == "awaiting_ai_connection":
+        print("DANZABOSS is active; verify an AI connection in the UI before onboarding.")
+    return 0 if report["status"] != "failed" else 1
+
+
 def _print_doctor(root: str) -> int:
     """Render a doctor Report as [PASS]/[FAIL] lines + verdict. 0 green, 1 red."""
     rep = run_doctor(root)
@@ -473,6 +512,7 @@ _COMMANDS = {"scan": _cmd_scan, "verify": _cmd_verify,
              "cortex": _cmd_cortex, "profile": _cmd_profile,
              "tier": _cmd_tier, "runners": _cmd_runners,
              "conduct": _cmd_conduct, "unit": _cmd_unit, "init": _cmd_init,
+             "activate": _cmd_activate,
              "doctor": _cmd_doctor, "ui": _cmd_ui}
 
 
@@ -480,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in _COMMANDS:
         print("danzaboss.cli <scan|verify|selftest|hook|cortex|profile|tier"
-              "|runners|conduct|unit|init|doctor|ui> ...",
+              "|runners|conduct|unit|init|activate|doctor|ui> ...",
               file=sys.stderr)
         return 2
     return _COMMANDS[argv[0]](argv[1:])

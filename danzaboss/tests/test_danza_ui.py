@@ -565,15 +565,21 @@ class TestDashboardStatic(unittest.TestCase):
     def test_setup_ui_wiring_present(self):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
-        for marker in ("api/setup", "loadSetup", "Confirm team",
-                       "Connected", "Who Does What", "characterRow",
-                       "s.roster.map(characterRow)",
-                       "Found, not logged in",
-                       "Set up your AI team first", "features-per-turn",
-                       "verified atomic units per AI turn",
+        for marker in ("api/setup", "loadSetup", "WHO’S THE BOSS?",
+                       "boss-lineup", "Choose <b>1–4 models to help build your ideas</b>",
+                       "api/connection/launch", "Launch client", "2 recommended",
+                       "active Tony-D", "WAITING FOR ITS TURN",
+                       "api/connection/verify", "Verify connection",
+                       "s.active_boss", "s.waiting_bosses",
+                       "features-per-turn",
                        "features_per_turn: pick.features_per_turn"):
             self.assertIn(marker, js)
-        self.assertIn("driverName(id, o.roster)", js)
+        for removed in ("Who Does What", "characterRow",
+                        "s.roster.map(characterRow)", "data-seat",
+                        "SEAT_VERBS", "pickLineup", "Verify AI connection",
+                        "Specialist roles", "ONE ACTIVE BOSS", "NO ROLE THEATRE",
+                        "boss-hero-grid", "connection-runner", "turnSize"):
+            self.assertNotIn(removed, js)
         for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
             self.assertIn(value, js)
         for removed in ("Full Power", "data-dial", "data-override",
@@ -594,7 +600,9 @@ class TestDashboardStatic(unittest.TestCase):
     def test_setup_css_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         css = body.decode()
-        for token in (".agent-card", ".seat-row"):
+        for token in (".agent-card", ".boss-hero", ".boss-lineup",
+                      ".boss-card", ".boss-active", ".boss-waiting",
+                      ".boss-feature-choice"):
             self.assertIn(token, css)
         self.assertNotIn(".dial-card", css)
 
@@ -708,7 +716,7 @@ class TestSetupApi(unittest.TestCase):
         names = [a["name"] for a in o["agents"]]
         # five real catalog entries; the generic copy-me template is no card
         self.assertEqual(names, ["claude", "codex", "gemini", "grok",
-                                 "opencode"])
+                                 "hermes", "opencode"])
         claude = o["agents"][0]
         self.assertEqual(claude["display_name"], "Claude Code")
         self.assertTrue(claude["detected"])
@@ -758,6 +766,52 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(routing["features_per_turn"], 4)
         self.assertEqual(out["setup"]["features_per_turn"], 4)
 
+    def test_post_setup_accepts_ordered_boss_lineup_without_role_mapping(self):
+        body = {"lineup": ["gemini", "claude"], "features_per_turn": 2}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 200, out)
+        routing = json.loads((Path(self.root) / ROUTING_RELPATH).read_text())
+        self.assertEqual(routing["lineup"], ["gemini", "claude"])
+        self.assertEqual(routing["boss_mode"], "sequential")
+        self.assertEqual(routing["seats"]["conductor"], "builtin")
+        for work_type in SEAT_WORK_TYPES:
+            self.assertEqual(routing["seats"][work_type], "gemini")
+        setup = out["setup"]
+        self.assertEqual(setup["active_boss"], "gemini")
+        self.assertEqual(setup["waiting_bosses"], ["claude"])
+        self.assertEqual(setup["specialist_execution"], "active_boss")
+
+    def test_connection_launch_endpoint_starts_project_client_session(self):
+        saved = server_mod.launch_runner
+        server_mod.launch_runner = lambda root, runner, config: {
+            "status": "launched", "runner": runner,
+            "session": "danza-demo-claude",
+            "attach_command": "tmux attach -t danza-demo-claude"}
+        self.addCleanup(lambda: setattr(server_mod, "launch_runner", saved))
+        status, out = post(self.port, "/api/connection/launch",
+                           {"runner": "claude"})
+        self.assertEqual(status, 200, out)
+        self.assertEqual(out["launch"]["status"], "launched")
+        self.assertIn("tmux attach", out["launch"]["attach_command"])
+
+    def test_setup_summary_tracks_sequential_turn_owner(self):
+        status, out = post(self.port, "/api/setup", {
+            "lineup": ["claude", "gemini"], "features_per_turn": 2})
+        self.assertEqual(status, 200, out)
+        runtime = Path(self.root) / ".danza" / "runtime"
+        (runtime / "team-state.json").write_text(json.dumps({
+            **TEAM_STATE, "turn_number": 3, "current_boss": "gemini"}))
+        summary = server_mod.setup_summary(self.root)
+        self.assertEqual(summary["active_boss"], "gemini")
+        self.assertEqual(summary["waiting_bosses"], ["claude"])
+
+    def test_post_rejects_five_runner_lineup(self):
+        body = {"lineup": ["claude", "gemini", "codex", "grok", "opencode"],
+                "features_per_turn": 2}
+        status, out = post(self.port, "/api/setup", body)
+        self.assertEqual(status, 400)
+        self.assertIn("1-4", out["error"])
+
     def test_post_requires_valid_features_per_turn_before_any_write(self):
         base = {"lineup": ["claude"], "seats": team_seats("claude")}
         for value in (None, True, False, 1, 6, 2.5, "2"):
@@ -798,13 +852,13 @@ class TestSetupApi(unittest.TestCase):
         self.assertTrue(o["setup_complete"])
 
     def test_post_rejects_six_runner_lineup(self):
-        body = {"lineup": ["claude", "codex", "gemini", "grok", "opencode",
+        body = {"lineup": ["claude", "codex", "gemini", "grok", "hermes", "opencode",
                            "generic"],
                 "features_per_turn": 2,
                 "seats": team_seats("claude")}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
-        self.assertIn("1-5", out["error"])
+        self.assertIn("1-4", out["error"])
 
     def test_post_rejects_unauthenticated_seat(self):
         server_mod._BUILD_REGISTRY = \

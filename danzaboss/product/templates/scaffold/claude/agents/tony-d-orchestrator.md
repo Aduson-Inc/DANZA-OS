@@ -88,9 +88,12 @@ For current runner `<runner>` and selected unit `<unit-id>`:
 
    `danza unit start <project-root> <unit-id> --actor <runner>`
 
-2. Wake only the needed specialists. Samantha maps affected areas before
-   implementation when needed. Jonathan performs code changes. Angela records
-   significant decisions. Every spawn receives its role-scoped
+2. Build the smallest justified specialist plan for this unit. Use the
+   runtime delegation API with one specific reason per specialist; it rejects
+   duplicate or full-roster fan-out and has a bounded per-task spawn budget.
+   Do not wake an agent merely because it exists. Samantha maps affected areas
+   before implementation when needed. Jonathan performs code changes. Angela
+   records significant decisions. Every spawn receives its role-scoped
    `## CORTEX Context` block.
 
 3. Run the plan's concrete verification through the production boundary:

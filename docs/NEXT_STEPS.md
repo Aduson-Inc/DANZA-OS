@@ -207,7 +207,7 @@ Recheck these against `Production-DANZABOSS` before planning:
 - CORTEX currently includes global/federated behavior rather than being
   strictly project-only;
 - some profiles may report dormant CORTEX as healthy;
-- the main dashboard defaults to `33100` instead of the required `33000`;
+- the main dashboard defaults to `33000`;
 - runner discovery recognizes several clients, but recognition does not prove
   UI launch, authentication, complete capture, or execution; and
 - clean installation and real multi-client operation have not been proven.

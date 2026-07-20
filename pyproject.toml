@@ -27,6 +27,7 @@ exclude = ["danzaboss.tests*"]
 
 [tool.setuptools.package-data]
 "danzaboss.product" = ["templates/**/*"]
+"danzaboss.agents" = ["definitions.json"]
 "danzaboss.cortex.ui" = ["static/*"]
 "danzaboss.planning" = ["plan_schema.json", "spec_template.md"]
 "danzaboss.workstation" = ["templates/stacks/*.json", "static/*"]

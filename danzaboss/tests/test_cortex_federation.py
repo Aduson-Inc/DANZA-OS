@@ -55,12 +55,14 @@ class TestFactory(unittest.TestCase):
         ctor.assert_called_once_with("postgresql://x")
         self.assertIs(store.backend, fake)
 
-    def test_open_store_is_federated(self):
+    def test_open_store_is_project_only(self):
         with tempfile.TemporaryDirectory() as tmp, \
              mock.patch.dict(os.environ,
                              {factory.GLOBAL_DB_ENV: os.path.join(tmp, "g.db"),
                               factory.GLOBAL_DSN_ENV: ""}):
-            self.assertIsInstance(factory.open_store(tmp), FederatedStore)
+            self.assertIsInstance(factory.open_store(tmp), ObservationStore)
+            factory.open_store(tmp).upsert(obs("local", layer=5))
+            self.assertEqual(factory.open_global_store().backend.all(), [])
 
 
 class TestFederatedRouting(unittest.TestCase):
@@ -167,18 +169,18 @@ class TestCommandsFederation(unittest.TestCase):
             rc = commands.main(argv, root=self.root, stdin=stdin)
         return rc, out.getvalue()
 
-    def test_observe_routes_layer5_to_global_store(self):
+    def test_observe_keeps_every_runtime_layer_project_local(self):
         rc, out = self.run_cmd(["observe"], payload={
             "title": "Reusable retry-with-backoff helper",
             "summary": "battle-tested across projects",
             "type": ObsType.CONVENTION.value, "layer": 5})
         self.assertEqual(rc, 0)
         oid = json.loads(out)["stored"][0]
-        self.assertIsNotNone(SqliteBackend(self.global_db).get(oid))
+        self.assertIsNotNone(SqliteBackend(factory.db_path(self.root)).get(oid))
         self.assertEqual(
-            SqliteBackend(factory.db_path(self.root)).all(), [])
+            SqliteBackend(self.global_db).all(), [])
 
-    def test_search_and_get_reach_global_observations(self):
+    def test_search_and_get_reach_project_observations(self):
         rc, out = self.run_cmd(["observe"], payload={
             "title": "Reusable retry-with-backoff helper",
             "summary": "battle-tested across projects",

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 
-from .federate import FederatedStore
 from .sqlite_backend import SqliteBackend
 from .store import ObservationStore
 
@@ -42,7 +41,12 @@ def open_global_store() -> ObservationStore:
     return ObservationStore(SqliteBackend(global_db_path()))
 
 
-def open_store(root: str) -> FederatedStore:
-    """The default store for CLI + hooks: project truth federated with the
-    cross-project L4/L5 bank."""
-    return FederatedStore(open_project_store(root), open_global_store())
+def open_store(root: str) -> ObservationStore:
+    """Return the authoritative project-local CORTEX store.
+
+    Global stores remain available only through the explicit
+    ``open_global_store`` development/tooling API. Runtime hooks, UI, MCP,
+    retrieval, and agent context all use this project-only path so one project
+    can never read or write another project's memory.
+    """
+    return open_project_store(root)

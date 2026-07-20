@@ -33,7 +33,7 @@ from danzaboss.workstation.runners import (
 class TestDetectRunners(unittest.TestCase):
     """Test 1 — detect_runners with injectable which."""
 
-    DETECTABLE = ["claude", "codex", "gemini", "grok", "opencode"]
+    DETECTABLE = ["claude", "codex", "gemini", "grok", "hermes", "opencode"]
 
     def test_detect_only_claude(self):
         def stub_which(binary):
@@ -257,9 +257,9 @@ class TestCatalogV2(unittest.TestCase):
     def test_catalog_has_five_real_runners_plus_generic(self):
         self.assertEqual(
             list(KNOWN_RUNNERS),
-            ["claude", "codex", "gemini", "grok", "opencode", "generic"],
+            ["claude", "codex", "gemini", "grok", "hermes", "opencode", "generic"],
         )
-        for name in ("claude", "codex", "gemini", "grok", "opencode"):
+        for name in ("claude", "codex", "gemini", "grok", "hermes", "opencode"):
             self.assertEqual(KNOWN_RUNNERS[name]["binary"], name)
         self.assertEqual(KNOWN_RUNNERS["generic"]["binary"], "")
 

@@ -692,14 +692,8 @@ async function loadProject() {
 let setupData = null;                    // last /api/setup payload
 const setup = { pick: null, error: "", notice: "", busy: false };
 
-const SEAT_VERBS = {
-  plan: "plan", build: "build", map: "map the codebase", qa: "test",
-  review: "review decisions", research: "research",
-  design: "design", security: "check security",
-};
-
 function initPick(s) {
-  return { seats: { conductor: "builtin", ...s.seats },
+  return { lineup: Array.isArray(s.lineup) ? [...s.lineup] : [],
     features_per_turn: s.features_per_turn };
 }
 
@@ -712,95 +706,96 @@ function agentChip(a) {
   return `<span class="chip mono dim">Not installed</span>`;
 }
 
-function agentCard(a) {
+function agentCard(a, pick) {
+  const selected = pick.lineup.includes(a.name);
+  const canSelect = a.detected && a.auth !== "unauthenticated";
+  const launch = a.detected
+    ? `<button class="chip" data-launch-boss="${esc(a.name)}">Launch client</button>`
+    : "";
+  const verify = a.detected
+    ? `<button class="chip" data-verify-boss="${esc(a.name)}">Verify connection</button>`
+    : "";
   return `<div class="agent-card${a.detected ? "" : " dim"}">
     <div class="agent-head"><b>${esc(a.display_name)}</b>${agentChip(a)}</div>
-    <p class="dim">${esc(a.strengths || "")}</p></div>`;
+    <p class="dim">${esc(a.strengths || "")}</p>
+    <div class="agent-actions">
+      <label class="boss-toggle">
+        <input type="checkbox" data-boss-select="${esc(a.name)}"
+          ${selected ? "checked" : ""}${canSelect ? "" : " disabled"}>
+        ${selected ? "In boss order" : "Add as boss"}
+      </label><div class="boss-actions">${launch}${verify}</div>
+    </div></div>`;
 }
 
-// Seatable = detected and not known to be logged out ("unprobed" counts) —
-// mirrors routing._connected so the pickers and the server agree.
-const seatable = (agents) =>
-  agents.filter((a) => a.detected && a.auth !== "unauthenticated");
-
-function characterRow(character) {
-  const current = setup.pick.seats[character.work_type] ?? "";
-  const available = seatable(setupData.agents);
-  const opts = available.map((a) =>
-    `<option value="${esc(a.name)}"${a.name === current ? " selected" : ""}>
-     ${esc(a.display_name)}</option>`).join("");
-  return `<div class="seat-row">
-    <div class="seat-name"><b>${esc(character.name)}</b>
-      <span>${esc(character.role)}</span>
-      <span class="dim">${esc(character.responsibility)}</span></div>
-    <select data-seat="${esc(character.work_type)}"${available.length ? "" : " disabled"}>
-      ${current ? "" : '<option value="" selected disabled>choose a connected AI…</option>'}
-      ${opts}</select>
-  </div>`;
+function agentDisplay(name, agents) {
+  return (agents.find((a) => a.name === name) || { display_name: name }).display_name;
 }
 
-// The confirm payload's lineup follows canonical character hierarchy. The
-// internal runtime controller remains a hidden built-in seat.
-function pickLineup(pick) {
-  const lineup = [];
-  for (const character of setupData.roster) {
-    const who = pick.seats[character.work_type];
-    if (who && who !== "builtin" && !lineup.includes(who)) lineup.push(who);
-  }
-  return lineup;
-}
-
-function teamSentences(pick, agents) {
-  const nameOf = (n) =>
-    (agents.find((a) => a.name === n) || { display_name: n }).display_name;
-  const jobs = new Map();
-  for (const [seat, verb] of Object.entries(SEAT_VERBS)) {
-    const who = pick.seats[seat];
-    if (!who) continue;
-    if (!jobs.has(who)) jobs.set(who, []);
-    jobs.get(who).push(verb);
-  }
-  const list = (v) => v.length > 1
-    ? `${v.slice(0, -1).join(", ")} and ${v[v.length - 1]}` : v[0];
-  const lines = [...jobs].map(([who, verbs]) =>
-    `${nameOf(who)} will ${list(verbs)}.`);
-  return lines;
+function bossLineup(pick, agents, activeName) {
+  if (!pick.lineup.length)
+    return `<div class="boss-empty">No bosses chosen yet. Add at least one connected client below.</div>`;
+  return `<ol class="boss-lineup">${pick.lineup.map((name, index) => {
+    const active = name === (activeName || pick.lineup[0]);
+    return `<li class="boss-card ${active ? "boss-active" : "boss-waiting"}">
+      <div class="boss-rank">${index + 1}</div>
+      <div class="boss-card-copy"><b>${esc(agentDisplay(name, agents))}</b>
+        <span class="mono">${active ? "ACTIVE TONY-D" : "WAITING FOR ITS TURN"}</span></div>
+      <div class="boss-controls">
+        <button class="chip" data-move-boss="up" data-boss-name="${esc(name)}"
+          ${index === 0 ? "disabled" : ""}>↑</button>
+        <button class="chip" data-move-boss="down" data-boss-name="${esc(name)}"
+          ${index === pick.lineup.length - 1 ? "disabled" : ""}>↓</button>
+      </div>
+    </li>`;
+  }).join("")}</ol>`;
 }
 
 function renderSetup() {
   const s = setupData;
   const pick = setup.pick;
+  const activeBoss = s.active_boss || pick.lineup[0];
+  const waitingBosses = Array.isArray(s.waiting_bosses)
+    ? s.waiting_bosses : pick.lineup.slice(1);
   const banner = [
     setup.error ? `<p class="warn mono">${esc(setup.error)}</p>` : "",
     setup.notice ? `<p class="ok">${esc(setup.notice)}</p>` : "",
     setup.busy ? `<p class="dim">saving your team…</p>` : "",
     s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : "",
   ].join("");
-  const agents = panel("Connected AI tools",
-    `<div class="agent-grid">${s.agents.map(agentCard).join("")}</div>
-     <p class="dim">Log in to an agent in your terminal, then come back —
-     this list updates on its own.</p>`);
-  const seats = panel("Who Does What",
-    s.roster.map(characterRow).join(""));
-  const turnSize = panel("Units per turn", `
-    <label class="field" for="features-per-turn">Verified atomic units per AI turn</label>
-    <select id="features-per-turn">
-      <option value="2"${pick.features_per_turn === 2 ? " selected" : ""}>2</option>
-      <option value="3"${pick.features_per_turn === 3 ? " selected" : ""}>3</option>
-      <option value="4"${pick.features_per_turn === 4 ? " selected" : ""}>4</option>
-      <option value="5"${pick.features_per_turn === 5 ? " selected" : ""}>5</option>
-    </select>
-    <p class="dim">These are verified atomic units per AI turn — not tokens
-    or power.</p>`);
-  const sentences = teamSentences(pick, s.agents);
-  const team = panel("Your team", `
+  const hero = `<section class="boss-hero">
+    <div class="boss-kicker mono">YOUR AI TEAM</div>
+    <h1>WHO’S THE BOSS?</h1>
+    <p class="boss-lede">Choose <b>1–4 models to help build your ideas</b>.
+      Put them in order. The highlighted model works now; the others wait.</p>
+    <div class="boss-feature-choice">
+      <label for="features-per-turn">Verified features completed per turn</label>
+      <select id="features-per-turn">
+        <option value="2"${pick.features_per_turn === 2 ? " selected" : ""}>2 recommended</option>
+        <option value="3"${pick.features_per_turn === 3 ? " selected" : ""}>3</option>
+        <option value="4"${pick.features_per_turn === 4 ? " selected" : ""}>4</option>
+        <option value="5"${pick.features_per_turn === 5 ? " selected" : ""}>5</option>
+      </select>
+      <span>Choose between 2 and 5. A feature counts after verification.</span>
+    </div>
+    <p class="connection-note">Launch opens a project-only tmux session for the
+      client. Sign in there once, then return here and verify the connection.</p>
+  </section>`;
+  const lineup = panel("Boss order", `
+    <div id="boss-lineup">${bossLineup(pick, s.agents, s.active_boss)}</div>
+    <p class="dim">Use the arrows to set the handoff order. Waiting bosses do not
+      run specialist work until their turn.</p>`);
+  const agents = panel("Connect and choose bosses",
+    `<div class="agent-grid">${s.agents.map((a) => agentCard(a, pick)).join("")}</div>
+     <p class="dim">Launch a client from its card, sign in if needed, then
+       verify it. Only selected bosses enter this project’s rotation.</p>`);
+  const team = panel("Ready to activate", `
     ${s.setup_complete ? `<p class="ok">Team confirmed — Project is
       unlocked. Confirm again any time to change it.</p>` : ""}
-    ${sentences.length
-      ? sentences.map((t) => `<p>${esc(t)}</p>`).join("")
-      : `<p class="dim">Pick at least one agent to see your team.</p>`}
-    <button id="confirm-team" class="chip">Confirm team</button>`);
-  $("#setup-panel").innerHTML = banner + agents + seats + turnSize + team;
+    <div class="ready-summary"><b>${activeBoss ? esc(agentDisplay(activeBoss, s.agents)) : "No active boss"}</b>
+      <span>is active Tony-D for this turn.</span>
+      <span>${waitingBosses.length ? `${waitingBosses.length} boss${waitingBosses.length === 1 ? "" : "es"} wait in order.` : "No waiting bosses."}</span></div>
+    <button id="confirm-team" class="boss-confirm">Save boss order and continue</button>`);
+  $("#setup-panel").innerHTML = banner + hero + lineup + agents + team;
   wireSetup();
 }
 
@@ -814,7 +809,7 @@ async function setupAction(fn) {
     const out = await fn();
     setupData = out.setup;
     setup.pick = initPick(setupData);
-    setup.notice = "Team saved.";
+    if (!setup.notice) setup.notice = "Boss order saved.";
   } catch (e) {
     setup.error = e.message;
   }
@@ -829,23 +824,53 @@ function wireSetup() {
     pick.features_per_turn = Number(features.value);
     renderSetup();
   });
-  $$("[data-seat]").forEach((sel) => sel.addEventListener("change", () => {
-    pick.seats[sel.dataset.seat] = sel.value;
-    renderSetup();                       // team sentences follow the seats
+  $$('[data-boss-select]').forEach((box) => box.addEventListener("change", () => {
+    const name = box.dataset.bossSelect;
+    if (box.checked && !pick.lineup.includes(name)) pick.lineup.push(name);
+    if (!box.checked) pick.lineup = pick.lineup.filter((item) => item !== name);
+    renderSetup();
+  }));
+  $$('[data-move-boss]').forEach((button) => button.addEventListener("click", () => {
+    const index = pick.lineup.indexOf(button.dataset.bossName);
+    const next = button.dataset.moveBoss === "up" ? index - 1 : index + 1;
+    if (index < 0 || next < 0 || next >= pick.lineup.length) return;
+    [pick.lineup[index], pick.lineup[next]] = [pick.lineup[next], pick.lineup[index]];
+    renderSetup();
   }));
   const confirm = $("#confirm-team");
+  const launchRunner = (runner) => setupAction(async () => {
+    const out = await post("api/connection/launch", { runner });
+    setupData = out.setup;
+    setup.pick = initPick(setupData);
+    setup.notice = `${runner} is running. Sign in with: ${out.launch.attach_command}. ` +
+      "Then return and click Verify connection.";
+    return { setup: setupData };
+  });
+  const verifyRunner = (runner) => setupAction(async () => {
+    const out = await post("api/connection/verify", { runner });
+    setupData = await api("api/setup");
+    setup.pick = initPick(setupData);
+    setup.notice = out.installation && out.installation.status === "verified"
+      ? "Installation verified — UI, CORTEX, project, and AI connection are working."
+      : "AI connection verified. Onboarding is now available.";
+    return { setup: setupData };
+  });
+  $$('[data-launch-boss]').forEach((button) => button.addEventListener("click", () =>
+    launchRunner(button.dataset.launchBoss)));
+  $$('[data-verify-boss]').forEach((button) => button.addEventListener("click", () => {
+    verifyRunner(button.dataset.verifyBoss);
+  }));
   if (confirm) confirm.addEventListener("click", () => {
-    const lineup = pickLineup(pick);
-    // 1-5 agents (the server re-validates — it stays authoritative)
-    if (!lineup.length) {
+    // 1-4 bosses (the server re-validates — it stays authoritative)
+    if (!pick.lineup.length) {
       setup.error = "pick at least one agent before confirming";
       return renderSetup();
     }
-    if (lineup.length > 5) {
-      setup.error = "a team holds at most 5 agents — share some seats";
+    if (pick.lineup.length > 4) {
+      setup.error = "the boss rotation holds at most 4 models";
       return renderSetup();
     }
-    setupAction(() => post("api/setup", { lineup, seats: pick.seats,
+    setupAction(() => post("api/setup", { lineup: pick.lineup,
       features_per_turn: pick.features_per_turn }));
   });
 }
@@ -864,7 +889,8 @@ const build = { error: "", busy: false, advanced: false,
 // Runner ids -> plain names for event lines. The event API retains its
 // internal implementation name; the catalog name is what a human reads.
 const RUNNER_NAMES = { claude: "Claude Code", codex: "Codex",
-  gemini: "Gemini CLI", grok: "Grok CLI", opencode: "OpenCode" };
+  gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes Agent",
+  opencode: "OpenCode" };
 const runnerName = (n) => RUNNER_NAMES[n] || n || "the next AI";
 
 // One friendly sentence per runtime event; raw JSONL stays under Advanced.
