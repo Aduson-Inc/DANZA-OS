@@ -38,10 +38,10 @@ class InstallShStructure(unittest.TestCase):
         for knob in ("DANZA_VERSION", "DANZA_BIN_DIR", "CONFIGURE"):
             self.assertIn(knob, self.text, f"missing env knob {knob}")
 
-    def test_installs_from_pinned_production_branch(self):
+    def test_installs_from_pinned_test_branch(self):
         self.assertIn('REPO_URL="https://github.com/Aduson-Inc/DANZA-OS"',
                       self.text)
-        self.assertIn('DANZA_BRANCH="Production-DANZABOSS"', self.text)
+        self.assertIn('DANZA_BRANCH="codex/production-danzaboss-install-flow"', self.text)
         self.assertNotIn("@main", self.text)
         self.assertIn("install.py", self.text)
 

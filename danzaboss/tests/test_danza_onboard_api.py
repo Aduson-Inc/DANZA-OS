@@ -41,7 +41,7 @@ def install_stub_boss(root: Path, body: str, headless: bool = True) -> Path:
                              "interactive": [sys.executable, str(script)],
                              "headless": ([sys.executable, str(script)]
                                           if headless else []),
-                             "detected": True}}}
+                             "detected": True, "auth": "ok"}}}
     path = root / RUNNERS_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config), encoding="utf-8")

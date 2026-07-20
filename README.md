@@ -45,21 +45,21 @@ whole-product and browser qualification remain part of that task.
 The Linux and macOS commands below use Bash. Windows PowerShell has a matching
 installer. The first release contract covers Linux, macOS, and Windows.
 
-## Install the `Production-DANZABOSS` Branch
+## Install the temporary guided-flow branch
 
-The public installer is pinned to the `Production-DANZABOSS` branch. It can be
-run from an empty folder or an existing Git repository.
+The test installer is pinned to `codex/production-danzaboss-install-flow`. It
+can be run from an empty folder or an existing Git repository.
 
 On Linux or macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/codex/production-danzaboss-install-flow/install.sh | bash
 ```
 
 On Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.ps1 | iex
+irm https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/codex/production-danzaboss-install-flow/install.ps1 | iex
 ```
 
 The installer detects Python 3.10+, Git, and the Python virtual-environment
@@ -75,7 +75,7 @@ becomes the user's `APP_BUILD`.
 ```bash
 mkdir my-app
 cd my-app
-curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/codex/production-danzaboss-install-flow/install.sh | bash
 ```
 
 For an existing Git repository, enter its root and run the same installer. The
@@ -85,15 +85,15 @@ dashboard opens at:
 http://localhost:33000
 ```
 
-In Setup, choose or launch an AI client/model and select **Verify connection**.
+In Setup, follow the four large steps: choose 1–4 clients, press Connect and
+complete each provider’s native sign-in, press Verify, then set boss order.
 Onboarding remains locked until the connection check succeeds. Tony-D runs
-onboarding only when no valid runtime handoff exists.
+onboarding only when no valid runtime handoff exists. DANZABOSS opens the
+provider client in a project terminal; you do not need to type tmux commands.
 
-During this factory test, inspect the `profile` and `cortex` lines printed by
-`danza doctor .`. The application repository must be recognized as
-`APP_BUILD`, and CORTEX must be available there. If doctor reports `OS_DEV` or
-says CORTEX is dormant inside `my-app`, stop and save the complete output as a
-factory activation defect.
+During this factory test, `danza doctor .` should report the target project as
+active and CORTEX as available under that project. Save the complete output if
+either check fails.
 
 ## Use PROJECT
 

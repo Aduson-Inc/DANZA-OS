@@ -56,7 +56,8 @@ from .planner import (PLAN_JSON_RELPATH, PLAN_MD_RELPATH, PlanningError,
                       PlanningUnavailable, parse_plan, propose_plan,
                       run_planning)
 from .runners import (RUNNERS_RELPATH, RunnerError, build_registry,
-                      headless_argv, load_runners, save_runners)
+                      headless_argv, load_runners, runner_state,
+                      save_runners)
 from .state import STATE_RELPATH
 from .tree import APP_PROJECT_TYPES
 from .wizard import Wizard, WizardError
@@ -332,12 +333,17 @@ def setup_complete(root: str) -> bool:
 
 
 def setup_summary(root: str) -> dict:
-    """Everything the SETUP tab needs: live agent registry, persisted (or
-    suggested) seats, conductor, and the gate state."""
+    """Everything the SETUP tab needs: live agent registry and saved team.
+
+    A fresh project is intentionally unassigned. Detection tells the user
+    what is available; it must never choose a boss or specialist assignment
+    before the user confirms the team.
+    """
     config = _live_registry()
     agents = [{"name": name, "display_name": entry["display_name"],
                "strengths": entry["strengths"],
-               "detected": entry["detected"], "auth": entry["auth"]}
+               "detected": entry["detected"], "auth": entry["auth"],
+               "state": runner_state(entry)}
               for name, entry in config["runners"].items()
               if entry["binary"]]  # the generic copy-me template is no card
     lineup: list = []
@@ -352,15 +358,9 @@ def setup_summary(root: str) -> dict:
         features_per_turn = persisted["features_per_turn"]
     except (RunnerError, routing_mod.RoutingError) as e:
         # a routing file that EXISTS but can't be trusted is reported, never
-        # hidden; plain absence silently falls through to the suggestion
+        # hidden; plain absence remains empty until the user confirms a team
         if (Path(root) / routing_mod.ROUTING_RELPATH).exists():
             routing_error = str(e)
-        try:
-            seats = routing_mod.suggest_seats(config)
-            lineup = [name for name in config["runners"]
-                      if name in set(seats.values())]
-        except routing_mod.RoutingError:
-            pass  # nothing connected: no team to suggest — honest emptiness
     active_boss = lineup[0] if lineup else None
     if boss_mode == "sequential" and lineup:
         team_state, _ = _team_state(root)

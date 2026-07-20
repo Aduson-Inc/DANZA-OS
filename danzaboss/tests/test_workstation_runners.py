@@ -25,6 +25,7 @@ from danzaboss.workstation.runners import (
     interactive_argv,
     load_runners,
     probe_auth,
+    runner_state,
     save_runners,
     validate_config,
 )
@@ -319,7 +320,7 @@ class TestProbeAuth(unittest.TestCase):
         entry = self._entry()
         self.assertEqual(probe_auth(entry, run=fake_run), "ok")
         argv, kwargs = calls[0]
-        self.assertEqual(argv, entry["headless"] + [self.PROMPT])
+        self.assertEqual(argv, entry["authcheck"])
         self.assertTrue(kwargs["capture_output"])
         self.assertTrue(kwargs["text"])
         self.assertEqual(kwargs["timeout"], 30)
@@ -343,10 +344,42 @@ class TestProbeAuth(unittest.TestCase):
         def explode(argv, **kwargs):
             raise AssertionError("probe must not invoke run for unprobed entries")
 
-        self.assertEqual(
-            probe_auth(self._entry(headless=[]), run=explode), "unprobed")
+        entry = self._entry(headless=[])
+        entry.pop("authcheck", None)
+        self.assertEqual(probe_auth(entry, run=explode), "unprobed")
         self.assertEqual(
             probe_auth(self._entry(detected=False), run=explode), "unprobed")
+
+    def test_codex_uses_native_login_status_without_model_prompt(self):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0)
+
+        entry = copy.deepcopy(KNOWN_RUNNERS["codex"])
+        entry["detected"] = True
+        self.assertEqual(probe_auth(entry, run=fake_run), "ok")
+        self.assertEqual(calls[0][0], ["codex", "login", "status"])
+
+    def test_codex_native_login_status_failure_is_unauthenticated(self):
+        entry = copy.deepcopy(KNOWN_RUNNERS["codex"])
+        entry["detected"] = True
+        self.assertEqual(
+            probe_auth(entry, run=lambda *args, **kwargs:
+                       SimpleNamespace(returncode=1)),
+            "unauthenticated")
+
+    def test_runner_state_never_calls_unprobed_connected(self):
+        self.assertEqual(runner_state({"detected": False, "auth": "unprobed"}),
+                         "not_installed")
+        self.assertEqual(runner_state({"detected": True, "auth": "ok"}),
+                         "verified")
+        self.assertEqual(
+            runner_state({"detected": True, "auth": "unauthenticated"}),
+            "needs_sign_in")
+        self.assertEqual(runner_state({"detected": True, "auth": "unprobed"}),
+                         "verification_unavailable")
 
     def test_build_registry_stamps_auth(self):
         def which(binary):
@@ -358,8 +391,8 @@ class TestProbeAuth(unittest.TestCase):
         cfg = build_registry(which=which, run=fake_run)
         # detected + headless-capable → probed ok
         self.assertEqual(cfg["runners"]["claude"]["auth"], "ok")
-        # detected but headless-less → unprobed (no call made)
-        self.assertEqual(cfg["runners"]["codex"]["auth"], "unprobed")
+        # Codex uses its native read-only login status command.
+        self.assertEqual(cfg["runners"]["codex"]["auth"], "ok")
         # undetected → unprobed
         self.assertEqual(cfg["runners"]["gemini"]["auth"], "unprobed")
         # a build_registry result is a valid config as-is
@@ -387,6 +420,15 @@ class TestKnownRunners(unittest.TestCase):
         self.assertEqual(c["binary"], "claude")
         self.assertEqual(c["interactive"], ["claude"])
         self.assertEqual(c["headless"], ["claude", "-p", "--output-format", "json"])
+        self.assertEqual(c["authcheck"], ["claude", "doctor"])
+
+    def test_native_authchecks_are_read_only_commands(self):
+        self.assertEqual(KNOWN_RUNNERS["grok"]["authcheck"],
+                         ["grok", "models"])
+        self.assertEqual(KNOWN_RUNNERS["opencode"]["authcheck"],
+                         ["opencode", "auth", "list"])
+        self.assertEqual(KNOWN_RUNNERS["gemini"]["headless"],
+                         ["gemini", "--output-format", "json", "-p"])
 
     def test_codex_entry_present(self):
         self.assertIn("codex", KNOWN_RUNNERS)
@@ -394,6 +436,7 @@ class TestKnownRunners(unittest.TestCase):
         self.assertEqual(c["binary"], "codex")
         self.assertEqual(c["interactive"], ["codex"])
         self.assertEqual(c["headless"], [])
+        self.assertEqual(c["authcheck"], ["codex", "login", "status"])
 
     def test_schema_version_is_2(self):
         self.assertEqual(SCHEMA_VERSION, 2)

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # DANZABOSS cross-platform bootstrap for POSIX shells.
-# Public source is intentionally pinned to Production-DANZABOSS.
+# Temporary guided-flow test source; change this when the branch is promoted.
 set -euo pipefail
 
 REPO_URL="https://github.com/Aduson-Inc/DANZA-OS"
-DANZA_BRANCH="Production-DANZABOSS"
+DANZA_BRANCH="codex/production-danzaboss-install-flow"
 RAW_BASE="https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/${DANZA_BRANCH}"
-DANZA_VERSION="${DANZA_VERSION:-Production-DANZABOSS}"
+DANZA_VERSION="${DANZA_VERSION:-codex/production-danzaboss-install-flow}"
 DANZA_BIN_DIR="${DANZA_BIN_DIR:-$HOME/.local/bin}"
 CONFIGURE="${CONFIGURE:-1}"
 

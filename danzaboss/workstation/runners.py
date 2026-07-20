@@ -7,11 +7,9 @@ and what argv to pass for each invocation mode. This is the single source of
 truth; every other module imports from here rather than hard-coding runner names.
 
 Presence vs. auth: detect_runners checks binary presence via shutil.which;
-probe_auth confirms authentication by running one cheap headless no-op through
-the runner's own CLI. build_registry combines both: detect → default_config →
-probe, stamping every entry with auth ∈ ("ok", "unauthenticated", "unprobed").
-Runners without a headless argv cannot be probed and stay "unprobed" —
-potentially usable, but unconfirmed.
+probe_auth confirms authentication through a provider-native read-only status
+command when one exists, otherwise through a cheap headless no-op. The
+registry never treats binary presence as proof of authentication.
 """
 from __future__ import annotations
 
@@ -41,6 +39,8 @@ RUNNERS_RELPATH: Path = Path(".danza") / "runtime" / "runners.json"
 # "typed" = typed into the session after launch).
 KNOWN_RUNNERS: dict[str, dict] = {
     "claude": {
+        # Claude Code documents ``doctor`` as its local diagnostic command;
+        # it is safer than spending a model turn on a probe.
         "kind": "cli", "binary": "claude",
         "display_name": "Claude Code",
         "strengths": "Deep reasoning, complex building, careful review",
@@ -48,12 +48,12 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "activation": "argv",
         "interactive": ["claude"],
         "headless": ["claude", "-p", "--output-format", "json"],
+        "authcheck": ["claude", "doctor"],
     },
     "codex": {
-        # Headless mode is not yet supported for codex (empty list signals
-        # this). headless_argv will raise RunnerError rather than returning an
-        # empty command — callers must not attempt headless dispatch for codex
-        # until this is filled in.
+        # Codex exposes a local, read-only login status command. It is the
+        # authentication probe; invoking a model for a probe would be wasteful
+        # and could incur usage.
         "kind": "cli", "binary": "codex",
         "display_name": "Codex",
         "strengths": "Fast, focused code edits",
@@ -61,6 +61,7 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "activation": "argv",
         "interactive": ["codex"],
         "headless": [],
+        "authcheck": ["codex", "login", "status"],
     },
     "gemini": {
         "kind": "cli", "binary": "gemini",
@@ -69,9 +70,14 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "suggested_seats": ["research", "map"],
         "activation": "argv",
         "interactive": ["gemini"],
-        "headless": [],
+        # Gemini documents ``-p`` as its non-interactive mode. This is a
+        # real, bounded connection check because Gemini exposes no separate
+        # local auth-status command.
+        "headless": ["gemini", "--output-format", "json", "-p"],
     },
     "grok": {
+        # ``grok models`` is a documented read-only catalog command and
+        # exercises the provider session without sending a model prompt.
         "kind": "cli", "binary": "grok",
         "display_name": "Grok CLI",
         "strengths": "Quick answers and fast iteration",
@@ -79,6 +85,7 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "activation": "argv",
         "interactive": ["grok"],
         "headless": [],
+        "authcheck": ["grok", "models"],
     },
     "hermes": {
         "kind": "cli", "binary": "hermes",
@@ -90,6 +97,8 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "headless": [],
     },
     "opencode": {
+        # OpenCode documents ``auth list`` for inspecting configured provider
+        # credentials; it does not consume a model request.
         "kind": "cli", "binary": "opencode",
         "display_name": "OpenCode",
         "strengths": "Flexible open-source coding",
@@ -97,6 +106,7 @@ KNOWN_RUNNERS: dict[str, dict] = {
         "activation": "argv",
         "interactive": ["opencode"],
         "headless": [],
+        "authcheck": ["opencode", "auth", "list"],
     },
     # Copy-me template for any other CLI. Empty binary => never detected;
     # excluded from detect_runners results and from lineups.
@@ -155,8 +165,13 @@ def detect_runners(
 
 
 def probe_auth(entry: dict, run: Callable = subprocess.run) -> str:
-    """Probe whether a runner entry is actually authenticated by running one
-    cheap headless no-op. Returns "ok", "unauthenticated", or "unprobed".
+    """Probe whether a runner entry is actually authenticated.
+
+    Provider-native ``authcheck`` commands are preferred because they are
+    read-only and do not consume model usage. A headless no-op remains the
+    fallback for providers that explicitly support it.
+
+    Returns "ok", "unauthenticated", or "unprobed".
 
     Injectable *run* mirrors detect_runners' injectable *which* — tests pass a
     double; production uses subprocess.run. Entries that are undetected or
@@ -164,15 +179,33 @@ def probe_auth(entry: dict, run: Callable = subprocess.run) -> str:
     subprocess call. Exit 0 → "ok"; a nonzero exit, a timeout, or an OSError
     (binary vanished between detect and probe) → "unauthenticated" — fail
     closed rather than assuming credentials exist."""
-    if not entry.get("detected", False) or not entry["headless"]:
+    if not entry.get("detected", False):
         return "unprobed"
-    argv = list(entry["headless"]) + [_PROBE_PROMPT]
+    authcheck = entry.get("authcheck")
+    if authcheck:
+        argv = list(authcheck)
+    elif entry.get("headless"):
+        argv = list(entry["headless"]) + [_PROBE_PROMPT]
+    else:
+        return "unprobed"
     try:
         result = run(argv, capture_output=True, text=True,
                      timeout=_PROBE_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return "unauthenticated"
     return "ok" if result.returncode == 0 else "unauthenticated"
+
+
+def runner_state(entry: dict) -> str:
+    """Return the plain-language connection state for one runner card."""
+    if not entry.get("detected", False):
+        return "not_installed"
+    auth = entry.get("auth")
+    if auth == "ok":
+        return "verified"
+    if auth == "unauthenticated":
+        return "needs_sign_in"
+    return "verification_unavailable"
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +327,12 @@ def validate_config(config: object) -> dict:
                     f"runner {name!r}.{argv_key} must be a list of strings; "
                     f"found non-string element"
                 )
+        if "authcheck" in entry:
+            authcheck = entry["authcheck"]
+            if not isinstance(authcheck, list) or not all(
+                    isinstance(s, str) for s in authcheck):
+                raise RunnerError(
+                    f"runner {name!r}.authcheck must be a list of strings")
 
     # An unauthenticated boss can never take a turn — reject at validation
     # time so the bad state is caught at save/load, not mid-relay. (Lineup

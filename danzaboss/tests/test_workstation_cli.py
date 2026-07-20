@@ -89,6 +89,7 @@ class ConductCmd(unittest.TestCase):
         (self.root / ".danza" / "runtime").mkdir(parents=True, exist_ok=True)
         config = runners_mod.default_config({"claude": True, "codex": False})
         config["session_host"] = "headless"
+        config["runners"]["claude"]["auth"] = "ok"
         runners_mod.save_runners(self.root, config)
 
     def _init_state(self):

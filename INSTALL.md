@@ -1,26 +1,28 @@
 # Installing DANZA-OS
 
 DANZA-OS is packaged by `pyproject.toml` and requires Python 3.10 or newer.
-The supported public installer is pinned to the `Production-DANZABOSS` branch.
-It works from an empty folder or an existing Git repository.
+This temporary guided-flow test installer is pinned to the
+`codex/production-danzaboss-install-flow` branch. It works from an empty folder
+or an existing Git repository.
 
 Linux and macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/codex/production-danzaboss-install-flow/install.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/Production-DANZABOSS/install.ps1 | iex
+irm https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/codex/production-danzaboss-install-flow/install.ps1 | iex
 ```
 
 The installer checks mandatory dependencies, explains them, requests approval
 before installing, writes the packaged payload, initializes project-local
-CORTEX, starts the dashboard on `http://localhost:33000`, and reports the AI
-connection as pending until Setup verifies it. tmux is optional and is not
-installed by the installer.
+CORTEX, starts the dashboard on `http://localhost:33000`, and opens the browser.
+Setup then walks through choosing clients, native sign-in, connection
+verification, and boss order. tmux is an internal session host and is never a
+user prerequisite or a manual first step.
 
 ## Initialize a target application
 

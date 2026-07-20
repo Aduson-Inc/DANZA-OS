@@ -71,15 +71,17 @@ class RoutingError(ValueError):
 # ---------------------------------------------------------------------------
 
 def _connected(config: dict) -> list[str]:
-    """Runner names usable for seating: detected and not known to be logged
-    out ("unprobed" counts — the runner may work, and excluding it would
-    leave probeless CLIs permanently unseatable). KNOWN_RUNNERS order so
-    ties resolve the same way as boss selection in default_config."""
+    """Runner names usable for seating: detected and verified.
+
+    Presence is not authentication. A client whose provider status is
+    unavailable must remain outside the team until the connection path can
+    prove it works.
+    """
     runners = config.get("runners", {})
     return [name for name in KNOWN_RUNNERS
             if name in runners
             and runners[name].get("detected", False)
-            and runners[name].get("auth") != "unauthenticated"]
+            and runners[name].get("auth") == "ok"]
 
 
 def suggest_seats(config: dict) -> dict:
@@ -171,10 +173,14 @@ def validate_routing(routing: object, config: dict) -> dict:
                 f"lineup member {name!r} is not installed — open the "
                 f"dashboard SETUP tab to rebuild your team"
             )
-        if entry.get("auth") == "unauthenticated":
+        if entry.get("auth") != "ok":
+            if entry.get("auth") == "unauthenticated":
+                reason = "not logged in"
+            else:
+                reason = "connection has not been verified"
             raise RoutingError(
-                f"lineup member {name!r} is not logged in — open the "
-                f"dashboard SETUP tab to reconnect your agents"
+                f"lineup member {name!r} is {reason} — open the dashboard "
+                f"SETUP tab to reconnect and verify the agent"
             )
 
     seats = routing.get("seats")

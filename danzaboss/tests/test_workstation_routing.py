@@ -110,6 +110,11 @@ class TestSuggestSeats(unittest.TestCase):
         cfg = _config({"claude": "ok", "codex": "unprobed"})
         self.assertEqual(suggest_seats(cfg), suggest_seats(cfg))
 
+    def test_unprobed_runner_is_not_seated(self):
+        cfg = _config({"claude": "unprobed"})
+        with self.assertRaises(RoutingError):
+            suggest_seats(cfg)
+
     def test_unauthenticated_runner_never_seated(self):
         cfg = _config({"claude": "unauthenticated", "codex": "ok"})
         seats = suggest_seats(cfg)
@@ -184,6 +189,12 @@ class TestValidateRouting(unittest.TestCase):
         cfg = _config({"claude": "ok", "codex": "unauthenticated"})
         routing = _routing(["claude", "codex"], _full_seats("claude"))
         with self.assertRaises(RoutingError):
+            validate_routing(routing, cfg)
+
+    def test_rejects_unprobed_lineup_member(self):
+        cfg = _config({"claude": "ok", "codex": "unprobed"})
+        routing = _routing(["claude", "codex"], _full_seats("claude"))
+        with self.assertRaisesRegex(RoutingError, "not been verified"):
             validate_routing(routing, cfg)
 
     def test_rejects_undetected_lineup_member(self):

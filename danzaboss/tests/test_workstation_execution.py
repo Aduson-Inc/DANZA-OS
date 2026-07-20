@@ -37,6 +37,8 @@ class ExecutionFixture(unittest.TestCase):
         self.manager.init(mode="relay", current_boss="claude",
                           max_features_per_turn=2)
         config = default_config({"claude": True, "codex": True})
+        config["runners"]["claude"]["auth"] = "ok"
+        config["runners"]["codex"]["auth"] = "ok"
         save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR

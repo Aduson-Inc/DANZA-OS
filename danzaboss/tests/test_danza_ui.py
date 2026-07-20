@@ -516,6 +516,12 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, css = get(self.port, "/static/app.css")
         self.assertNotIn(b'url("/static/', css)
 
+    def test_front_end_hides_internal_execution_profile_names(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        self.assertIn('textContent = "DANZA-OS"', js)
+        self.assertNotIn("o.profile.name", js)
+
     def test_onboard_form_wiring_present(self):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
@@ -566,10 +572,11 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
         for marker in ("api/setup", "loadSetup", "WHO’S THE BOSS?",
-                       "boss-lineup", "Choose <b>1–4 models to help build your ideas</b>",
-                       "api/connection/launch", "Launch client", "2 recommended",
+                       "boss-lineup", "Connect <b>1–4 AI clients</b>",
+                       "setup-steps", "Choose clients", "Sign in", "Set order",
+                       "api/connection/launch", "Connect", "2 recommended",
                        "active Tony-D", "WAITING FOR ITS TURN",
-                       "api/connection/verify", "Verify connection",
+                       "api/connection/verify", "Verify",
                        "s.active_boss", "s.waiting_bosses",
                        "features-per-turn",
                        "features_per_turn: pick.features_per_turn"):
@@ -578,7 +585,9 @@ class TestDashboardStatic(unittest.TestCase):
                         "s.roster.map(characterRow)", "data-seat",
                         "SEAT_VERBS", "pickLineup", "Verify AI connection",
                         "Specialist roles", "ONE ACTIVE BOSS", "NO ROLE THEATRE",
-                        "boss-hero-grid", "connection-runner", "turnSize"):
+                        "boss-hero-grid", "connection-runner", "turnSize",
+                        "Launch client", "Verify connection",
+                        "Found, not logged in", "Add as boss"):
             self.assertNotIn(removed, js)
         for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
             self.assertIn(value, js)
@@ -682,7 +691,7 @@ def seed_confirmed_setup(root):
                   "display_name": "Stub", "strengths": "",
                   "suggested_seats": [], "activation": "argv",
                   "full_power_extra_argv": [], "interactive": ["stub"],
-                  "headless": [], "detected": True, "auth": "unprobed"}}}
+                  "headless": [], "detected": True, "auth": "ok"}}}
     (Path(root) / RUNNERS_RELPATH).write_text(json.dumps(config))
     routing = {"version": ROUTING_SCHEMA_VERSION, "features_per_turn": 2,
                "lineup": ["stub"], "seats": team_seats("stub")}
@@ -709,7 +718,7 @@ class TestSetupApi(unittest.TestCase):
         server_mod._BUILD_REGISTRY, server_mod._REGISTRY_CLOCK = self._saved
         server_mod._reset_registry_cache()
 
-    def test_get_setup_reports_agents_and_suggested_seats(self):
+    def test_get_setup_reports_agents_without_auto_selecting_clients(self):
         status, _, raw = get(self.port, "/api/setup")
         self.assertEqual(status, 200)
         o = json.loads(raw)
@@ -721,16 +730,19 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(claude["display_name"], "Claude Code")
         self.assertTrue(claude["detected"])
         self.assertEqual(claude["auth"], "ok")
+        self.assertEqual(claude["state"], "verified")
         codex = o["agents"][1]
         self.assertFalse(codex["detected"])
         self.assertEqual(codex["auth"], "unprobed")
-        # routing.json absent -> strengths-based suggestion fills the seats
-        self.assertEqual(o["lineup"], ["claude", "gemini"])
-        self.assertEqual(o["seats"]["conductor"], "builtin")
-        self.assertEqual(o["seats"]["build"], "claude")
-        self.assertEqual(o["seats"]["research"], "gemini")
-        self.assertEqual(o["seats"]["map"], "gemini")
-        self.assertEqual(o["conductor"], "builtin")
+        self.assertEqual(codex["state"], "not_installed")
+        gemini = o["agents"][2]
+        self.assertEqual(gemini["state"], "verified")
+        # A fresh project is intentionally empty. Detection never chooses a
+        # boss or specialist assignment on the user's behalf.
+        self.assertEqual(o["lineup"], [])
+        self.assertEqual(o["seats"], {})
+        self.assertIsNone(o["active_boss"])
+        self.assertEqual(o["waiting_bosses"], [])
         self.assertEqual(o["features_per_turn"], 2)
         self.assertIn("roster", o)
         self.assertEqual(
@@ -747,6 +759,15 @@ class TestSetupApi(unittest.TestCase):
         for removed in ("dial", "overrides", "floors", "budgets_error"):
             self.assertNotIn(removed, o)
         self.assertFalse(o["setup_complete"])
+
+    def test_setup_summary_reports_provider_states(self):
+        server_mod._BUILD_REGISTRY = lambda: fake_registry(
+            auth={"claude": "unauthenticated", "gemini": "unprobed"})
+        server_mod._reset_registry_cache()
+        summary = server_mod.setup_summary(self.root)
+        states = {agent["name"]: agent["state"] for agent in summary["agents"]}
+        self.assertEqual(states["claude"], "needs_sign_in")
+        self.assertEqual(states["gemini"], "verification_unavailable")
 
     def test_post_setup_writes_only_runners_and_routing(self):
         body = {"lineup": ["claude", "gemini"],

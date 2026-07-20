@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Repository = "https://github.com/Aduson-Inc/DANZA-OS"
-$Branch = "Production-DANZABOSS"
+$Branch = "codex/production-danzaboss-install-flow"
 $RawBase = "https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/$Branch"
 
 function Fail([string]$Message) {

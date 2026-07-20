@@ -45,7 +45,7 @@ function projectPanel(o) {
   return panel("Project", `<table class="kv">
     ${row("name", `<b>${esc(o.project)}</b>`)}
     ${row("root", `<span class="mono dim">${esc(o.root)}</span>`)}
-    ${row("profile", `<span class="chip mono">${esc(o.profile.name)}</span>`)}
+    ${row("workspace", `<span class="chip mono">DANZA-OS</span>`)}
     ${row("project brief", o.spec_exists ? "ready (spec.md)"
                                 : '<span class="dim">not written yet</span>')}
   </table>`);
@@ -137,7 +137,8 @@ function logLine(e) {
 
 async function loadOverview() {
   const o = await api("api/overview");
-  $("#profile-chip").textContent = o.profile.name;
+  $("#profile-chip").textContent = "DANZA-OS";
+  $("#profile-chip").title = "DANZA-OS workspace";
   $("#overview-grid").innerHTML =
     projectPanel(o) + teamPanel(o) + planPanel(o) + cortexPanel(o) +
     tokensPanel(o);
@@ -690,7 +691,7 @@ async function loadProject() {
 
 /* ---------- setup (Phase 4: confirm your AI team) ---------- */
 let setupData = null;                    // last /api/setup payload
-const setup = { pick: null, error: "", notice: "", busy: false };
+const setup = { pick: null, error: "", notice: "", fallback: "", busy: false };
 
 function initPick(s) {
   return { lineup: Array.isArray(s.lineup) ? [...s.lineup] : [],
@@ -698,31 +699,49 @@ function initPick(s) {
 }
 
 function agentChip(a) {
-  if (a.detected && a.auth === "unauthenticated")
-    return `<span class="chip mono chip-bad">Found, not logged in</span>`;
-  if (a.detected && a.auth === "ok")
-    return `<span class="chip mono chip-ok">Connected</span>`;
-  if (a.detected) return `<span class="chip mono chip-dim">Found</span>`;
-  return `<span class="chip mono dim">Not installed</span>`;
+  const labels = {
+    verified: ["Ready", "chip-ok"],
+    needs_sign_in: ["Needs sign-in", "chip-bad"],
+    verification_unavailable: ["Check unavailable", "chip-dim"],
+    not_installed: ["Not installed", "dim"],
+  };
+  const [label, cls] = labels[a.state] || ["Not checked", "chip-dim"];
+  return `<span class="chip mono ${cls}">${label}</span>`;
+}
+
+function agentInstruction(a) {
+  switch (a.state) {
+    case "verified":
+      return "Verified. You can add this client to the boss order.";
+    case "needs_sign_in":
+      return "Open it, complete the provider sign-in, then press Verify.";
+    case "verification_unavailable":
+      return "Installed, but this provider has no safe status check yet.";
+    case "not_installed":
+      return "Install this client first, then refresh this page.";
+    default:
+      return "DANZABOSS has not checked this client yet.";
+  }
 }
 
 function agentCard(a, pick) {
   const selected = pick.lineup.includes(a.name);
-  const canSelect = a.detected && a.auth !== "unauthenticated";
+  const canSelect = a.state === "verified";
   const launch = a.detected
-    ? `<button class="chip" data-launch-boss="${esc(a.name)}">Launch client</button>`
+    ? `<button class="connect-button" data-launch-boss="${esc(a.name)}">Connect</button>`
     : "";
   const verify = a.detected
-    ? `<button class="chip" data-verify-boss="${esc(a.name)}">Verify connection</button>`
+    ? `<button class="chip" data-verify-boss="${esc(a.name)}">${a.state === "verified" ? "Verify again" : "Verify"}</button>`
     : "";
-  return `<div class="agent-card${a.detected ? "" : " dim"}">
+  return `<div class="agent-card state-${esc(a.state || "unknown")}${a.detected ? "" : " dim"}">
     <div class="agent-head"><b>${esc(a.display_name)}</b>${agentChip(a)}</div>
     <p class="dim">${esc(a.strengths || "")}</p>
+    <p class="agent-instruction">${agentInstruction(a)}</p>
     <div class="agent-actions">
       <label class="boss-toggle">
         <input type="checkbox" data-boss-select="${esc(a.name)}"
           ${selected ? "checked" : ""}${canSelect ? "" : " disabled"}>
-        ${selected ? "In boss order" : "Add as boss"}
+        ${selected ? "In boss order" : "Add to boss order"}
       </label><div class="boss-actions">${launch}${verify}</div>
     </div></div>`;
 }
@@ -759,35 +778,46 @@ function renderSetup() {
   const banner = [
     setup.error ? `<p class="warn mono">${esc(setup.error)}</p>` : "",
     setup.notice ? `<p class="ok">${esc(setup.notice)}</p>` : "",
+    setup.fallback ? `<details class="connection-fallback"><summary>Show terminal fallback</summary><code>${esc(setup.fallback)}</code></details>` : "",
     setup.busy ? `<p class="dim">saving your team…</p>` : "",
     s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : "",
   ].join("");
+  const verified = s.agents.filter((a) => a.state === "verified").length;
+  const steps = `<div class="setup-steps" aria-label="Setup progress">
+    <div class="setup-step ${verified ? "done" : "active"}"><span>1</span><b>Choose clients</b><small>Select the AI clients you want</small></div>
+    <div class="setup-step ${setup.notice && !setup.error ? "active" : ""}"><span>2</span><b>Sign in</b><small>Use each provider’s own login</small></div>
+    <div class="setup-step ${verified ? "done" : ""}"><span>3</span><b>Verify</b><small>DANZABOSS confirms the connection</small></div>
+    <div class="setup-step ${pick.lineup.length ? "active" : ""}"><span>4</span><b>Set order</b><small>Choose who becomes Tony-D first</small></div>
+  </div>`;
   const hero = `<section class="boss-hero">
     <div class="boss-kicker mono">YOUR AI TEAM</div>
     <h1>WHO’S THE BOSS?</h1>
-    <p class="boss-lede">Choose <b>1–4 models to help build your ideas</b>.
-      Put them in order. The highlighted model works now; the others wait.</p>
+    <p class="boss-lede">Connect <b>1–4 AI clients</b>, verify them, and put
+      them in order. The first verified client becomes Tony-D for this turn;
+      the others wait for their own turn.</p>
+    ${steps}
     <div class="boss-feature-choice">
-      <label for="features-per-turn">Verified features completed per turn</label>
+      <label for="features-per-turn">Features per turn</label>
       <select id="features-per-turn">
         <option value="2"${pick.features_per_turn === 2 ? " selected" : ""}>2 recommended</option>
         <option value="3"${pick.features_per_turn === 3 ? " selected" : ""}>3</option>
         <option value="4"${pick.features_per_turn === 4 ? " selected" : ""}>4</option>
         <option value="5"${pick.features_per_turn === 5 ? " selected" : ""}>5</option>
       </select>
-      <span>Choose between 2 and 5. A feature counts after verification.</span>
+      <span>Choose 2–5. A feature counts only after Bonnie verifies it.</span>
     </div>
-    <p class="connection-note">Launch opens a project-only tmux session for the
-      client. Sign in there once, then return here and verify the connection.</p>
+    <p class="connection-note">Connect opens the selected client in a new
+      project terminal. You never need to manage tmux yourself.</p>
   </section>`;
-  const lineup = panel("Boss order", `
+  const lineup = panel("4. Set boss order", `
     <div id="boss-lineup">${bossLineup(pick, s.agents, s.active_boss)}</div>
-    <p class="dim">Use the arrows to set the handoff order. Waiting bosses do not
-      run specialist work until their turn.</p>`);
-  const agents = panel("Connect and choose bosses",
+    <p class="dim">Use the arrows to set the handoff order. Only the active
+      Tony-D model runs specialist work; waiting models do nothing until their turn.</p>`);
+  const agents = panel("1–3. Choose, connect, and verify",
     `<div class="agent-grid">${s.agents.map((a) => agentCard(a, pick)).join("")}</div>
-     <p class="dim">Launch a client from its card, sign in if needed, then
-       verify it. Only selected bosses enter this project’s rotation.</p>`);
+     <p class="setup-help"><b>How it works:</b> press Connect, finish sign-in
+       in the provider’s own window, return here, and press Verify. Then tick
+       Add to boss order. Only verified clients can be selected.</p>`);
   const team = panel("Ready to activate", `
     ${s.setup_complete ? `<p class="ok">Team confirmed — Project is
       unlocked. Confirm again any time to change it.</p>` : ""}
@@ -842,8 +872,13 @@ function wireSetup() {
     const out = await post("api/connection/launch", { runner });
     setupData = out.setup;
     setup.pick = initPick(setupData);
-    setup.notice = `${runner} is running. Sign in with: ${out.launch.attach_command}. ` +
-      "Then return and click Verify connection.";
+    const agent = setupData.agents.find((a) => a.name === runner);
+    const name = agent ? agent.display_name : runner;
+    setup.notice = out.launch.terminal && out.launch.terminal.opened
+      ? `${name} is open in a new terminal. Finish sign-in there, then return and press Verify.`
+      : `${name} is ready. Open the client in your terminal, finish sign-in, then return and press Verify.`;
+    setup.fallback = out.launch.terminal && !out.launch.terminal.opened
+      ? (out.launch.attach_command || "") : "";
     return { setup: setupData };
   });
   const verifyRunner = (runner) => setupAction(async () => {

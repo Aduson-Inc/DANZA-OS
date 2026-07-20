@@ -60,6 +60,7 @@ class LoopFixture(unittest.TestCase):
         (self.root / ".danza" / "runtime").mkdir(parents=True)
         config = runners_mod.default_config({"claude": True,
                                              "codex": False})
+        config["runners"]["claude"]["auth"] = "ok"
         config["runners"]["claude"]["activation"] = "typed"
         runners_mod.save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing_mod.SEATS}
@@ -263,6 +264,8 @@ class Routing(LoopFixture):
     def install_team(self, *, claude_activation: str = "argv") -> None:
         """Two-runner lineup: build -> claude, qa -> codex, plan on disk."""
         config = runners_mod.default_config({"claude": True, "codex": True})
+        config["runners"]["claude"]["auth"] = "ok"
+        config["runners"]["codex"]["auth"] = "ok"
         config["runners"]["claude"]["activation"] = claude_activation
         runners_mod.save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing_mod.SEATS}

@@ -74,7 +74,7 @@ def seed_setup(root):
             "kind": "cli", "binary": "stub", "display_name": "Stub",
             "strengths": "", "suggested_seats": [], "activation": "argv",
             "full_power_extra_argv": [], "interactive": ["stub"],
-            "headless": [], "detected": True, "auth": "unprobed",
+            "headless": [], "detected": True, "auth": "ok",
         }},
     }
     (Path(root) / RUNNERS_RELPATH).write_text(json.dumps(config))

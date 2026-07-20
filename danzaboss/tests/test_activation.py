@@ -45,29 +45,91 @@ class ActivationContract(unittest.TestCase):
                                          open_browser=False)
         open_browser.assert_called_once_with("http://localhost:33000")
 
-    def test_launch_runner_uses_project_scoped_tmux_session(self):
+    def test_launch_runner_uses_one_project_session_and_opens_terminal(self):
         calls = []
+        terminal_calls = []
 
         class Result:
-            def __init__(self, returncode):
+            def __init__(self, returncode, stdout=""):
                 self.returncode = returncode
                 self.stderr = ""
+                self.stdout = stdout
 
         def run(argv, **kwargs):
             calls.append(argv)
-            return Result(1 if argv[1] == "has-session" else 0)
+            # First health check says the shared project session is new; the
+            # post-launch health check proves it stayed alive.
+            if argv[1] == "has-session":
+                return Result(1 if len([a for a in calls if a[1] == "has-session"]) == 1 else 0)
+            return Result(0, "%0\n")
+
+        def popen(argv, **kwargs):
+            terminal_calls.append(argv)
 
         proof = launch_runner(
             "/tmp/demo-project", "codex",
             {"runners": {"codex": {
                 "detected": True, "auth": "unprobed",
                 "interactive": ["codex"], "kind": "cli"}}},
-            run=run, which=lambda name: "/usr/bin/tmux")
+            run=run, popen=popen,
+            which=lambda name: "/usr/bin/tmux" if name == "tmux" else
+            ("/usr/bin/x-terminal-emulator" if name == "x-terminal-emulator"
+             else None))
         self.assertEqual(proof["status"], "launched")
         self.assertEqual(proof["runner"], "codex")
+        self.assertEqual(proof["session"], "danza-project-demo-project")
+        self.assertTrue(proof["terminal"]["opened"])
+        self.assertEqual(len(terminal_calls), 1)
         self.assertEqual(calls[0][0:3], ["tmux", "has-session", "-t"])
         self.assertEqual(calls[1][0:2], ["tmux", "new-session"])
         self.assertIn("codex", calls[1])
+        self.assertEqual(calls[2][0:2], ["tmux", "has-session"])
+
+    def test_second_runner_gets_a_pane_in_the_same_project_session(self):
+        calls = []
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = "%1\n"
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return Result()
+
+        proof = launch_runner(
+            "/tmp/demo-project", "claude",
+            {"runners": {"claude": {
+                "detected": True, "auth": "unprobed",
+                "interactive": ["claude"], "kind": "cli"}}},
+            run=run, popen=lambda *args, **kwargs: None,
+            which=lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+        self.assertEqual(proof["status"], "already_running")
+        self.assertEqual(proof["session"], "danza-project-demo-project")
+        self.assertEqual(calls[0][0:3], ["tmux", "has-session", "-t"])
+        self.assertEqual(calls[1][0:2], ["tmux", "split-window"])
+        self.assertIn("=danza-project-demo-project", calls[1])
+
+    def test_launch_runner_falls_back_to_native_terminal_without_tmux(self):
+        terminal_calls = []
+
+        def popen(argv, **kwargs):
+            terminal_calls.append(argv)
+
+        proof = launch_runner(
+            "/tmp/demo-project", "gemini",
+            {"runners": {"gemini": {
+                "detected": True, "auth": "unprobed",
+                "interactive": ["gemini"], "kind": "cli"}}},
+            run=lambda *args, **kwargs: self.fail("tmux must not be used"),
+            popen=popen,
+            which=lambda name: "/usr/bin/x-terminal-emulator"
+            if name == "x-terminal-emulator" else None)
+        self.assertEqual(proof["status"], "launched")
+        self.assertEqual(proof["host"], "native_terminal")
+        self.assertTrue(proof["terminal"]["opened"])
+        self.assertEqual(terminal_calls[0][0], "x-terminal-emulator")
+        self.assertIn("gemini", terminal_calls[0])
 
     def test_activation_scaffolds_cortex_and_runtime_without_ui_process(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 REPOSITORY = "https://github.com/Aduson-Inc/DANZA-OS"
-DEFAULT_BRANCH = "Production-DANZABOSS"
+DEFAULT_BRANCH = "codex/production-danzaboss-install-flow"
 
 
 def _run(argv: list[str], *, cwd: Path | None = None) -> None:

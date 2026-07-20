@@ -247,6 +247,8 @@ class AdditionsAndQueue(BuildFixture):
 
     def test_queue_activates_on_quota_handoff_before_routing(self):
         config = default_config({"claude": True, "codex": True})
+        config["runners"]["claude"]["auth"] = "ok"
+        config["runners"]["codex"]["auth"] = "ok"
         save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR
@@ -283,6 +285,7 @@ class AdditionsAndQueue(BuildFixture):
 
     def test_active_unit_is_carried_and_queue_activates_at_safe_unit_boundary(self):
         config = default_config({"claude": True})
+        config["runners"]["claude"]["auth"] = "ok"
         save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR
@@ -330,6 +333,7 @@ class AdditionsAndQueue(BuildFixture):
 
     def test_queue_never_bypasses_a_hard_stop_conclusion(self):
         config = default_config({"claude": True})
+        config["runners"]["claude"]["auth"] = "ok"
         save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR
@@ -356,6 +360,8 @@ class AdditionsAndQueue(BuildFixture):
 
     def test_queued_plan_hard_stop_blocks_before_next_runner_ignition(self):
         config = default_config({"claude": True, "codex": True})
+        config["runners"]["claude"]["auth"] = "ok"
+        config["runners"]["codex"]["auth"] = "ok"
         save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR
@@ -398,6 +404,7 @@ class BuildApiContracts(BuildFixture):
     def setUp(self):
         super().setUp()
         config = default_config({"claude": True})
+        config["runners"]["claude"]["auth"] = "ok"
         save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR
