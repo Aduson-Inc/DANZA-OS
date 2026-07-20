@@ -108,7 +108,8 @@ Expected result: the new tests fail because Codex has no native auth probe and t
 
 - [x] **Step 1: Add installer documentation tests** requiring the public flow to describe native client sign-in and the browser fallback, not manual tmux attachment.
 - [x] **Step 2: Update the user-facing install/run instructions** with the four Setup steps and the explicit rule that installation is pending until a client is verified.
-- [ ] **Step 3: Run the full suite with localhost socket access**:
+- [x] **Step 3: Run the full suite with localhost socket access** — 1,124
+  tests passed with 14 documented skips:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONWARNINGS=ignore \
@@ -120,7 +121,8 @@ Expected result: all tests pass with only the repository’s documented skips.
 
 - [x] **Step 4: Run `node --check danzaboss/workstation/static/app.js` and `git diff --check`.**
 - [ ] **Step 5: Test activation in disposable empty and existing Git repositories**, confirm the UI opens automatically, confirm a fresh Setup has no selected clients, and verify at least one real provider through its native login/status path.
-- [ ] **Step 6: Commit the implementation** with message `Redesign guided AI connection flow` and push the existing temporary branch `codex/production-danzaboss-install-flow`.
+- [x] **Step 6: Commit the implementation** and push the temporary branch
+  `codex/production-danzaboss-install-flow`.
 
 ## Self-review
 
