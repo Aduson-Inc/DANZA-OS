@@ -4,19 +4,47 @@ from __future__ import annotations
 import json
 import os
 import signal
+import io
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import _bootstrap  # noqa: F401
 
 from danzaboss.product.activation import activate_project, verify_installation
 from danzaboss.product.connection import launch_runner, verify_runner
 from danzaboss.cortex.tasks import start_task
+from danzaboss import cli
 
 
 class ActivationContract(unittest.TestCase):
+    def test_activate_prints_dashboard_url_after_starting_ui(self):
+        output = io.StringIO()
+        report = {
+            "status": "awaiting_ai_connection",
+            "project_initialized": True,
+            "cortex": True,
+            "ui": True,
+            "ai_connection": False,
+            "missing": [],
+        }
+        with patch("danzaboss.product.activation.activate_project") as activate, \
+                patch("danzaboss.product.activation.wait_for_ui", return_value=True), \
+                patch("danzaboss.product.activation.verify_installation",
+                      return_value=report), \
+                patch("danzaboss.cli.webbrowser.open", return_value=True) as open_browser, \
+                redirect_stdout(output):
+            result = cli._cmd_activate(["/tmp/project"])
+
+        self.assertEqual(result, 0)
+        self.assertIn("http://localhost:33000", output.getvalue())
+        activate.assert_called_once_with("/tmp/project", start_ui_process=True,
+                                         open_browser=False)
+        open_browser.assert_called_once_with("http://localhost:33000")
+
     def test_launch_runner_uses_project_scoped_tmux_session(self):
         calls = []
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import webbrowser
 from pathlib import Path
 
 from .cortex import commands as cortex_commands
@@ -450,11 +451,24 @@ def _cmd_activate(argv: list[str]) -> int:
     from .product.activation import activate_project, verify_installation, wait_for_ui
     try:
         activate_project(root, start_ui_process=not no_ui,
-                         open_browser=open_browser)
+                         # The parent opens the browser after the child UI is
+                         # confirmed live, so activation never races the bind
+                         # and never opens duplicate tabs.
+                         open_browser=False)
         if not no_ui and not wait_for_ui():
             print("activation failed: dashboard did not answer on port 33000",
                   file=sys.stderr)
             return 1
+        if not no_ui:
+            dashboard_url = "http://localhost:33000"
+            if open_browser:
+                try:
+                    webbrowser.open(dashboard_url)
+                except Exception:
+                    # The URL below is the reliable fallback on headless or
+                    # misconfigured desktop environments.
+                    pass
+            print(f"DANZABOSS dashboard: {dashboard_url}")
         report = verify_installation(root, require_connection=False)
     except (OSError, ValueError) as exc:
         print(f"activation failed: {exc}", file=sys.stderr)
