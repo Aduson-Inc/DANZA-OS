@@ -49,6 +49,9 @@ class InstallShStructure(unittest.TestCase):
         self.assertLess(self.text.index("Approve installation"),
                         self.text.index("curl -fsSL"))
 
+    def test_exit_trap_is_safe_after_main_returns(self):
+        self.assertIn('"${tmp:-}"', self.text)
+
     def test_executable_bit(self):
         self.assertTrue(SCRIPT.stat().st_mode & 0o111,
                         "install.sh must be executable")

@@ -43,7 +43,10 @@ main() {
   fi
 
   tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' EXIT
+  # The trap runs after main returns, outside the scope of the local
+  # variable. The default keeps set -u from turning a successful install into
+  # an EXIT-trap error.
+  trap 'rm -f "${tmp:-}"' EXIT
   curl -fsSL "${RAW_BASE}/install.py" -o "$tmp"
   "$python" "$tmp" --target "$PWD" --branch "$DANZA_BRANCH" "$@"
 }
