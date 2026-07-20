@@ -50,7 +50,8 @@ class InstallShStructure(unittest.TestCase):
                         self.text.index("curl -fsSL"))
 
     def test_exit_trap_is_safe_after_main_returns(self):
-        self.assertIn('"${tmp:-}"', self.text)
+        self.assertNotIn("local python tmp", self.text)
+        self.assertIn("trap 'rm -f \"$tmp\"' EXIT", self.text)
 
     def test_executable_bit(self):
         self.assertTrue(SCRIPT.stat().st_mode & 0o111,

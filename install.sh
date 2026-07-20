@@ -24,7 +24,7 @@ find_python() {
 }
 
 main() {
-  local python tmp
+  local python
   python="$(find_python || true)"
   [[ -n "$python" ]] || die "Python 3.10+ is required. Install it, then rerun this command."
   "$python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' \
@@ -43,10 +43,9 @@ main() {
   fi
 
   tmp="$(mktemp)"
-  # The trap runs after main returns, outside the scope of the local
-  # variable. The default keeps set -u from turning a successful install into
-  # an EXIT-trap error.
-  trap 'rm -f "${tmp:-}"' EXIT
+  # Keep tmp at script scope: EXIT runs after main returns, so a function-local
+  # trap variable is no longer bound under set -u.
+  trap 'rm -f "$tmp"' EXIT
   curl -fsSL "${RAW_BASE}/install.py" -o "$tmp"
   "$python" "$tmp" --target "$PWD" --branch "$DANZA_BRANCH" "$@"
 }
