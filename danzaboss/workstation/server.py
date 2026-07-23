@@ -335,6 +335,56 @@ def setup_complete(root: str) -> bool:
     return bool(routing["lineup"])
 
 
+def _active_boss(root: str, lineup: list) -> Optional[str]:
+    """The runner taking the current turn. Sequential relay is the only
+    routing model that ships (P T8a): this is always
+    ``lineup[turn_number % len(lineup)]`` — the same rotation route_turn
+    uses, kept as one function so every caller agrees (single source of
+    truth, requirement 4)."""
+    if not lineup:
+        return None
+    active = lineup[0]
+    team_state, _ = _team_state(root)
+    if isinstance(team_state, dict) and type(team_state.get("turn_number")) is int:
+        active = lineup[team_state["turn_number"] % len(lineup)]
+    return active
+
+
+def _team_roster(root: str) -> list:
+    """The confirmed team as ONE merged list (P T8a requirement 4):
+    ``[{runner, display_name, pane, live, active}]``, derived from routing
+    + workspace so the active/waiting split has a single source of truth
+    instead of two separate views. Empty until a team is confirmed."""
+    try:
+        routing = routing_mod.load_routing(root)
+    except (RunnerError, routing_mod.RoutingError):
+        return []
+    lineup = routing["lineup"]
+    if not lineup:
+        return []
+    active = _active_boss(root, lineup)
+    workspace = workspace_summary(root)
+    panes = workspace["panes"]
+    session_live = False
+    host = _SESSION_HOST(root)
+    if host is not None:
+        try:
+            session_live = bool(host.alive(workspace["session"]))
+        except (HostError, OSError):
+            pass  # a missing host reads as no live pane, not a crash
+    try:
+        display_names = {name: entry["display_name"]
+                         for name, entry in load_runners(root)["runners"].items()}
+    except RunnerError:
+        display_names = {}
+    return [{"runner": name,
+             "display_name": display_names.get(name, name),
+             "pane": panes.get(name),
+             "live": session_live and name in panes,
+             "active": name == active}
+            for name in lineup]
+
+
 def setup_summary(root: str) -> dict:
     """Everything the SETUP tab needs: live agent registry and saved team.
 
@@ -350,34 +400,24 @@ def setup_summary(root: str) -> dict:
               for name, entry in config["runners"].items()
               if entry["binary"]]  # the generic copy-me template is no card
     lineup: list = []
-    seats: dict = {}
-    boss_mode = "seat_routed"
     features_per_turn = routing_mod.DEFAULT_FEATURES_PER_TURN
     routing_error = ""
     try:
         persisted = routing_mod.load_routing(root)
-        lineup, seats = persisted["lineup"], persisted["seats"]
-        boss_mode = persisted.get("boss_mode", "seat_routed")
+        lineup = persisted["lineup"]
         features_per_turn = persisted["features_per_turn"]
     except (RunnerError, routing_mod.RoutingError) as e:
         # a routing file that EXISTS but can't be trusted is reported, never
         # hidden; plain absence remains empty until the user confirms a team
         if (Path(root) / routing_mod.ROUTING_RELPATH).exists():
             routing_error = str(e)
-    active_boss = lineup[0] if lineup else None
-    if boss_mode == "sequential" and lineup:
-        team_state, _ = _team_state(root)
-        if isinstance(team_state, dict) and type(team_state.get("turn_number")) is int:
-            active_boss = lineup[team_state["turn_number"] % len(lineup)]
+    active_boss = _active_boss(root, lineup)
     waiting_bosses = ([name for name in lineup if name != active_boss]
                       if active_boss else [])
-    out = {"agents": agents, "roster": agent_roster(),
-           "lineup": lineup, "seats": seats,
-           "conductor": seats.get("conductor", routing_mod.BUILTIN_CONDUCTOR),
+    out = {"agents": agents,
+           "lineup": lineup,
            "active_boss": active_boss,
            "waiting_bosses": waiting_bosses,
-           "specialist_execution": "active_boss",
-           "boss_turns": boss_mode,
            "features_per_turn": features_per_turn,
            "setup_complete": setup_complete(root),
            "connection": connection_status(root),
@@ -478,6 +518,97 @@ def snapshot_token(root: str) -> str:
     return "|".join(parts)
 
 
+# -- one-flow stage machine (P T8a) ------------------------------------------
+
+FLOW_STAGE_IDS = ("connect", "describe", "approve", "build", "done")
+
+
+def _connect_stage(root: str) -> dict:
+    """Connect: the AI team is confirmed (SETUP) and a client connection is
+    verified — the same predicates onboarding_summary gates on."""
+    connection = connection_status(root)
+    team_confirmed = setup_complete(root)
+    complete = team_confirmed and connection.get("status") == "verified"
+    return {"complete": complete, "team_confirmed": team_confirmed,
+            "connection_status": connection.get("status")}
+
+
+def _describe_stage(root: str) -> dict:
+    """Describe: the onboarding interview is complete and the project brief
+    (spec.md) has been compiled — the same artifact overview's spec_exists
+    reports."""
+    onboarding = onboarding_summary(root)
+    complete = (Path(root) / SPEC_RELPATH).exists()
+    return {"complete": complete,
+            "onboarding_complete": onboarding["complete"],
+            "current_step": onboarding["current_step"],
+            "answered": onboarding["answered"]}
+
+
+def _approve_stage(root: str) -> dict:
+    """Approve: the product scope is drafted, approved exactly, and
+    decomposed into a build plan that references the approved revision —
+    the same gate post_build_start enforces before BUILD may start."""
+    scope = None
+    try:
+        scope = product_scope_mod.load_scope(root)
+    except product_scope_mod.ProductScopeError:
+        pass
+    complete = False
+    if scope is not None:
+        try:
+            project_mod.require_approved_scope(root)
+            plan, err = _read_json(Path(root) / PLAN_JSON_RELPATH)
+            if plan is not None and not err:
+                project_mod.require_plan_matches_scope(root, plan)
+                complete = True
+        except project_mod.ProjectGateConflict:
+            complete = False
+    return {"complete": complete,
+            "scope_state": scope["approval"]["state"] if scope else None,
+            "revision": scope["revision"] if scope else None,
+            "features_total": len(scope["features"]) if scope else 0}
+
+
+def _build_stage(root: str) -> dict:
+    """Build: the relay executes the approved plan until every product
+    feature is completed — derived from the same live_payload BUILD reads."""
+    try:
+        live = build_mod.live_payload(root)
+    except build_mod.BuildError:
+        return {"complete": False, "status": None,
+                "completed": 0, "total": 0, "running": False}
+    pid = _conductor_pid(root)
+    progress = live["progress"]
+    return {"complete": progress["status"] == "completed",
+            "status": progress["status"],
+            "completed": progress["completed"], "total": progress["total"],
+            "running": pid is not None and _pid_alive(pid)}
+
+
+def flow_state(root: str) -> dict:
+    """The one-flow journey (Connect -> Describe -> Approve -> Build ->
+    Done): an ordered stage list, which stage is current, and the merged
+    team roster (requirement 4). Stage status is derived entirely from
+    existing product state — no new state files. Each stage carries only a
+    light summary; the SPA fetches heavy detail from the existing tab
+    endpoints (/api/onboarding, /api/project, /api/build, ...)."""
+    build = _build_stage(root)
+    by_id = {"connect": _connect_stage(root),
+             "describe": _describe_stage(root),
+             "approve": _approve_stage(root),
+             "build": build,
+             "done": {"complete": build["complete"]}}
+    stages = [{"id": stage_id, **by_id[stage_id]}
+             for stage_id in FLOW_STAGE_IDS]
+    current = "done"
+    for stage in stages:
+        if not stage["complete"]:
+            current = stage["id"]
+            break
+    return {"stages": stages, "current": current, "team": _team_roster(root)}
+
+
 # -- write-side actions (pure functions of root+body, unit-testable) --------
 
 GateConflict = project_mod.ProjectGateConflict
@@ -528,18 +659,15 @@ def post_setup(root: str, body: dict) -> dict:
     written, so a rejected confirm leaves no torn multi-file state."""
     lineup = _require(body, "lineup", list)
     features_per_turn = _require(body, "features_per_turn", int)
-    # The production UI chooses only the ordered bosses. Every specialist is
-    # executed by the active boss; the old explicit seat map remains accepted
-    # for backwards-compatible routing files and tests.
-    if "seats" in body:
-        seats = _require(body, "seats", dict)
-        boss_mode = body.get("boss_mode", "seat_routed")
-    else:
-        active = lineup[0] if lineup else None
-        seats = {"conductor": routing_mod.BUILTIN_CONDUCTOR}
-        seats.update({work_type: active
-                      for work_type in routing_mod.SEAT_WORK_TYPES})
-        boss_mode = "sequential"
+    # Sequential relay is the only routing model that ships (P T8a): the
+    # confirmed lineup owns every specialist seat in turn-rotation order.
+    # Any "seats"/"boss_mode" in the body is ignored, like other
+    # unrecognized fields (e.g. the retired budgets dial).
+    active = lineup[0] if lineup else None
+    seats = {"conductor": routing_mod.BUILTIN_CONDUCTOR}
+    seats.update({work_type: active
+                  for work_type in routing_mod.SEAT_WORK_TYPES})
+    boss_mode = "sequential"
     config = _live_registry(fresh=True)
     try:
         # keep host settings the user already chose; absence means defaults
@@ -944,6 +1072,8 @@ class DanzaUIHandler(CortexUIHandler):
                 self._static(route[len("/static/"):], static_dir=_STATIC_DIR)
             elif route == "/api/overview":
                 self._json(overview(self.root))
+            elif route == "/api/flow":
+                self._json(flow_state(self.root))
             elif route == "/api/conductor":
                 raw = (q.get("limit") or ["100"])[0]
                 try:

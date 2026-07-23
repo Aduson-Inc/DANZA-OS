@@ -19,16 +19,20 @@ from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
 from danzaboss.workstation import server as server_mod
 from danzaboss.workstation import execution as execution_mod
+from danzaboss.workstation import product_scope as product_scope_mod
 from danzaboss.workstation import project as project_mod
+from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation.conductor import (PIDFILE_RELPATH as
                                              CONDUCTOR_PIDFILE, session_name)
 from danzaboss.workstation.routing import (ROUTING_RELPATH,
                                            SCHEMA_VERSION as ROUTING_SCHEMA_VERSION,
                                            SEAT_WORK_TYPES)
 from danzaboss.workstation.runners import (KNOWN_RUNNERS, RUNNERS_RELPATH,
-                                           SCHEMA_VERSION, default_config)
+                                           SCHEMA_VERSION, default_config,
+                                           save_runners as save_runners_config)
 from danzaboss.workstation.server import (conductor_tail, overview,
                                           serve_in_thread, snapshot_token)
+from danzaboss.workstation.workspace import save_workspace
 
 
 STALE_BUDGETS_RELPATH = Path(".danza") / "runtime" / "budgets.json"
@@ -748,23 +752,14 @@ class TestSetupApi(unittest.TestCase):
         # A fresh project is intentionally empty. Detection never chooses a
         # boss or specialist assignment on the user's behalf.
         self.assertEqual(o["lineup"], [])
-        self.assertEqual(o["seats"], {})
         self.assertIsNone(o["active_boss"])
         self.assertEqual(o["waiting_bosses"], [])
         self.assertEqual(o["features_per_turn"], 2)
-        self.assertIn("roster", o)
-        self.assertEqual(
-            [(item["name"], item["role"]) for item in o["roster"]],
-            [("Tony-D", "The Boss"), ("Jonathan", "Builder"),
-             ("Samantha", "Mapper"), ("Angela", "Auditor"),
-             ("Bonnie", "QA"), ("Carmella", "Researcher"),
-             ("Hank", "Designer"), ("Billy", "Security")])
-        self.assertEqual(len({item["id"] for item in o["roster"]}), 8)
-        self.assertNotIn("mona-historian",
-                         {item["id"] for item in o["roster"]})
-        self.assertTrue(all(item["responsibility"]
-                            for item in o["roster"]))
-        for removed in ("dial", "overrides", "floors", "budgets_error"):
+        # P T8a: dead setup_summary fields are gone — seats/boss_mode are
+        # internal routing detail now, and roster lives on /api/overview.
+        for removed in ("dial", "overrides", "floors", "budgets_error",
+                        "seats", "conductor", "specialist_execution",
+                        "boss_turns", "roster"):
             self.assertNotIn(removed, o)
         self.assertFalse(o["setup_complete"])
 
@@ -808,7 +803,6 @@ class TestSetupApi(unittest.TestCase):
         setup = out["setup"]
         self.assertEqual(setup["active_boss"], "gemini")
         self.assertEqual(setup["waiting_bosses"], ["claude"])
-        self.assertEqual(setup["specialist_execution"], "active_boss")
 
     def test_activated_setup_prepares_the_shared_workspace_before_save(self):
         installation = Path(self.root) / ".danza" / "runtime" / "installation.json"
@@ -889,48 +883,39 @@ class TestSetupApi(unittest.TestCase):
         for removed in ("dial", "overrides", "floors", "budgets_error"):
             self.assertNotIn(removed, out["setup"])
 
-    def test_persisted_seats_win_over_suggestion(self):
-        body = {"lineup": ["claude", "gemini"],
-                "features_per_turn": 3,
-                "seats": team_seats("gemini", plan="claude")}
-        status, _ = post(self.port, "/api/setup", body)
-        self.assertEqual(status, 200)
-        _, _, raw = get(self.port, "/api/setup")
-        o = json.loads(raw)
-        self.assertEqual(o["seats"], body["seats"])
-        self.assertEqual(o["lineup"], ["claude", "gemini"])
-        self.assertEqual(o["features_per_turn"], 3)
-        self.assertTrue(o["setup_complete"])
-
     def test_post_rejects_six_runner_lineup(self):
         body = {"lineup": ["claude", "codex", "gemini", "grok", "hermes", "opencode",
                            "generic"],
-                "features_per_turn": 2,
-                "seats": team_seats("claude")}
+                "features_per_turn": 2}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
         self.assertIn("1-4", out["error"])
 
-    def test_post_rejects_unauthenticated_seat(self):
+    def test_post_rejects_unauthenticated_lineup_member(self):
         server_mod._BUILD_REGISTRY = \
             lambda: fake_registry(auth={"claude": "unauthenticated"})
         server_mod._reset_registry_cache()
-        body = {"lineup": ["claude"], "seats": team_seats("claude"),
-                "features_per_turn": 2}
+        body = {"lineup": ["claude"], "features_per_turn": 2}
         status, out = post(self.port, "/api/setup", body)
         self.assertEqual(status, 400)
         self.assertIn("not logged in", out["error"])
 
-    def test_post_rejects_invalid_seats_and_writes_nothing(self):
-        body = {"lineup": ["claude"], "seats": {"build": "claude"},
-                "features_per_turn": 2}
+    def test_post_ignores_legacy_seats_and_boss_mode_in_body(self):
+        # P T8a: sequential relay is the only routing model that ships —
+        # an explicit "seats"/"boss_mode" body (the retired per-seat picker)
+        # is ignored like any other unrecognized field, not honored or
+        # rejected.
+        body = {"lineup": ["claude", "gemini"], "features_per_turn": 3,
+                "seats": team_seats("gemini", plan="claude"),
+                "boss_mode": "seat_routed"}
         status, out = post(self.port, "/api/setup", body)
-        self.assertEqual(status, 400)
-        self.assertIn("seats keys", out["error"])
-        # every payload validates BEFORE anything is written: a rejected
-        # confirm must leave no torn multi-file state
-        for rel in (RUNNERS_RELPATH, ROUTING_RELPATH):
-            self.assertFalse((Path(self.root) / rel).exists(), rel)
+        self.assertEqual(status, 200, out)
+        routing = json.loads((Path(self.root) / ROUTING_RELPATH).read_text())
+        self.assertEqual(routing["boss_mode"], "sequential")
+        for work_type in SEAT_WORK_TYPES:
+            self.assertEqual(routing["seats"][work_type], "claude")
+        self.assertEqual(out["setup"]["lineup"], ["claude", "gemini"])
+        self.assertEqual(out["setup"]["features_per_turn"], 3)
 
     def test_registry_cache_ttl_and_post_reprobes(self):
         calls = []
@@ -950,8 +935,7 @@ class TestSetupApi(unittest.TestCase):
         server_mod.setup_summary(self.root)
         self.assertEqual(len(calls), 2)   # TTL expired: rebuilt
         server_mod.post_setup(self.root, {
-            "lineup": ["claude"], "seats": team_seats("claude"),
-            "features_per_turn": 2})
+            "lineup": ["claude"], "features_per_turn": 2})
         self.assertEqual(len(calls), 3)   # POST always re-probes fresh
 
     def test_onboarding_posts_409_until_setup_confirmed(self):
@@ -989,6 +973,217 @@ class TestSetupApi(unittest.TestCase):
         self.assertNotEqual(t0, t1)
         (Path(self.root) / STALE_BUDGETS_RELPATH).write_text("{}")
         self.assertEqual(t1, snapshot_token(self.root))
+
+
+def _flow_feature(feature_id, *, status="pending"):
+    return {"id": feature_id,
+            "summary": f"Users can complete outcome {feature_id}.",
+            "acceptance_criteria": [f"Outcome {feature_id} is verified."],
+            "status": status}
+
+
+def _flow_leaf(unit_id, feature_id):
+    return {"id": unit_id, "feature_id": feature_id,
+            "description": f"implement {unit_id}", "kind": "backend",
+            "size_est": 10, "writes": [f"src/{unit_id}.py"],
+            "verification": {"kind": "automated_test", "detail": "exit 0"}}
+
+
+class TestFlowApi(unittest.TestCase):
+    """P T8a: /api/flow one-flow stage machine + merged team roster."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        (self.root / ".danza" / "runtime").mkdir(parents=True)
+
+    def _stage(self, flow, stage_id):
+        return next(s for s in flow["stages"] if s["id"] == stage_id)
+
+    def _seed_connect_and_describe(self):
+        """Confirmed team + verified connection + a written project brief —
+        Connect and Describe both complete."""
+        seed_confirmed_setup(self.root)
+        (Path(self.root) / ".danza" / "runtime" / "connection.json").write_text(
+            json.dumps({"status": "verified", "runner": "stub"}))
+        (Path(self.root) / ".danza" / "spec.md").write_text("# Spec\n")
+
+    def _seed_approved_plan(self, *, completed=False):
+        """An approved features.json (revision 1) plus a matching plan.json
+        with two leaves — the minimal 'Approve stage complete' fixture."""
+        scope = product_scope_mod.new_scope(
+            [_flow_feature(1), _flow_feature(2)])
+        product_scope_mod.write_scope(self.root, scope)
+        product_scope_mod.approve_scope(self.root, expected_revision=1)
+        tasks = [_flow_leaf("1.1", 1), _flow_leaf("2.1", 2)]
+        order = [t["id"] for t in tasks]
+        execution = execution_mod.initial_execution(order)
+        if completed:
+            for unit_id in order:
+                execution[unit_id].update({
+                    "status": "completed", "started_at": "start",
+                    "completed_at": "done", "actual_minutes": 1,
+                    "verification_attempts": 1, "verification_passed": True,
+                    "verification_evidence": [{"passed": True}],
+                    "completed_turn": 0,
+                })
+        plan = {"spec_ref": ".danza/features.json#revision-1",
+                "tasks": tasks, "order": order, "execution": execution,
+                "calibration": []}
+        (Path(self.root) / ".danza" / "plan.json").write_text(
+            json.dumps(plan), encoding="utf-8")
+
+    def test_fresh_project_is_all_incomplete_and_current_is_connect(self):
+        flow = server_mod.flow_state(self.root)
+        self.assertEqual([s["id"] for s in flow["stages"]],
+                         ["connect", "describe", "approve", "build", "done"])
+        self.assertTrue(all(not s["complete"] for s in flow["stages"]))
+        self.assertEqual(flow["current"], "connect")
+        self.assertEqual(flow["team"], [])
+
+    def test_connect_completes_on_confirmed_team_and_verified_connection(self):
+        seed_confirmed_setup(self.root)
+        (Path(self.root) / ".danza" / "runtime" / "connection.json").write_text(
+            json.dumps({"status": "verified", "runner": "stub"}))
+        flow = server_mod.flow_state(self.root)
+        self.assertTrue(self._stage(flow, "connect")["complete"])
+        self.assertEqual(flow["current"], "describe")
+
+    def test_connect_incomplete_without_verified_connection(self):
+        seed_confirmed_setup(self.root)  # team confirmed, never verified
+        flow = server_mod.flow_state(self.root)
+        stage = self._stage(flow, "connect")
+        self.assertFalse(stage["complete"])
+        self.assertTrue(stage["team_confirmed"])
+        self.assertEqual(flow["current"], "connect")
+
+    def test_describe_completes_when_spec_is_written(self):
+        self._seed_connect_and_describe()
+        flow = server_mod.flow_state(self.root)
+        self.assertTrue(self._stage(flow, "describe")["complete"])
+        self.assertEqual(flow["current"], "approve")
+
+    def test_approve_completes_when_scope_approved_and_plan_matches(self):
+        self._seed_connect_and_describe()
+        self._seed_approved_plan()
+        flow = server_mod.flow_state(self.root)
+        stage = self._stage(flow, "approve")
+        self.assertTrue(stage["complete"])
+        self.assertEqual(stage["scope_state"], "approved")
+        self.assertEqual(stage["revision"], 1)
+        self.assertEqual(stage["features_total"], 2)
+        self.assertEqual(flow["current"], "build")
+
+    def test_approve_incomplete_when_scope_is_only_drafted(self):
+        self._seed_connect_and_describe()
+        scope = product_scope_mod.new_scope([_flow_feature(1)])
+        product_scope_mod.write_scope(self.root, scope)
+        flow = server_mod.flow_state(self.root)
+        stage = self._stage(flow, "approve")
+        self.assertFalse(stage["complete"])
+        self.assertEqual(stage["scope_state"], "draft")
+        self.assertEqual(flow["current"], "approve")
+
+    def test_build_and_done_complete_when_every_feature_is_completed(self):
+        self._seed_connect_and_describe()
+        self._seed_approved_plan(completed=True)
+        flow = server_mod.flow_state(self.root)
+        build_stage = self._stage(flow, "build")
+        self.assertTrue(build_stage["complete"])
+        self.assertEqual(build_stage["status"], "completed")
+        self.assertEqual(build_stage["completed"], 2)
+        self.assertEqual(build_stage["total"], 2)
+        self.assertTrue(self._stage(flow, "done")["complete"])
+        self.assertEqual(flow["current"], "done")
+
+    def test_build_reports_pending_status_before_any_work_starts(self):
+        self._seed_connect_and_describe()
+        self._seed_approved_plan(completed=False)
+        flow = server_mod.flow_state(self.root)
+        build_stage = self._stage(flow, "build")
+        self.assertFalse(build_stage["complete"])
+        self.assertEqual(build_stage["status"], "pending")
+        self.assertFalse(build_stage["running"])
+        self.assertFalse(self._stage(flow, "done")["complete"])
+        self.assertEqual(flow["current"], "build")
+
+    def test_team_roster_is_empty_without_a_confirmed_team(self):
+        self.assertEqual(server_mod.flow_state(self.root)["team"], [])
+
+    def test_team_roster_merges_active_waiting_pane_and_live_state(self):
+        config = default_config({"claude": True, "codex": True})
+        config["runners"]["claude"]["auth"] = "ok"
+        config["runners"]["codex"]["auth"] = "ok"
+        save_runners_config(self.root, config)
+        seats = {seat: "claude" for seat in SEAT_WORK_TYPES}
+        seats["conductor"] = routing_mod.BUILTIN_CONDUCTOR
+        routing_mod.save_routing(self.root, {
+            "version": ROUTING_SCHEMA_VERSION, "features_per_turn": 2,
+            "lineup": ["claude", "codex"], "seats": seats}, config)
+        save_workspace(self.root, {
+            "schema_version": 1, "session": session_name(self.root),
+            "host": "tmux", "order": ["claude", "codex"],
+            "panes": {"claude": "%1", "codex": "%2"},
+            "active_runner": "claude", "terminal_opened": True})
+        (Path(self.root) / ".danza" / "runtime" / "team-state.json").write_text(
+            json.dumps({**TEAM_STATE, "turn_number": 1, "current_boss": "codex"}))
+
+        class FakeHost:
+            def alive(self, name):
+                return True
+
+        saved = server_mod._SESSION_HOST
+        server_mod._SESSION_HOST = lambda root: FakeHost()
+        self.addCleanup(lambda: setattr(server_mod, "_SESSION_HOST", saved))
+
+        team = server_mod.flow_state(self.root)["team"]
+
+        self.assertEqual([m["runner"] for m in team], ["claude", "codex"])
+        claude, codex = team
+        self.assertEqual(claude["display_name"], "Claude Code")
+        self.assertEqual(claude["pane"], "%1")
+        self.assertTrue(claude["live"])
+        self.assertFalse(claude["active"])   # turn_number=1 -> codex's turn
+        self.assertEqual(codex["display_name"], "Codex")
+        self.assertEqual(codex["pane"], "%2")
+        self.assertTrue(codex["active"])
+
+    def test_team_roster_pane_is_not_live_when_the_session_is_dead(self):
+        config = default_config({"claude": True})
+        config["runners"]["claude"]["auth"] = "ok"
+        save_runners_config(self.root, config)
+        seats = {seat: "claude" for seat in SEAT_WORK_TYPES}
+        seats["conductor"] = routing_mod.BUILTIN_CONDUCTOR
+        routing_mod.save_routing(self.root, {
+            "version": ROUTING_SCHEMA_VERSION, "features_per_turn": 2,
+            "lineup": ["claude"], "seats": seats}, config)
+        save_workspace(self.root, {
+            "schema_version": 1, "session": session_name(self.root),
+            "host": "tmux", "order": ["claude"], "panes": {"claude": "%1"},
+            "active_runner": "claude", "terminal_opened": True})
+
+        class DeadHost:
+            def alive(self, name):
+                return False
+
+        saved = server_mod._SESSION_HOST
+        server_mod._SESSION_HOST = lambda root: DeadHost()
+        self.addCleanup(lambda: setattr(server_mod, "_SESSION_HOST", saved))
+
+        team = server_mod.flow_state(self.root)["team"]
+        self.assertEqual(len(team), 1)
+        self.assertFalse(team[0]["live"])
+
+    def test_http_route_serves_the_same_payload_as_flow_state(self):
+        self._seed_connect_and_describe()
+        server, port = serve_in_thread(self.root)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        status, ctype, raw = get(port, "/api/flow")
+        self.assertEqual(status, 200)
+        self.assertIn("application/json", ctype)
+        self.assertEqual(json.loads(raw), server_mod.flow_state(self.root))
 
 
 class TestBuildApi(unittest.TestCase):
