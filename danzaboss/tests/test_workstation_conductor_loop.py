@@ -26,12 +26,14 @@ class FakeHost:
 
     def __init__(self):
         self.ignites = []
+        self.runners = []
         self.alive_now = False
         self.tail_now = ""
         self.killed = []
 
-    def ignite(self, name, cwd, argv):
+    def ignite(self, name, cwd, argv, runner=None):
         self.ignites.append((name, str(cwd), list(argv)))
+        self.runners.append(runner)
         self.alive_now = True
 
     def alive(self, name):
@@ -99,6 +101,7 @@ class Ignition(LoopFixture):
         self.assertEqual(name, session_name(self.root))
         self.assertEqual(cwd, str(self.root))
         self.assertEqual(argv, ["claude"])  # tmux host -> interactive argv
+        self.assertEqual(self.host.runners, ["claude"])
         self.assertIs(con.tick(), Action.WAIT)  # session alive: no re-ignite
         self.assertEqual(len(self.host.ignites), 1)
         self.assertIn("ignite", {e["event"] for e in self.log_events()})

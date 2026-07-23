@@ -30,6 +30,8 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 
+from .workspace import load_workspace, save_workspace
+
 # The phrase that activates the DANZA OS inside the boss session.
 IGNITION_MESSAGE = "Who's the Boss?"
 
@@ -58,7 +60,7 @@ class SessionHost(Protocol):
     """Interface every host implementation must satisfy."""
 
     def ignite(self, name: str, cwd: str | os.PathLike,
-               argv: list[str]) -> None:
+               argv: list[str], runner: str | None = None) -> None:
         """Start a fresh boss session and deliver IGNITION_MESSAGE to it."""
         ...
 
@@ -104,12 +106,47 @@ class TmuxHost:
     # ------------------------------------------------------------------
 
     def ignite(self, name: str, cwd: str | os.PathLike,
-               argv: list[str]) -> None:
+               argv: list[str], runner: str | None = None) -> None:
         """Create a detached tmux session then send the ignition phrase.
 
         Raises HostError if either command exits nonzero or the OS cannot
         exec tmux (e.g. binary not on PATH).
         """
+        if runner is not None:
+            try:
+                workspace = load_workspace(cwd)
+            except ValueError as exc:
+                raise HostError(f"invalid project workspace: {exc}") from exc
+            if (workspace is None or workspace["host"] != "tmux"
+                    or workspace["session"] != name
+                    or runner not in workspace["panes"]):
+                raise HostError(
+                    f"active runner {runner!r} has no valid pane in {name!r}")
+            pane = workspace["panes"][runner]
+            try:
+                alive = self._run(
+                    ["tmux", "has-session", "-t", f"={name}"],
+                    capture_output=True, text=True)
+                if alive.returncode != 0:
+                    raise HostError(f"workspace session {name!r} is not running")
+                owner = self._run(
+                    ["tmux", "display-message", "-p", "-t", pane,
+                     "#{session_name}"], capture_output=True, text=True)
+                if owner.returncode != 0 or owner.stdout.strip() != name:
+                    raise HostError(
+                        f"workspace pane {pane!r} is not owned by {name!r}")
+                if workspace["active_runner"] != runner:
+                    save_workspace(cwd, {**workspace, "active_runner": runner})
+                sk = self._run(
+                    ["tmux", "send-keys", "-t", pane, IGNITION_MESSAGE,
+                     "Enter"], capture_output=True, text=True)
+            except OSError as exc:
+                raise HostError(f"tmux workspace ignition failed: {exc}") from exc
+            if sk.returncode != 0:
+                excerpt = (sk.stderr or "")[-500:]
+                raise HostError(
+                    f"tmux workspace send-keys exited {sk.returncode}: {excerpt}")
+            return
         try:
             result = self._run(
                 ["tmux", "new-session", "-d", "-s", name, "-c", str(cwd)]
@@ -212,7 +249,7 @@ class HeadlessHost:
     # ------------------------------------------------------------------
 
     def ignite(self, name: str, cwd: str | os.PathLike,
-               argv: list[str]) -> None:
+               argv: list[str], runner: str | None = None) -> None:
         """Spawn the boss subprocess and pipe its output to <name>.log.
 
         Raises HostError on OSError from the subprocess seam (e.g. missing

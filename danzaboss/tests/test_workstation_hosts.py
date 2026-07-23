@@ -21,6 +21,8 @@ from danzaboss.workstation.hosts import (
     HeadlessHost,
     pick_host,
 )
+from danzaboss.workstation.workspace import (load_workspace, save_workspace,
+                                              session_name)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,34 @@ class TestConstants(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestTmuxHostIgnite(unittest.TestCase):
+    def test_workspace_ignite_targets_existing_runner_pane(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            save_workspace(root, {
+                "schema_version": 1,
+                "session": session_name(root),
+                "host": "tmux",
+                "order": ["claude", "codex"],
+                "panes": {"claude": "%1", "codex": "%2"},
+                "active_runner": "claude",
+                "terminal_opened": True,
+            })
+            calls = []
+
+            def run(cmd, **kwargs):
+                calls.append(cmd)
+                if "display-message" in cmd:
+                    return _ok_proc(stdout=session_name(root) + "\n")
+                return _ok_proc()
+
+            TmuxHost(run=run).ignite(session_name(root), root, ["codex"],
+                                     runner="codex")
+            self.assertFalse(any("new-session" in call for call in calls))
+            send = next(call for call in calls if "send-keys" in call)
+            self.assertEqual(send[send.index("-t") + 1], "%2")
+            self.assertIn(IGNITION_MESSAGE, send)
+            self.assertEqual(load_workspace(root)["active_runner"], "codex")
+
     def test_ignite_issues_new_session_then_send_keys(self):
         """ignite must call new-session then send-keys with correct arguments."""
         calls = []

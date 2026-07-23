@@ -13,7 +13,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import re
 import time
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -24,6 +23,7 @@ from danzaboss.kernel.state import StateError, StateManager, TeamState
 from danzaboss.workstation import planner as planner_mod
 from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation import runners as runners_mod
+from danzaboss.workstation.workspace import session_name as workspace_session_name
 
 
 class ConductorError(RuntimeError):
@@ -113,8 +113,7 @@ def session_name(root: str | os.PathLike) -> str:
     tmux rejects or rewrites '.'/':' in session names AND parses them
     as window/pane separators in -t targets, so a repo named
     'myapp.web' would create one name and probe another forever."""
-    return "danza-" + re.sub(r"[^A-Za-z0-9_-]", "_",
-                             Path(root).resolve().name)
+    return workspace_session_name(root)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -317,7 +316,7 @@ class Conductor:
                 return Action.WAIT
             runner, work_type = routed
             argv = self._argv_for(runner, routed=work_type is not None)
-            self._host.ignite(self._name, self._root, argv)
+            self._host.ignite(self._name, self._root, argv, runner=runner)
             self._watch = replace(self._watch, session_alive=True,
                                   turn_at_ignite=state.turn_number,
                                   last_change_monotonic=self._clock())
