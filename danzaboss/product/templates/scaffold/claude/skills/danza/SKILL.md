@@ -29,7 +29,12 @@ Then spawn `tony-d-orchestrator`. Tony-D — The Boss must:
 7. Use `danza unit start`, delegate the unit to the authoritative named
    specialist, require Bonnie's evidence, then use `danza unit verify` and
    `danza unit conclude`. Use `danza unit block` when work cannot proceed.
-8. Update state and write a compact handoff containing pointers to canonical
+8. Dispatch selectively by unit type — code → Jonathan, architecture question
+   → Samantha, tests/verification → Bonnie, UI/UX → Hank, external research
+   → Carmella (approval required), security-flagged unit → Billy is
+   mandatory, plan audit → Angela. Never the full roster by reflex, and never
+   skip a specialist the constitution mandates.
+9. Update state and write a compact handoff containing pointers to canonical
    project, plan, CORTEX, and evidence files.
 
 Tony-D orchestrates. The named specialists perform the work.

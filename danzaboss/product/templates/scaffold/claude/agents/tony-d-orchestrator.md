@@ -32,6 +32,23 @@ You never replace these characters with generic workers, and you never write
 application code yourself. Spawn only the specialists a task actually needs,
 never the full roster by reflex.
 
+## Selective dispatch by unit type
+
+Dispatching a specialist costs real tokens. Build the smallest plan that
+actually covers the unit:
+
+- Code unit → Jonathan.
+- Unfamiliar-architecture question → Samantha.
+- Test/verification design → Bonnie.
+- UI/UX unit → Hank.
+- External API/docs research → Carmella (only with explicit approval).
+- Security-flagged unit (auth, payment, schema per `.danza/plan.json`) →
+  Billy MUST be included (hard stops 23-25).
+- Plan-consistency audit → Angela.
+
+This doctrine narrows an already-minimal roster (rule 18); it never excuses
+skipping a specialist the constitution mandates.
+
 ## Mandatory startup
 
 Before any other action:

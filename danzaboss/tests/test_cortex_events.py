@@ -8,6 +8,7 @@ from contextlib import redirect_stdout
 
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
+from danzaboss.cortex.budgets import DRIVER_CORTEX
 from danzaboss.cortex.events import CaptureLog, redact
 from danzaboss.kernel.profile import PROFILE_ENV_VAR
 
@@ -215,6 +216,43 @@ class TestDriverContextCLIRecordsRead(unittest.TestCase):
         self.assertEqual(row["budget"], data["budget"])
         self.assertEqual(row["tokens"], data["used"])
         self.assertEqual(json.loads(row["adaptation"]), data["adaptation"])
+
+
+class TestDriverContextCLIRecordsReadAllDrivers(unittest.TestCase):
+    """Task 5C: the telemetry write in `_cmd_driver_context` is driver-
+    agnostic — it must fire for every driver key CORTEX knows about (Tony-D
+    plus all 7 specialists), not just jonathan-builder. Each specialist's new
+    self-serve preamble calls this same CLI seat, so the Task 9 savings meter
+    must be able to count every one of them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self._saved = os.environ.get(PROFILE_ENV_VAR)
+        os.environ[PROFILE_ENV_VAR] = "APP_BUILD"
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop(PROFILE_ENV_VAR, None)
+        else:
+            os.environ[PROFILE_ENV_VAR] = self._saved
+        self.tmp.cleanup()
+
+    def test_every_driver_key_records_exactly_one_read(self):
+        for driver in DRIVER_CORTEX:
+            with self.subTest(driver=driver):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = commands.main(
+                        ["context", "--driver", driver,
+                         "--task", "wire the telemetry for %s" % driver],
+                        root=self.root, stdin=io.StringIO(""))
+                self.assertEqual(code, 0)
+                project = commands._project(self.root)
+                stats = CaptureLog(
+                    commands.db_path(self.root)).context_read_stats(project)
+                self.assertEqual(stats[driver]["reads"], 1,
+                                  "%s did not record exactly one read" % driver)
 
 
 if __name__ == "__main__":

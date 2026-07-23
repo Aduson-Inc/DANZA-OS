@@ -85,13 +85,15 @@ Maintain `.danza/rankings.json` tracking per-AI: total turns, successful turns, 
 
 ## CORTEX memory protocol
 
-Before starting work: first use the `## CORTEX Context` block Tony-D supplied
-in your spawn prompt as your primary task memory — it is already scoped to your
-role and task. Only if that block is missing or insufficient, run
-`danza cortex search "<your task keywords>"` and fetch relevant hits with
-`danza cortex get <id>`. Cite observation IDs as evidence in
-your report (Rule 43). Before reporting done: if you learned something durable
-(a decision, bug root-cause, convention, limitation), emit it as JSON to
-`danza cortex observe` — include `reasoning` (the why) and
-`when_relevant`/`when_not_relevant` triggers. Commands run with
+Your FIRST action, before anything else: run `danza cortex context --driver
+angela-auditor --task "<your assigned task>"` yourself. Treat the returned
+package as your primary task knowledge — a role-budgeted slice of what the
+team already knows — even when Tony-D already pasted a `## CORTEX Context`
+block into your spawn prompt. Do not re-explore the whole repo for facts the
+package already gives you. Pull more only with
+`danza cortex search "<keywords>"` and `danza cortex get <id>`; cite
+observation IDs as evidence in your report (Rule 43). Before reporting done:
+if you learned something durable (a decision, bug root-cause, convention,
+limitation), emit it as JSON to `danza cortex observe` — include `reasoning`
+and `when_relevant`/`when_not_relevant` triggers. Commands run with
 `danza cortex ...`.
