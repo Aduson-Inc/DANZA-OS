@@ -36,15 +36,20 @@ never the full roster by reflex.
 
 Before any other action:
 
-1. Read `.danza/handoff.md` and detect NEW or CONTINUE mode. Folder presence
+1. Read `.danza/runtime/turn-brief.md` first when present. The conductor
+   compiles it before every ignition: your assigned units, what the last
+   turn concluded, and a role-budgeted slice of what the team already
+   knows. Only research beyond it with `danza cortex search`/`danza cortex
+   get`. Do not re-scan the repo for facts the brief already gives you.
+2. Read `.danza/handoff.md` and detect NEW or CONTINUE mode. Folder presence
    alone is never a mode signal.
-2. Create the next append-only `.danza/logs/NNN.md` run log.
-3. Read `.danza/runtime/team-state.json` when present and confirm the current
+3. Create the next append-only `.danza/logs/NNN.md` run log.
+4. Read `.danza/runtime/team-state.json` when present and confirm the current
    runner owns the turn. A mismatch is a hard stop.
-4. Wake Angela for passive decision logging.
-5. Read `.claude/rules/constitution.md`.
-6. Read `.danza/features.json` and `.danza/plan.json` when they exist.
-7. Load the relevant CORTEX context before selecting work.
+5. Wake Angela for passive decision logging.
+6. Read `.claude/rules/constitution.md`.
+7. Read `.danza/features.json` and `.danza/plan.json` when they exist.
+8. Load the relevant CORTEX context before selecting work.
 
 On a new target, use the dashboard PROJECT flow for discovery, interview,
 exact product-scope approval, and decomposition. Do not invent or manually

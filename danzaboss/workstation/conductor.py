@@ -19,10 +19,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
+from danzaboss.cortex.inject import est_tokens
 from danzaboss.kernel.state import StateError, StateManager, TeamState
 from danzaboss.workstation import planner as planner_mod
 from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation import runners as runners_mod
+from danzaboss.workstation import turnbrief as turnbrief_mod
 from danzaboss.workstation.workspace import session_name as workspace_session_name
 
 
@@ -242,25 +244,42 @@ class Conductor:
             argv.append(IGNITION_PHRASE)
         return argv
 
-    def _route(self, state: TeamState) -> tuple[str, str] | None:
-        """(runner, work_type) for this ignition. routing.json and
+    def _route(self, state: TeamState) -> tuple[str, str, dict] | None:
+        """(runner, work_type, plan_data) for this ignition. routing.json and
         plan.json are re-read on EVERY ignite — setup edits apply from the
         next turn, never mid-session (Decision 7). Routing and plan defects
         fail closed with a logged error. Choosing a fallback boss would make
         the postman a scheduler and could ignite work after a terminal kernel
-        conclusion."""
+        conclusion. plan_data rides back with the routing result so the P4.1
+        T4 turn-brief compiler can reuse the same read instead of a second
+        (potentially inconsistent) load of plan.json."""
         try:
             routing = routing_mod.load_routing(self._root)
             plan_data = json.loads(
                 (self._root / planner_mod.PLAN_JSON_RELPATH)
                 .read_text(encoding="utf-8"))
-            return routing_mod.route_turn(routing, plan_data, state)
+            runner, work_type = routing_mod.route_turn(routing, plan_data, state)
+            return runner, work_type, plan_data
         except (runners_mod.RunnerError, OSError, ValueError) as exc:
             # RoutingError and JSONDecodeError are ValueErrors; a missing
             # plan.json is an OSError; a re-validated registry gone bad is
             # a RunnerError.
             self.log("routing_error", reason=str(exc))
             return None
+
+    def _compile_turn_brief(self, state: TeamState, plan_data: dict,
+                            runner: str, work_type: str | None) -> None:
+        """Compile and write the P4.1 T4 turn brief before ignite. A brief
+        must NEVER block a turn: any failure here (cortex down, a bad plan
+        shape, a disk error) is logged and swallowed, never raised."""
+        try:
+            path = turnbrief_mod.write_turn_brief(
+                self._root, state, plan_data, runner, work_type)
+            text = path.read_text(encoding="utf-8")
+            self.log("turn_brief", bytes=len(text.encode("utf-8")),
+                     tokens=est_tokens(text))
+        except Exception as exc:  # noqa: BLE001 - fail-open by design
+            self.log("turn_brief_error", reason=str(exc))
 
     def _refresh_watch(self, state: TeamState) -> None:
         alive = self._host.alive(self._name)
@@ -314,8 +333,9 @@ class Conductor:
             routed = self._route(state)
             if routed is None:
                 return Action.WAIT
-            runner, work_type = routed
+            runner, work_type, plan_data = routed
             argv = self._argv_for(runner, routed=work_type is not None)
+            self._compile_turn_brief(state, plan_data, runner, work_type)
             self._host.ignite(self._name, self._root, argv, runner=runner)
             self._watch = replace(self._watch, session_alive=True,
                                   turn_at_ignite=state.turn_number,

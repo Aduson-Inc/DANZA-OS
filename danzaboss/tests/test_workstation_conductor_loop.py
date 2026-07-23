@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import _bootstrap  # noqa
 from danzaboss.kernel.state import StateManager
@@ -13,6 +14,7 @@ from danzaboss.workstation import planner as planner_mod
 from danzaboss.workstation import execution as execution_mod
 from danzaboss.workstation import routing as routing_mod
 from danzaboss.workstation import runners as runners_mod
+from danzaboss.workstation import turnbrief as turnbrief_mod
 from danzaboss.workstation.conductor import (IGNITION_PHRASE, LOG_RELPATH,
                                              PIDFILE_RELPATH,
                                              TEAM_STATE_RELPATH, Action,
@@ -419,6 +421,58 @@ class Degraded(LoopFixture):
         (self.root / runners_mod.RUNNERS_RELPATH).unlink()
         with self.assertRaises(runners_mod.RunnerError):
             self.conductor()
+
+
+class BriefCheckingHost(FakeHost):
+    """Records, at the moment ignite() is called, whether the turn brief
+    already exists on disk — proves ordering (brief write happens BEFORE
+    the host is asked to ignite), not just that it eventually appears."""
+
+    def __init__(self, root):
+        super().__init__()
+        self._root = root
+        self.brief_existed_at_ignite = []
+
+    def ignite(self, name, cwd, argv, runner=None):
+        path = self._root / turnbrief_mod.TURN_BRIEF_RELPATH
+        self.brief_existed_at_ignite.append(path.exists())
+        super().ignite(name, cwd, argv, runner=runner)
+
+
+class TurnBriefWiring(LoopFixture):
+    """P4.1 T4: the conductor compiles `.danza/runtime/turn-brief.md`
+    before every ignite, and a brief failure must never block the turn."""
+
+    def test_brief_exists_before_host_ignite_is_called(self):
+        host = BriefCheckingHost(self.root)
+        con = Conductor(host=host, root=self.root, clock=self.clock,
+                        sleep=lambda s: None, poll_interval=0.0)
+        self.assertIs(con.tick(), Action.IGNITE)
+        self.assertEqual(host.brief_existed_at_ignite, [True])
+        brief_path = self.root / turnbrief_mod.TURN_BRIEF_RELPATH
+        self.assertTrue(brief_path.exists())
+        self.assertIn("## Your turn", brief_path.read_text(encoding="utf-8"))
+
+    def test_turn_brief_event_logged_on_success(self):
+        con = self.conductor()
+        con.tick()
+        events = [e for e in self.log_events() if e["event"] == "turn_brief"]
+        self.assertTrue(events, "expected a turn_brief log event on success")
+        self.assertGreater(events[-1]["bytes"], 0)
+        self.assertGreater(events[-1]["tokens"], 0)
+
+    def test_brief_compilation_failure_does_not_block_ignite(self):
+        with patch("danzaboss.workstation.turnbrief.compile_turn_brief",
+                   side_effect=RuntimeError("cortex store is corrupt")):
+            con = self.conductor()
+            self.assertIs(con.tick(), Action.IGNITE)
+        self.assertEqual(len(self.host.ignites), 1)
+        errors = [e for e in self.log_events() if e["event"] == "turn_brief_error"]
+        self.assertTrue(errors)
+        self.assertIn("cortex store is corrupt", errors[-1]["reason"])
+        # a failed brief must not leave a torn/partial file behind
+        brief_path = self.root / turnbrief_mod.TURN_BRIEF_RELPATH
+        self.assertFalse(brief_path.exists())
 
 
 if __name__ == "__main__":
