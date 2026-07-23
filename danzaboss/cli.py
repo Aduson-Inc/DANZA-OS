@@ -455,7 +455,7 @@ def _cmd_activate(argv: list[str]) -> int:
                          # confirmed live, so activation never races the bind
                          # and never opens duplicate tabs.
                          open_browser=False)
-        if not no_ui and not wait_for_ui():
+        if not no_ui and not wait_for_ui(expected_root=root):
             print("activation failed: dashboard did not answer on port 33000",
                   file=sys.stderr)
             return 1

@@ -573,7 +573,10 @@ class TestDashboardStatic(unittest.TestCase):
         js = body.decode()
         for marker in ("api/setup", "loadSetup", "WHO’S THE BOSS?",
                        "boss-lineup", "Connect <b>1–4 AI clients</b>",
-                       "setup-steps", "Choose clients", "Sign in", "Set order",
+                       "setup-steps", "1. Connect", "2. Verify",
+                       "3. Choose order", "setup-live-status", "LIVE UPDATE",
+                       "1. Connect and verify", "2. Choose boss order",
+                       "3. Save your team",
                        "api/connection/launch", "Connect", "2 recommended",
                        "active Tony-D", "WAITING FOR ITS TURN",
                        "api/connection/verify", "Verify",
@@ -589,6 +592,7 @@ class TestDashboardStatic(unittest.TestCase):
                         "Launch client", "Verify connection",
                         "Found, not logged in", "Add as boss"):
             self.assertNotIn(removed, js)
+        self.assertIn("innerHTML = hero + agents + live + lineup + team", js)
         for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
             self.assertIn(value, js)
         for removed in ("Full Power", "data-dial", "data-override",
@@ -611,7 +615,7 @@ class TestDashboardStatic(unittest.TestCase):
         css = body.decode()
         for token in (".agent-card", ".boss-hero", ".boss-lineup",
                       ".boss-card", ".boss-active", ".boss-waiting",
-                      ".boss-feature-choice"):
+                      ".boss-feature-choice", ".setup-live-status"):
             self.assertIn(token, css)
         self.assertNotIn(".dial-card", css)
 

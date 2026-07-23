@@ -4,6 +4,8 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import signal
+import socket
 import subprocess
 import sys
 import time
@@ -46,6 +48,74 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _port_available(port: int) -> bool:
+    """Return whether the loopback UI port can be bound right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _ui_overview(port: int = UI_PORT) -> dict | None:
+    """Read the identity payload from a DANZABOSS UI already on *port*."""
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/overview", timeout=0.5) as response:
+            if response.status != 200:
+                return None
+            payload = json.loads(response.read())
+            return payload if isinstance(payload, dict) else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _terminate_pid(pid: int) -> None:
+    """Ask a previous DANZABOSS UI process to exit."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
+def clear_ui_port(root: str | Path, port: int = UI_PORT,
+                  *, timeout: float = 3.0) -> None:
+    """Release *port* when it is owned by another DANZABOSS UI.
+
+    The existing UI must identify its project through ``/api/overview`` and
+    expose that project's ``.danza/runtime/ui.pid``. Unknown processes are
+    never killed automatically.
+    """
+    root = Path(root).resolve()
+    if _port_available(port):
+        return
+    owner = _ui_overview(port)
+    owner_root = owner.get("root") if isinstance(owner, dict) else None
+    if not isinstance(owner_root, str) or not owner_root:
+        raise OSError(
+            f"port {port} is occupied by another application; close it "
+            f"before starting DANZABOSS")
+    owner_pid_path = Path(owner_root).resolve() / UI_PID_RELPATH
+    try:
+        pid = int(owner_pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        raise OSError(
+            f"port {port} is occupied by DANZABOSS at {owner_root}, but its "
+            f"UI process id is unavailable; close that dashboard first") from None
+    if pid == os.getpid():
+        raise OSError(f"port {port} is already used by this installer process")
+    _terminate_pid(pid)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _port_available(port):
+            return
+        time.sleep(0.05)
+    raise OSError(
+        f"could not clear port {port} from the previous DANZABOSS UI at "
+        f"{owner_root}")
+
+
 def start_ui(root: str | Path, *, open_browser: bool = True,
              popen=subprocess.Popen) -> int:
     root = Path(root).resolve()
@@ -57,6 +127,7 @@ def start_ui(root: str | Path, *, open_browser: bool = True,
                 return pid
         except (OSError, ValueError):
             pass
+    clear_ui_port(root)
     log_path = root / UI_LOG_RELPATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = log_path.open("a", encoding="utf-8")
@@ -76,13 +147,24 @@ def start_ui(root: str | Path, *, open_browser: bool = True,
     return pid
 
 
-def wait_for_ui(port: int = UI_PORT, *, timeout: float = 5.0) -> bool:
+def wait_for_ui(port: int = UI_PORT, *, expected_root: str | Path | None = None,
+                timeout: float = 5.0) -> bool:
+    expected = (str(Path(expected_root).resolve())
+                if expected_root is not None else None)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(
                     f"http://127.0.0.1:{port}/api/overview", timeout=0.5) as response:
-                return response.status == 200
+                if response.status != 200:
+                    return False
+                if expected is None:
+                    return True
+                payload = json.loads(response.read())
+                return (isinstance(payload, dict)
+                        and payload.get("root") == expected)
+        except (ValueError, json.JSONDecodeError):
+            return False
         except (OSError, urllib.error.URLError):
             time.sleep(0.05)
     return False
@@ -136,7 +218,8 @@ def verify_installation(root: str | Path, *, require_connection: bool = False) -
         root / ".danza" / "cortex" / "cortex.db",
     ]
     missing = [str(path.relative_to(root)) for path in required if not path.exists()]
-    ui_ok = wait_for_ui() if (root / UI_PID_RELPATH).exists() else False
+    ui_ok = (wait_for_ui(expected_root=root)
+             if (root / UI_PID_RELPATH).exists() else False)
     try:
         connection = json.loads((root / ".danza" / "runtime" /
                                  "connection.json").read_text(encoding="utf-8"))

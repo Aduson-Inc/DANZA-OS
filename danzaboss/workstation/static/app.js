@@ -752,7 +752,9 @@ function agentDisplay(name, agents) {
 
 function bossLineup(pick, agents, activeName) {
   if (!pick.lineup.length)
-    return `<div class="boss-empty">No bosses chosen yet. Add at least one connected client below.</div>`;
+    return `<div class="boss-empty"><b>No bosses chosen yet.</b>
+      <span>Connect and verify an AI client above, then choose
+      “Add to boss order”.</span></div>`;
   return `<ol class="boss-lineup">${pick.lineup.map((name, index) => {
     const active = name === (activeName || pick.lineup[0]);
     return `<li class="boss-card ${active ? "boss-active" : "boss-waiting"}">
@@ -775,27 +777,51 @@ function renderSetup() {
   const activeBoss = s.active_boss || pick.lineup[0];
   const waitingBosses = Array.isArray(s.waiting_bosses)
     ? s.waiting_bosses : pick.lineup.slice(1);
-  const banner = [
-    setup.error ? `<p class="warn mono">${esc(setup.error)}</p>` : "",
-    setup.notice ? `<p class="ok">${esc(setup.notice)}</p>` : "",
-    setup.fallback ? `<details class="connection-fallback"><summary>Show terminal fallback</summary><code>${esc(setup.fallback)}</code></details>` : "",
-    setup.busy ? `<p class="dim">saving your team…</p>` : "",
-    s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : "",
-  ].join("");
   const verified = s.agents.filter((a) => a.state === "verified").length;
+  const hasOrder = pick.lineup.length > 0;
   const steps = `<div class="setup-steps" aria-label="Setup progress">
-    <div class="setup-step ${verified ? "done" : "active"}"><span>1</span><b>Choose clients</b><small>Select the AI clients you want</small></div>
-    <div class="setup-step ${setup.notice && !setup.error ? "active" : ""}"><span>2</span><b>Sign in</b><small>Use each provider’s own login</small></div>
-    <div class="setup-step ${verified ? "done" : ""}"><span>3</span><b>Verify</b><small>DANZABOSS confirms the connection</small></div>
-    <div class="setup-step ${pick.lineup.length ? "active" : ""}"><span>4</span><b>Set order</b><small>Choose who becomes Tony-D first</small></div>
+    <div class="setup-step ${verified ? "done" : "active"}"><span>1</span><b>1. Connect</b><small>Open an AI client and sign in there.</small></div>
+    <div class="setup-step ${verified ? "done" : ""}"><span>2</span><b>2. Verify</b><small>Return here and confirm the connection.</small></div>
+    <div class="setup-step ${hasOrder ? "done" : verified ? "active" : ""}"><span>3</span><b>3. Choose order</b><small>Pick who becomes Tony-D first.</small></div>
   </div>`;
   const hero = `<section class="boss-hero">
     <div class="boss-kicker mono">YOUR AI TEAM</div>
     <h1>WHO’S THE BOSS?</h1>
     <p class="boss-lede">Connect <b>1–4 AI clients</b>, verify them, and put
-      them in order. The first verified client becomes Tony-D for this turn;
-      the others wait for their own turn.</p>
+      them in order. Follow the three steps below. Only a verified client can
+      become Tony-D.</p>
     ${steps}
+  </section>`;
+  const agents = panel("1. Connect and verify",
+    `<div class="agent-grid">${s.agents.map((a) => agentCard(a, pick)).join("")}</div>
+     <p class="setup-help"><b>Do this first:</b> press Connect, finish sign-in
+       in the provider’s own window, return here, and press Verify. The order
+       controls stay locked until a client is verified.</p>`);
+  const liveMessage = setup.error
+    ? `<p class="warn mono">${esc(setup.error)}</p>`
+    : setup.notice
+      ? `<p class="ok">${esc(setup.notice)}</p>`
+      : setup.busy
+        ? `<p class="dim">Working… keep this page open.</p>`
+        : `<p class="dim">Waiting for your first connection.</p>`;
+  const fallback = setup.fallback
+    ? `<details class="connection-fallback"><summary>Terminal fallback</summary><code>${esc(setup.fallback)}</code></details>`
+    : "";
+  const live = `<section class="setup-live-status ${setup.error ? "is-error" : ""}"
+      aria-live="polite"><div class="setup-live-label mono">LIVE UPDATE</div>
+      <div class="setup-live-message">${liveMessage}${fallback}
+      ${s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : ""}</div></section>`;
+  const lineup = panel("2. Choose boss order", `
+    <div id="boss-lineup">${bossLineup(pick, s.agents, s.active_boss)}</div>
+    <p class="setup-order-note">Use the arrows to set the turn order. The
+      active Tony-D model runs the specialist work; waiting models do nothing
+      until their turn.</p>`);
+  const team = panel("3. Save your team", `
+    ${s.setup_complete ? `<p class="ok">Team confirmed — Project is
+      unlocked. Confirm again any time to change it.</p>` : ""}
+    <div class="ready-summary"><b>${activeBoss ? esc(agentDisplay(activeBoss, s.agents)) : "No active boss yet"}</b>
+      <span>${activeBoss ? "will be Tony-D first." : "Choose at least one verified AI client above."}</span>
+      <span>${waitingBosses.length ? `${waitingBosses.length} waiting in order.` : "No waiting bosses."}</span></div>
     <div class="boss-feature-choice">
       <label for="features-per-turn">Features per turn</label>
       <select id="features-per-turn">
@@ -804,28 +830,10 @@ function renderSetup() {
         <option value="4"${pick.features_per_turn === 4 ? " selected" : ""}>4</option>
         <option value="5"${pick.features_per_turn === 5 ? " selected" : ""}>5</option>
       </select>
-      <span>Choose 2–5. A feature counts only after Bonnie verifies it.</span>
+      <span>Choose 2–5 verified features per turn.</span>
     </div>
-    <p class="connection-note">Connect opens the selected client in a new
-      project terminal. You never need to manage tmux yourself.</p>
-  </section>`;
-  const lineup = panel("4. Set boss order", `
-    <div id="boss-lineup">${bossLineup(pick, s.agents, s.active_boss)}</div>
-    <p class="dim">Use the arrows to set the handoff order. Only the active
-      Tony-D model runs specialist work; waiting models do nothing until their turn.</p>`);
-  const agents = panel("1–3. Choose, connect, and verify",
-    `<div class="agent-grid">${s.agents.map((a) => agentCard(a, pick)).join("")}</div>
-     <p class="setup-help"><b>How it works:</b> press Connect, finish sign-in
-       in the provider’s own window, return here, and press Verify. Then tick
-       Add to boss order. Only verified clients can be selected.</p>`);
-  const team = panel("Ready to activate", `
-    ${s.setup_complete ? `<p class="ok">Team confirmed — Project is
-      unlocked. Confirm again any time to change it.</p>` : ""}
-    <div class="ready-summary"><b>${activeBoss ? esc(agentDisplay(activeBoss, s.agents)) : "No active boss"}</b>
-      <span>is active Tony-D for this turn.</span>
-      <span>${waitingBosses.length ? `${waitingBosses.length} boss${waitingBosses.length === 1 ? "" : "es"} wait in order.` : "No waiting bosses."}</span></div>
-    <button id="confirm-team" class="boss-confirm">Save boss order and continue</button>`);
-  $("#setup-panel").innerHTML = banner + hero + lineup + agents + team;
+    <button id="confirm-team" class="boss-confirm"${hasOrder ? "" : " disabled"}>Save boss order and continue</button>`);
+  $("#setup-panel").innerHTML = hero + agents + live + lineup + team;
   wireSetup();
 }
 

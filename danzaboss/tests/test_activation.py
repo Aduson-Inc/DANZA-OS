@@ -14,13 +14,55 @@ from unittest.mock import patch
 
 import _bootstrap  # noqa: F401
 
-from danzaboss.product.activation import activate_project, verify_installation
+from danzaboss.product.activation import (activate_project, clear_ui_port,
+                                          verify_installation, wait_for_ui)
 from danzaboss.product.connection import launch_runner, verify_runner
 from danzaboss.cortex.tasks import start_task
 from danzaboss import cli
 
 
 class ActivationContract(unittest.TestCase):
+    def test_clear_ui_port_stops_an_existing_danza_ui(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "new-project"
+            other = Path(tmp) / "old-project"
+            pid_path = other / ".danza" / "runtime" / "ui.pid"
+            pid_path.parent.mkdir(parents=True)
+            pid_path.write_text("4242\n", encoding="utf-8")
+            with patch("danzaboss.product.activation._port_available",
+                       side_effect=[False, True]), \
+                    patch("danzaboss.product.activation._ui_overview",
+                          return_value={"root": str(other)}), \
+                    patch("danzaboss.product.activation._terminate_pid") as stop:
+                clear_ui_port(root)
+            stop.assert_called_once_with(4242)
+
+    def test_clear_ui_port_refuses_an_unknown_process(self):
+        with patch("danzaboss.product.activation._port_available",
+                   return_value=False), \
+                patch("danzaboss.product.activation._ui_overview",
+                      return_value=None):
+            with self.assertRaisesRegex(OSError, "another application"):
+                clear_ui_port("/tmp/new-project")
+
+    def test_wait_for_ui_rejects_a_different_project_on_same_port(self):
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({"root": "/tmp/other-project"}).encode()
+
+        with patch("danzaboss.product.activation.urllib.request.urlopen",
+                   return_value=Response()):
+            self.assertFalse(wait_for_ui(expected_root="/tmp/this-project",
+                                         timeout=0.01))
+
     def test_activate_prints_dashboard_url_after_starting_ui(self):
         output = io.StringIO()
         report = {
@@ -32,7 +74,7 @@ class ActivationContract(unittest.TestCase):
             "missing": [],
         }
         with patch("danzaboss.product.activation.activate_project") as activate, \
-                patch("danzaboss.product.activation.wait_for_ui", return_value=True), \
+                patch("danzaboss.product.activation.wait_for_ui", return_value=True) as wait, \
                 patch("danzaboss.product.activation.verify_installation",
                       return_value=report), \
                 patch("danzaboss.cli.webbrowser.open", return_value=True) as open_browser, \
@@ -43,6 +85,7 @@ class ActivationContract(unittest.TestCase):
         self.assertIn("http://localhost:33000", output.getvalue())
         activate.assert_called_once_with("/tmp/project", start_ui_process=True,
                                          open_browser=False)
+        wait.assert_called_once_with(expected_root="/tmp/project")
         open_browser.assert_called_once_with("http://localhost:33000")
 
     def test_launch_runner_uses_one_project_session_and_opens_terminal(self):
