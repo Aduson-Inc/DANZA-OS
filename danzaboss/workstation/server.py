@@ -37,7 +37,7 @@ from ..kernel.profile import active_profile
 from ..kernel.state import StateError, StateManager, TeamState
 from ..product.payload import agent_roster
 from ..product.connection import (connection_status, launch_runner,
-                                  verify_runner)
+                                  prepare_workspace, verify_runner)
 from ..product.handoff import HandoffMode, classify_handoff
 from . import build as build_mod
 from . import checkpoints as checkpoints_mod
@@ -61,6 +61,7 @@ from .runners import (RUNNERS_RELPATH, RunnerError, build_registry,
 from .state import STATE_RELPATH
 from .tree import APP_PROJECT_TYPES
 from .wizard import Wizard, WizardError
+from .workspace import workspace_summary
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 DEFAULT_PORT = 33000
@@ -70,6 +71,7 @@ MAX_POST_BYTES = 1_048_576  # nothing the onboarding forms send comes close
 # (interview.json, answers.json); one lock serializes concurrent POSTs so a
 # curl user racing the browser cannot interleave inside a mutation.
 _POST_LOCK = threading.Lock()
+_PREPARE_WORKSPACE = prepare_workspace
 
 # GET /api/setup must not block the dashboard behind five auth-probe
 # subprocesses on every poll, so the live registry is cached for a short TTL.
@@ -377,7 +379,8 @@ def setup_summary(root: str) -> dict:
            "boss_turns": boss_mode,
            "features_per_turn": features_per_turn,
            "setup_complete": setup_complete(root),
-           "connection": connection_status(root)}
+           "connection": connection_status(root),
+           "workspace": workspace_summary(root)}
     if routing_error:
         out["routing_error"] = routing_error
     return out
@@ -550,6 +553,9 @@ def post_setup(root: str, body: dict) -> dict:
                "lineup": lineup, "seats": seats,
                "boss_mode": boss_mode}
     routing_mod.validate_routing(routing, config)
+    installation = Path(root) / ".danza" / "runtime" / "installation.json"
+    if installation.exists():
+        _PREPARE_WORKSPACE(root, lineup, config)
     save_runners(root, config)
     routing_mod.save_routing(root, routing, config)
     return {"ok": True, "setup": setup_summary(root)}

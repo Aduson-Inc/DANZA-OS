@@ -9,6 +9,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
@@ -805,6 +806,18 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(setup["active_boss"], "gemini")
         self.assertEqual(setup["waiting_bosses"], ["claude"])
         self.assertEqual(setup["specialist_execution"], "active_boss")
+
+    def test_activated_setup_prepares_the_shared_workspace_before_save(self):
+        installation = Path(self.root) / ".danza" / "runtime" / "installation.json"
+        installation.parent.mkdir(parents=True, exist_ok=True)
+        installation.write_text("{}")
+        with patch.object(server_mod, "_PREPARE_WORKSPACE",
+                          return_value={"host": "tmux"}) as prepare:
+            status, out = post(self.port, "/api/setup", {
+                "lineup": ["claude", "gemini"], "features_per_turn": 2})
+        self.assertEqual(status, 200, out)
+        prepare.assert_called_once()
+        self.assertEqual(prepare.call_args.args[1], ["claude", "gemini"])
 
     def test_connection_launch_endpoint_starts_project_client_session(self):
         saved = server_mod.launch_runner

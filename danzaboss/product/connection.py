@@ -4,7 +4,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -13,6 +12,8 @@ from pathlib import Path
 
 from ..runtime.events import DanzaEvent, EventKind, ProjectEventLog
 from ..workstation.runners import RunnerError, probe_auth
+from ..workstation.workspace import (load_workspace, save_workspace,
+                                      session_name, workspace_summary)
 
 
 CONNECTION_RELPATH = Path(".danza") / "runtime" / "connection.json"
@@ -20,11 +21,6 @@ CONNECTION_RELPATH = Path(".danza") / "runtime" / "connection.json"
 
 class ConnectionError(ValueError):
     """The selected client/model cannot be verified for this project."""
-
-
-def _session_name(root: str | Path) -> str:
-    project = re.sub(r"[^A-Za-z0-9_-]", "_", Path(root).resolve().name)
-    return f"danza-project-{project}"
 
 
 def _terminal_argv(command: list[str], *, which=shutil.which) -> tuple[str, list[str]] | None:
@@ -107,6 +103,12 @@ def launch_runner(root: str | Path, runner: str, config: dict, *,
     if not isinstance(argv, list) or not argv:
         raise ConnectionError(f"{runner} has no interactive client command")
     if which("tmux") is None:
+        workspace = load_workspace(root)
+        if workspace is not None and workspace["host"] != "native_terminal":
+            raise ConnectionError(
+                "the project workspace was created with tmux, but tmux is no "
+                "longer available; restore tmux before connecting another client"
+            )
         terminal = _open_terminal(argv, cwd=str(Path(root).resolve()),
                                   which=which, popen=popen)
         if not terminal["opened"]:
@@ -114,59 +116,153 @@ def launch_runner(root: str | Path, runner: str, config: dict, *,
                 "DANZABOSS could not open a terminal for this client; install "
                 "a terminal emulator or tmux and try Connect again"
             )
+        order = list(workspace["order"]) if workspace else []
+        panes = dict(workspace["panes"]) if workspace else {}
+        if runner not in order:
+            order.append(runner)
+        panes[runner] = f"terminal:{runner}"
+        save_workspace(root, {
+            "schema_version": 1,
+            "session": session_name(root),
+            "host": "native_terminal",
+            "order": order,
+            "panes": panes,
+            "active_runner": workspace["active_runner"] if workspace else None,
+            "terminal_opened": True,
+        })
         return {
             "status": "launched",
             "runner": runner,
             "session": None,
-            "pane": None,
+            "pane": f"terminal:{runner}",
             "host": "native_terminal",
             "terminal": terminal,
             "attach_command": None,
             "message": "The client is open. Sign in there, then return here and verify.",
         }
 
-    session = _session_name(root)
+    session = session_name(root)
+    workspace = load_workspace(root)
     existing = run(["tmux", "has-session", "-t", f"={session}"],
                    capture_output=True, text=True)
-    if existing.returncode != 0:
-        started = run(["tmux", "new-session", "-d", "-P",
-                       "-F", "#{pane_id}", "-s", session,
-                       "-c", str(Path(root).resolve()), *argv],
-                      capture_output=True, text=True)
-        status = "launched"
-    else:
-        started = run(["tmux", "split-window", "-d", "-P",
-                       "-F", "#{pane_id}", "-t", f"={session}",
-                       "-c", str(Path(root).resolve()), *argv],
-                      capture_output=True, text=True)
+    if workspace is None and existing.returncode == 0:
+        raise ConnectionError(
+            "the project tmux session exists without DANZABOSS workspace "
+            "state; close that session manually, then Connect again")
+    if workspace is not None and workspace["host"] != "tmux":
+        raise ConnectionError(
+            "the project workspace is not a tmux workspace; recreate it before "
+            "connecting a tmux client")
+    if workspace is not None and runner in workspace["order"]:
         status = "already_running"
-    if started.returncode != 0:
-        excerpt = (started.stderr or "")[-500:]
-        raise ConnectionError(
-            f"could not launch {runner} in the project session: {excerpt}")
-
-    alive = run(["tmux", "has-session", "-t", f"={session}"],
-                capture_output=True, text=True)
-    if alive.returncode != 0:
-        raise ConnectionError(
-            f"{runner} closed before it could connect; open the client again "
-            "and complete its sign-in steps")
-
-    pane = (getattr(started, "stdout", "") or "").strip().splitlines()
-    terminal = _open_terminal(["tmux", "attach", "-t", session],
-                              cwd=str(Path(root).resolve()), which=which,
-                              popen=popen)
+        pane_id = workspace["panes"][runner]
+        terminal = {"opened": False, "launcher": None}
+    else:
+        if existing.returncode != 0:
+            started = run(["tmux", "new-session", "-d", "-P",
+                           "-F", "#{pane_id}", "-s", session,
+                           "-c", str(Path(root).resolve()), *argv],
+                          capture_output=True, text=True)
+            status = "launched"
+        else:
+            started = run(["tmux", "split-window", "-d", "-P",
+                           "-F", "#{pane_id}", "-t", f"={session}",
+                           "-c", str(Path(root).resolve()), *argv],
+                          capture_output=True, text=True)
+            status = "already_running"
+        if started.returncode != 0:
+            excerpt = (started.stderr or "")[-500:]
+            raise ConnectionError(
+                f"could not launch {runner} in the project session: {excerpt}")
+        pane_id = (getattr(started, "stdout", "") or "").strip().splitlines()
+        pane_id = pane_id[0] if pane_id else ""
+    if workspace is None or runner not in workspace["order"]:
+        alive = run(["tmux", "has-session", "-t", f"={session}"],
+                    capture_output=True, text=True)
+        if alive.returncode != 0:
+            raise ConnectionError(
+                f"{runner} closed before it could connect; open the client "
+                "again and complete its sign-in steps")
+        order = list(workspace["order"]) if workspace else []
+        panes = dict(workspace["panes"]) if workspace else {}
+        order.append(runner)
+        panes[runner] = pane_id
+        terminal_opened = bool(workspace and workspace["terminal_opened"])
+        if terminal_opened:
+            terminal = {"opened": False, "launcher": None}
+        else:
+            terminal = _open_terminal(["tmux", "attach", "-t", session],
+                                      cwd=str(Path(root).resolve()), which=which,
+                                      popen=popen)
+            terminal_opened = terminal["opened"]
+        save_workspace(root, {
+            "schema_version": 1,
+            "session": session,
+            "host": "tmux",
+            "order": order,
+            "panes": panes,
+            "active_runner": workspace["active_runner"] if workspace else None,
+            "terminal_opened": terminal_opened,
+        })
     terminal["fallback_command"] = f"tmux attach -t {session}"
     return {
         "status": status,
         "runner": runner,
         "session": session,
-        "pane": pane[0] if pane else None,
+        "pane": pane_id or None,
         "host": "tmux",
         "terminal": terminal,
         "attach_command": terminal["fallback_command"],
         "message": "The client is open. Sign in there, then return here and verify.",
     }
+
+
+def prepare_workspace(root: str | Path, lineup: list[str], config: dict, *,
+                      run=subprocess.run, which=shutil.which,
+                      popen=subprocess.Popen) -> dict:
+    """Ensure the selected lineup owns one ordered project workspace."""
+    if (not isinstance(lineup, list) or not lineup or len(lineup) > 4
+            or len(lineup) != len(set(lineup))):
+        raise ConnectionError("workspace lineup must contain 1-4 unique clients")
+    entries = config.get("runners", {}) if isinstance(config, dict) else {}
+    for runner in lineup:
+        entry = entries.get(runner)
+        if not isinstance(entry, dict) or not entry.get("detected"):
+            raise ConnectionError(f"{runner} is not installed on this machine")
+        if entry.get("auth") != "ok":
+            raise ConnectionError(f"{runner} is not verified")
+    for runner in lineup:
+        launch_runner(root, runner, config, run=run, which=which, popen=popen)
+    workspace = load_workspace(root)
+    if workspace is None:
+        raise ConnectionError("workspace state was not created")
+    current = list(workspace["order"])
+    panes = dict(workspace["panes"])
+    if workspace["host"] == "tmux":
+        for index, runner in enumerate(lineup):
+            if current[index] == runner:
+                continue
+            source_runner = current[index]
+            target_index = current.index(runner)
+            swapped = run(["tmux", "swap-pane", "-s", panes[source_runner],
+                           "-t", panes[runner]], capture_output=True, text=True)
+            if swapped.returncode != 0:
+                excerpt = (swapped.stderr or "")[-500:]
+                raise ConnectionError(
+                    f"could not order workspace panes: {excerpt}")
+            current[index], current[target_index] = (
+                current[target_index], current[index])
+    extras = [runner for runner in current if runner not in lineup]
+    if extras:
+        raise ConnectionError(
+            "workspace contains clients outside the saved lineup; close the "
+            "old workspace before saving a smaller team")
+    save_workspace(root, {
+        **workspace,
+        "order": list(lineup),
+        "active_runner": lineup[0],
+    })
+    return workspace_summary(root)
 
 
 def verify_runner(root: str | Path, runner: str, config: dict,

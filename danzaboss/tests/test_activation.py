@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import io
+import shutil
 import tempfile
 import time
 import unittest
@@ -16,7 +17,8 @@ import _bootstrap  # noqa: F401
 
 from danzaboss.product.activation import (activate_project, clear_ui_port,
                                           verify_installation, wait_for_ui)
-from danzaboss.product.connection import launch_runner, verify_runner
+from danzaboss.product.connection import (launch_runner, prepare_workspace,
+                                           verify_runner)
 from danzaboss.cortex.tasks import start_task
 from danzaboss import cli
 
@@ -89,6 +91,8 @@ class ActivationContract(unittest.TestCase):
         open_browser.assert_called_once_with("http://localhost:33000")
 
     def test_launch_runner_uses_one_project_session_and_opens_terminal(self):
+        root = tempfile.mkdtemp(prefix="danzaboss-launch-")
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         calls = []
         terminal_calls = []
 
@@ -110,7 +114,7 @@ class ActivationContract(unittest.TestCase):
             terminal_calls.append(argv)
 
         proof = launch_runner(
-            "/tmp/demo-project", "codex",
+            root, "codex",
             {"runners": {"codex": {
                 "detected": True, "auth": "unprobed",
                 "interactive": ["codex"], "kind": "cli"}}},
@@ -120,7 +124,7 @@ class ActivationContract(unittest.TestCase):
              else None))
         self.assertEqual(proof["status"], "launched")
         self.assertEqual(proof["runner"], "codex")
-        self.assertEqual(proof["session"], "danza-project-demo-project")
+        self.assertTrue(proof["session"].startswith("danza-"))
         self.assertTrue(proof["terminal"]["opened"])
         self.assertEqual(len(terminal_calls), 1)
         self.assertEqual(calls[0][0:3], ["tmux", "has-session", "-t"])
@@ -129,6 +133,8 @@ class ActivationContract(unittest.TestCase):
         self.assertEqual(calls[2][0:2], ["tmux", "has-session"])
 
     def test_second_runner_gets_a_pane_in_the_same_project_session(self):
+        root = tempfile.mkdtemp(prefix="danzaboss-launch-")
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         calls = []
 
         class Result:
@@ -138,20 +144,32 @@ class ActivationContract(unittest.TestCase):
 
         def run(argv, **kwargs):
             calls.append(argv)
+            if argv[1] == "has-session" and len(
+                    [call for call in calls if call[1] == "has-session"]) == 1:
+                return type("Result", (), {"returncode": 1,
+                                            "stderr": "", "stdout": ""})()
             return Result()
 
+        config = {"runners": {
+            "codex": {"detected": True, "auth": "unprobed",
+                      "interactive": ["codex"], "kind": "cli"},
+            "claude": {"detected": True, "auth": "unprobed",
+                       "interactive": ["claude"], "kind": "cli"}}}
+        launch_runner(root, "codex", config, run=run,
+                      popen=lambda *args, **kwargs: None,
+                      which=lambda name: "/usr/bin/tmux"
+                      if name == "tmux" else None)
         proof = launch_runner(
-            "/tmp/demo-project", "claude",
-            {"runners": {"claude": {
-                "detected": True, "auth": "unprobed",
-                "interactive": ["claude"], "kind": "cli"}}},
-            run=run, popen=lambda *args, **kwargs: None,
+            root, "claude", config, run=run,
+            popen=lambda *args, **kwargs: None,
             which=lambda name: "/usr/bin/tmux" if name == "tmux" else None)
         self.assertEqual(proof["status"], "already_running")
-        self.assertEqual(proof["session"], "danza-project-demo-project")
+        self.assertTrue(proof["session"].startswith("danza-"))
+        self.assertFalse(proof["terminal"]["opened"])
         self.assertEqual(calls[0][0:3], ["tmux", "has-session", "-t"])
-        self.assertEqual(calls[1][0:2], ["tmux", "split-window"])
-        self.assertIn("=danza-project-demo-project", calls[1])
+        self.assertEqual(calls[1][0:2], ["tmux", "new-session"])
+        self.assertEqual(calls[4][0:2], ["tmux", "split-window"])
+        self.assertIn("=" + proof["session"], calls[4])
 
     def test_launch_runner_falls_back_to_native_terminal_without_tmux(self):
         terminal_calls = []
@@ -173,6 +191,46 @@ class ActivationContract(unittest.TestCase):
         self.assertTrue(proof["terminal"]["opened"])
         self.assertEqual(terminal_calls[0][0], "x-terminal-emulator")
         self.assertIn("gemini", terminal_calls[0])
+
+    def test_prepare_workspace_returns_requested_order_and_active_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "demo-project"
+            calls = []
+
+            class Result:
+                returncode = 0
+                stderr = ""
+                stdout = "%0\n"
+
+            def run(argv, **kwargs):
+                calls.append(argv)
+                if argv[1] == "has-session" and len(
+                        [call for call in calls if call[1] == "has-session"]) == 1:
+                    return type("Result", (), {"returncode": 1,
+                                                "stderr": "", "stdout": ""})()
+                return Result()
+
+            config = {"runners": {
+                "codex": {"detected": True, "auth": "ok",
+                          "interactive": ["codex"], "kind": "cli"},
+                "claude": {"detected": True, "auth": "ok",
+                           "interactive": ["claude"], "kind": "cli"}}}
+            launch_runner(root, "codex", config, run=run,
+                          popen=lambda *a, **k: None,
+                          which=lambda name: "/usr/bin/tmux"
+                          if name == "tmux" else None)
+            launch_runner(root, "claude", config, run=run,
+                          popen=lambda *a, **k: None,
+                          which=lambda name: "/usr/bin/tmux"
+                          if name == "tmux" else None)
+            out = prepare_workspace(root, ["claude", "codex"], config,
+                                    run=run, popen=lambda *a, **k: None,
+                                    which=lambda name: "/usr/bin/tmux"
+                                    if name == "tmux" else None)
+            self.assertEqual(out["order"], ["claude", "codex"])
+            self.assertEqual(out["active_runner"], "claude")
+            self.assertEqual(out["host"], "tmux")
+            self.assertTrue(any(call[1] == "swap-pane" for call in calls))
 
     def test_activation_scaffolds_cortex_and_runtime_without_ui_process(self):
         with tempfile.TemporaryDirectory() as tmp:
