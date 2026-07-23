@@ -17,9 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .compress import MIN_ENTRY_TOKENS, compress_entry, entry_text
-from .inject import est_tokens
 from .observation import Observation
 from .retrieve import RetrievedItem
+from .tokens import est_tokens
 
 # Observation types grouped into budget categories.
 CATEGORY_TYPES: dict[str, set[str]] = {

@@ -1,8 +1,8 @@
 import unittest
 import _bootstrap  # noqa
 from danzaboss.cortex.compress import compress_entry, entry_text
-from danzaboss.cortex.inject import est_tokens
 from danzaboss.cortex.observation import Observation
+from danzaboss.cortex.tokens import est_tokens
 
 
 def obs(**kw):

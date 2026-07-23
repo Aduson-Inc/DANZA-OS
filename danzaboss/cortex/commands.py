@@ -58,7 +58,8 @@ def _hook_session_start(root: str, payload: dict) -> int:
     # dev session. Runtime profiles (OS_BOOT_TEST/APP_BUILD) inject as before.
     if not active_profile(root).session_inject:
         return 0
-    block = build_context(store, _project(root), stats=log.stats(_project(root)))
+    block = build_context(store, _project(root), root,
+                         stats=log.stats(_project(root)))
     if block:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "SessionStart", "additionalContext": block}}))
@@ -305,15 +306,17 @@ def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
     """danza cortex context [--driver <agent-id> --task "<task>" [--budget N]
     [--json]]
 
-    Bare form prints the session-start injection block (unchanged). With
-    --driver it compiles a budget-capped, role-specific CORTEX package for that
-    driver — the APP_BUILD front-door for per-driver context.
+    Bare form prints the same block SessionStart injects (turn-brief pointer
+    or compact index — see cortex/inject.py::build_context). With --driver it
+    compiles a budget-capped, role-specific CORTEX package for that driver —
+    the APP_BUILD front-door for per-driver context.
     """
     if "--driver" in argv:
         return _cmd_driver_context(argv, root)
     store = open_store(root)
     log = CaptureLog(db_path(root))
-    print(build_context(store, _project(root), stats=log.stats(_project(root))))
+    print(build_context(store, _project(root), root,
+                       stats=log.stats(_project(root))))
     return 0
 
 

@@ -33,6 +33,7 @@ import webbrowser
 from pathlib import Path
 
 from .cortex import commands as cortex_commands
+from .cortex.tokens import est_tokens
 from .kernel.profile import active_profile, binding_deny_reason, profile_binds_law
 from .kernel.state import StateError, StateManager, TeamState
 from .kernel.tiers import recommend_tier
@@ -102,14 +103,16 @@ def _emit(decision: str, reason: str = "") -> int:
 def _dispatch_tokens(tool: str, tool_input: dict) -> int:
     """Estimate the token payload of a sub-agent dispatch (Task/Agent).
 
-    ~4 chars/token over the serialized tool_input (prompt + description +
-    context), matching the est-token heuristic used across the memory/context
-    layers (store.py). Non-dispatch tools carry no dispatch payload.
+    Serializes tool_input (prompt + description + context) to JSON and
+    estimates its cost via the shared calibrated estimator
+    (cortex/tokens.py), kind="json" — a serialized payload is denser in
+    tokens per character than prose. Non-dispatch tools carry no dispatch
+    payload.
     """
     if tool not in ("Task", "Agent"):
         return 0
     try:
-        return len(json.dumps(tool_input, default=str)) // 4
+        return est_tokens(json.dumps(tool_input, default=str), kind="json")
     except (TypeError, ValueError):
         return 0
 

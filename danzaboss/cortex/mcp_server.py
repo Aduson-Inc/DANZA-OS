@@ -144,7 +144,8 @@ class CortexMcpServer:
         store = open_store(self.root)
         project = resolve_project(self.root)
         stats = CaptureLog(db_path(self.root)).stats(project)
-        return build_context(store, project, stats=stats) or "(empty store)"
+        return build_context(store, project, self.root,
+                            stats=stats) or "(empty store)"
 
     _TOOL_HANDLERS = {"cortex_search": _tool_search, "cortex_get": _tool_get,
                       "cortex_retrieve": _tool_retrieve,

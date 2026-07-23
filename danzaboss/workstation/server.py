@@ -30,8 +30,8 @@ from typing import Callable, Optional
 from ..cortex import commands as cortex_commands
 from ..cortex.events import CaptureLog
 from ..cortex.identity import resolve_project
-from ..cortex.inject import est_tokens
 from ..cortex.sqlite_backend import SqliteBackend
+from ..cortex.tokens import est_tokens
 from ..cortex.ui.server import CortexUIHandler, cross_origin_reason
 from ..kernel.profile import active_profile
 from ..kernel.state import StateError, StateManager, TeamState

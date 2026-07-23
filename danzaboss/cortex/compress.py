@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import re
 
-from .inject import est_tokens
 from .observation import Observation
+from .tokens import est_tokens
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 MIN_ENTRY_TOKENS = 24   # below this an entry stops being useful — don't emit

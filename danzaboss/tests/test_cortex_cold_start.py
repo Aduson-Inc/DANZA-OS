@@ -52,11 +52,16 @@ class TestC1Acceptance(unittest.TestCase):
             _, out = run(["hook", "stop"], root, {"session_id": "s1"})
             self.assertEqual(out.strip(), "")                        # gate passes
             # -- session 2: the knowledge is injected --
+            # P4.1 T6: no turn brief exists in this bare temp root, so
+            # SessionStart injects the compact titles-only index (full
+            # bodies were dropped entirely) — the title is present, the
+            # reasoning body is not, and the pull-by-id instruction is.
             _, out = run(["hook", "session-start"], root, {"session_id": "s2"})
             ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
             self.assertIn("CaptureLog is the tier-0 write path", ctx)
             self.assertIn("[CORTEX]", ctx)
-            self.assertIn("hooks must stay thin", ctx)  # reasoning survives
+            self.assertNotIn("hooks must stay thin", ctx)  # body not injected
+            self.assertIn("danza cortex get", ctx)  # pull reasoning on demand
 
 
 if __name__ == "__main__":

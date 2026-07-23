@@ -63,10 +63,14 @@ def _task_payload(prompt: str) -> dict:
 
 
 def _task_payload_at_tokens(tokens: int) -> dict:
+    # _dispatch_tokens now estimates via cortex/tokens.py kind="json"
+    # (~3.0 chars/token, not the old flat 4) — construct a payload whose
+    # serialized length is exactly `tokens * 3` chars so the estimate lands
+    # on `tokens` precisely, matching est_tokens' `len(text) // 3` math.
     payload = _task_payload("")
     tool_input = payload["tool_input"]
     overhead = len(json.dumps(tool_input))
-    tool_input["prompt"] = "x" * (tokens * 4 - overhead)
+    tool_input["prompt"] = "x" * (tokens * 3 - overhead)
     assert _dispatch_tokens("Task", tool_input) == tokens
     return payload
 

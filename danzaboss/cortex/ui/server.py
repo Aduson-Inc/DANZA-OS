@@ -20,9 +20,9 @@ from typing import Optional
 
 from ..events import CaptureLog
 from ..identity import resolve_project
-from ..inject import est_tokens
 from ..sqlite_backend import SqliteBackend
 from ..store import ObservationStore
+from ..tokens import est_tokens
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
