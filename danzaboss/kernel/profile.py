@@ -131,18 +131,50 @@ def active_profile(root: str = ".", env: dict | None = None) -> Profile:
     return PROFILES["OS_DEV"]
 
 
-def profile_binds_law(root: str = ".", env: dict | None = None) -> bool:
+INSTALLATION_MARKER_RELPATH = os.path.join(".danza", "runtime", "installation.json")
+
+
+@dataclass(frozen=True)
+class LawBinding:
+    """Result of profile_binds_law: whether runtime law binds, and whether
+    that answer came from the evidence-based fallback (active_profile()
+    raised, e.g. a corrupt profile.json) rather than a clean resolution.
+    Truthy on `binds` so existing `if profile_binds_law(...):` call sites are
+    unaffected by this richer return type."""
+    binds: bool
+    profile_unreadable: bool = False
+
+    def __bool__(self) -> bool:
+        return self.binds
+
+
+def profile_binds_law(root: str = ".", env: dict | None = None) -> LawBinding:
     """Does runtime law bind here? The shared predicate CC hooks use to decide
     fail-open vs fail-closed on their own errors (cli.py, cortex/commands.py).
 
-    Any profile-resolution failure (missing/corrupt profile config) resolves
-    to False (non-binding): a broken profile file must never make a hook's
-    error handling *stricter* than an intact one, and Layer 0 (OS_DEV) must
-    never be bricked by its own tooling."""
+    A profile-resolution failure (missing/corrupt profile config) must NOT
+    silently resolve to False: that would switch protection off in exactly
+    the customer APP_BUILD repo whose runtime state got corrupted. Instead it
+    falls back to evidence: activation always writes
+    .danza/runtime/installation.json (product/activation.py), so its presence
+    means this is a bound, activated repo whose profile file broke, and its
+    absence means an unactivated/OS_DEV tree, which must stay fail-open."""
     try:
-        return active_profile(root, env).constitution_binding
+        return LawBinding(active_profile(root, env).constitution_binding)
     except Exception:
-        return False
+        marker = os.path.join(root, INSTALLATION_MARKER_RELPATH)
+        return LawBinding(os.path.exists(marker), profile_unreadable=True)
+
+
+def binding_deny_reason(binding: LawBinding, detail: str) -> str:
+    """Standard hook deny-reason text for a profile_binds_law(...) deny path.
+    When the binding came from the evidence fallback (profile_unreadable),
+    the reason must say so and point at `danza doctor` so a corrupted
+    profile.json doesn't read as an ordinary internal-error deny."""
+    if binding.profile_unreadable:
+        return (f"{detail} — refusing by policy: execution profile is "
+                "unreadable (danza doctor for help)")
+    return f"{detail} — refusing by policy (danza doctor for help)"
 
 
 # ---- memory significance (capture diet) ---------------------------------------

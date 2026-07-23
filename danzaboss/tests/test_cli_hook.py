@@ -38,6 +38,23 @@ def _os_dev_root() -> str:
     return tempfile.mkdtemp()
 
 
+def _corrupt_profile_root(with_installation: bool) -> str:
+    """A repo whose .danza/runtime/profile.json is corrupt -> active_profile()
+    raises. installation.json (product/activation.py's activation marker)
+    present/absent decides whether profile_binds_law's evidence fallback
+    treats this as a bound APP_BUILD repo or an unactivated OS_DEV tree."""
+    root = tempfile.mkdtemp()
+    rt = os.path.join(root, ".danza", "runtime")
+    os.makedirs(rt)
+    with open(os.path.join(rt, "profile.json"), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+    if with_installation:
+        with open(os.path.join(rt, "installation.json"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("{}")
+    return root
+
+
 def _task_payload(prompt: str) -> dict:
     return {"tool_name": "Task",
             "tool_input": {"description": "spawn driver",
@@ -150,6 +167,15 @@ class TestFailClosedWhereRuntimeLawBinds(unittest.TestCase):
                 rc = main(["hook", "pretooluse"])
         return rc, out.getvalue(), err.getvalue()
 
+    def _run_hook(self, root, event, stdin_text):
+        os.chdir(root)
+        out = io.StringIO()
+        err = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = main(["hook", event])
+        return rc, out.getvalue(), err.getvalue()
+
     def test_app_build_denies_unreadable_stdin(self):
         root = _app_build_root()
         rc, out, _ = self._run_pretooluse(root, "this is not json{{{")
@@ -189,6 +215,81 @@ class TestFailClosedWhereRuntimeLawBinds(unittest.TestCase):
         hso = json.loads(out)["hookSpecificOutput"]
         self.assertEqual(hso["permissionDecision"], "allow")
         self.assertIn("failing open", err)
+
+    def test_app_build_stop_with_unreadable_stdin_emits_stop_shape(self):
+        # Finding 1: a Stop event must never emit the PreToolUse
+        # permissionDecision shape, even when stdin is garbage in a binding
+        # profile. Stop is an honest pass-through by design (the enforcement
+        # point is `danza cortex hook stop`), so unreadable stdin here must
+        # still produce the plain Stop shape and exit 0.
+        root = _app_build_root()
+        rc, out, _ = self._run_hook(root, "stop", "this is not json{{{")
+        self.assertEqual(rc, 0)
+        parsed = json.loads(out)
+        hso = parsed["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "Stop")
+        self.assertNotIn("permissionDecision", hso)
+
+    def test_os_dev_stop_with_unreadable_stdin_emits_stop_shape(self):
+        root = _os_dev_root()
+        rc, out, _ = self._run_hook(root, "stop", "this is not json{{{")
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "Stop")
+        self.assertNotIn("permissionDecision", hso)
+
+
+class TestEvidenceBasedBindingFallback(unittest.TestCase):
+    """Finding 2: a corrupt .danza/runtime/profile.json must not silently
+    switch protection off. profile_binds_law falls back to evidence
+    (installation.json presence) when active_profile() itself raises."""
+
+    def setUp(self):
+        self._old_cwd = os.getcwd()
+
+    def tearDown(self):
+        os.chdir(self._old_cwd)
+
+    def _run_pretooluse(self, root, stdin_text):
+        os.chdir(root)
+        out = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(out):
+                rc = main(["hook", "pretooluse"])
+        return rc, out.getvalue()
+
+    def test_corrupt_profile_with_installation_evidence_denies_and_explains(self):
+        root = _corrupt_profile_root(with_installation=True)
+        rc, out = self._run_pretooluse(root, "this is not json{{{")
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        reason = hso["permissionDecisionReason"].lower()
+        self.assertIn("profile", reason)
+        self.assertIn("unreadable", reason)
+        self.assertIn("danza doctor", reason)
+
+    def test_corrupt_profile_without_installation_evidence_fails_open(self):
+        root = _corrupt_profile_root(with_installation=False)
+        rc, out = self._run_pretooluse(root, "this is not json{{{")
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "allow")
+
+    def test_corrupt_profile_with_installation_evidence_denies_on_guard_error(self):
+        root = _corrupt_profile_root(with_installation=True)
+        payload = json.dumps({"tool_name": "Edit",
+                              "tool_input": {"file_path": "a.py"}})
+        with mock.patch("danzaboss.cli.file_protection_guard",
+                        side_effect=RuntimeError("guard exploded")):
+            rc, out = self._run_pretooluse(root, payload)
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        reason = hso["permissionDecisionReason"].lower()
+        self.assertIn("profile", reason)
+        self.assertIn("unreadable", reason)
+        self.assertIn("danza doctor", reason)
 
 
 if __name__ == "__main__":

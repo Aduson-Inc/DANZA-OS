@@ -33,7 +33,7 @@ import webbrowser
 from pathlib import Path
 
 from .cortex import commands as cortex_commands
-from .kernel.profile import active_profile, profile_binds_law
+from .kernel.profile import active_profile, binding_deny_reason, profile_binds_law
 from .kernel.state import StateError, StateManager, TeamState
 from .kernel.tiers import recommend_tier
 from .runtime.scan import profile_repo
@@ -186,25 +186,29 @@ def _cmd_hook(argv: list[str]) -> int:
                 "hookEventName": "SessionStart", "additionalContext": block}}))
         return 0
 
-    try:
-        payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
-    except Exception:
-        # Unreadable input -> fail open, EXCEPT where runtime law binds
-        # (APP_BUILD/OS_BOOT_TEST): there, a hook that cannot even read its
-        # own payload must refuse rather than silently allow the tool call.
-        if profile_binds_law(os.getcwd()):
-            return _emit("deny", "hook payload unreadable — refusing by "
-                         "policy (danza doctor for help)")
-        return _emit("allow")
-
     if event in ("stop", "Stop"):
         # DANZA's turn-end gates (anti-theatre/verify/regression) need turn data
         # the CC Stop event does not carry, so we do not block stops here.
         # This is an honest pass-through, not the enforcement point: the real
         # distillation enforcement lives at `danza cortex hook stop`
         # (cortex/commands.py::_hook_stop -> hooks/gates.py::distillation_gate).
+        # Dispatched before the stdin parse below (like session-start above)
+        # since Stop consumes no payload fields: a Stop event must never fall
+        # into the PreToolUse-shaped fail-closed/fail-open branch that parse
+        # failure triggers.
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop"}}))
         return 0
+
+    try:
+        payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
+    except Exception:
+        # Unreadable input -> fail open, EXCEPT where runtime law binds
+        # (APP_BUILD/OS_BOOT_TEST): there, a hook that cannot even read its
+        # own payload must refuse rather than silently allow the tool call.
+        binding = profile_binds_law(os.getcwd())
+        if binding:
+            return _emit("deny", binding_deny_reason(binding, "hook payload unreadable"))
+        return _emit("allow")
 
     # PreToolUse: enforce the actor-independent, safety-critical guards.
     try:
@@ -214,9 +218,9 @@ def _cmd_hook(argv: list[str]) -> int:
         # Internal guard error -> fail open, EXCEPT where runtime law binds:
         # there, silently allowing a tool call past a broken guard is exactly
         # the failure mode this policy exists to close.
-        if profile_binds_law(os.getcwd()):
-            return _emit("deny", "hook internal error — refusing by policy: "
-                         f"{e} (danza doctor for help)")
+        binding = profile_binds_law(os.getcwd())
+        if binding:
+            return _emit("deny", binding_deny_reason(binding, f"hook internal error: {e}"))
         print(f"danza hook internal error (failing open): {e}", file=sys.stderr)
         return _emit("allow")
 

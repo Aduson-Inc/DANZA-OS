@@ -28,7 +28,8 @@ from .intent import WorkspaceState
 from .observation import Observation
 from .tasks import start_task
 from ..hooks.gates import distillation_gate
-from ..kernel.profile import active_profile, capture_event, profile_binds_law
+from ..kernel.profile import (active_profile, binding_deny_reason,
+                              capture_event, profile_binds_law)
 
 
 def _project(root: str) -> str:
@@ -151,8 +152,8 @@ def _cmd_hook(argv: list[str], root: str, stdin: TextIO) -> int:
     if handler is None:
         if binding:
             return _fail_closed(
-                event, f"unknown cortex hook event: {event!r} — refusing by "
-                "policy (danza doctor for help)")
+                event, binding_deny_reason(
+                    binding, f"unknown cortex hook event: {event!r}"))
         print(f"unknown cortex hook event: {event!r}", file=sys.stderr)
         return 0  # fail open even on bad wiring
     try:
@@ -160,8 +161,8 @@ def _cmd_hook(argv: list[str], root: str, stdin: TextIO) -> int:
     except Exception as e:  # noqa: BLE001 — fail-closed only where law binds
         if binding:
             return _fail_closed(
-                event, "cortex hook internal error — refusing by policy: "
-                f"{e} (danza doctor for help)")
+                event, binding_deny_reason(
+                    binding, f"cortex hook internal error: {e}"))
         print(f"cortex hook internal error (failing open): {e}", file=sys.stderr)
         return 0
 

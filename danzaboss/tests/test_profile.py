@@ -9,7 +9,8 @@ import unittest
 import _bootstrap  # noqa
 
 from danzaboss.kernel.profile import (
-    PROFILE_ENV_VAR, PROFILES, active_profile, capture_event, event_significant)
+    PROFILE_ENV_VAR, PROFILES, active_profile, capture_event, event_significant,
+    profile_binds_law)
 from danzaboss.cortex import commands as cortex_commands
 from danzaboss.cortex.events import CaptureLog
 from danzaboss.hooks.gates import distillation_gate
@@ -125,6 +126,41 @@ class TestDistillationNoiseFloor(unittest.TestCase):
     def test_default_min_is_one_backward_compatible(self):
         self.assertFalse(distillation_gate(1, 0, False).allow)
         self.assertTrue(distillation_gate(0, 0, False).allow)
+
+
+class TestProfileBindsLawEvidenceFallback(unittest.TestCase):
+    """When active_profile() itself raises (corrupt profile.json), the shared
+    predicate must not silently fail open — that would switch off hook
+    protection in a customer APP_BUILD repo just because its runtime state
+    got corrupted. It falls back to evidence: an activated repo always has
+    .danza/runtime/installation.json (product/activation.py writes it), so
+    its presence means "this is a bound repo whose profile file broke", and
+    its absence means an unactivated/OS_DEV tree that must stay fail-open."""
+
+    def _corrupt_profile_root(self, with_installation: bool) -> str:
+        root = tempfile.mkdtemp()
+        rt = os.path.join(root, ".danza", "runtime")
+        os.makedirs(rt)
+        with open(os.path.join(rt, "profile.json"), "w", encoding="utf-8") as fh:
+            fh.write("{not valid json")
+        if with_installation:
+            with open(os.path.join(rt, "installation.json"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("{}")
+        return root
+
+    def test_corrupt_profile_still_raises_from_active_profile(self):
+        root = self._corrupt_profile_root(with_installation=True)
+        with self.assertRaises(ValueError):
+            active_profile(root, env={})
+
+    def test_corrupt_profile_with_installation_evidence_binds(self):
+        root = self._corrupt_profile_root(with_installation=True)
+        self.assertTrue(profile_binds_law(root, env={}))
+
+    def test_corrupt_profile_without_installation_evidence_fails_open(self):
+        root = self._corrupt_profile_root(with_installation=False)
+        self.assertFalse(profile_binds_law(root, env={}))
 
 
 class TestProfileAwareCortexHooks(unittest.TestCase):
