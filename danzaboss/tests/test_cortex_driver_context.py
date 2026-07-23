@@ -144,6 +144,18 @@ class TestCompileDriverContextCore(unittest.TestCase):
         rendered = ctx.render()
         self.assertIn("jonathan-builder", rendered)
 
+    def test_every_driver_profile_uses_known_intents_and_types(self):
+        # salvaged from the retired legacy context/pipeline.py DRIVER_CORTEX
+        # invariant test: every live driver profile must still name a real
+        # intent and only real observation types.
+        from danzaboss.cortex.intent import INTENTS
+        from danzaboss.cortex.observation import ObsType
+        valid_types = {t.value for t in ObsType}
+        for driver, prof in DRIVER_CORTEX.items():
+            self.assertIn(prof["intent"], INTENTS, driver)
+            if prof["types"] is not None:
+                self.assertTrue(set(prof["types"]) <= valid_types, driver)
+
 
 class TestNoLegacySubstrate(unittest.TestCase):
     def test_module_never_imports_memory_store(self):

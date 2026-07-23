@@ -1,6 +1,5 @@
 """C3 integration surfaces: the /api/explain endpoint runs the real pipeline,
-`danza cortex retrieve` works end to end, and ContextPipeline composes a
-per-driver CORTEX slice next to the MemoryStore section."""
+and `danza cortex retrieve` works end to end."""
 import io
 import json
 import tempfile
@@ -9,13 +8,11 @@ import urllib.parse
 import urllib.request
 
 import _bootstrap  # noqa
-from danzaboss.context.pipeline import ContextPipeline, DRIVER_CORTEX
 from danzaboss.cortex import commands
 from danzaboss.cortex.observation import Observation, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
 from danzaboss.cortex.ui.server import serve_in_thread
-from danzaboss.memory.store import MemoryStore
 
 
 def seed(root: str) -> ObservationStore:
@@ -113,41 +110,6 @@ class TestRetrieveCLI(unittest.TestCase):
     def test_prompt_is_required(self):
         rc, _ = self._run(["retrieve", "--json"])
         self.assertEqual(rc, 2)
-
-
-class TestPipelineCortexSource(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = self.tmp.name
-        self.cortex = seed(self.root)
-        self.project = self.root.split("/")[-1]
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_driver_slice_added_within_budget(self):
-        pipe = ContextPipeline(MemoryStore(self.root), cortex_store=self.cortex,
-                               project=self.project)
-        ctx = pipe.compile("bonnie-qa", "t1", "verify the jwt auth bug fix",
-                           cortex_budget=400)
-        self.assertIn("CORTEX observations", ctx.sections)
-        body = ctx.sections["CORTEX observations"]
-        self.assertIn("JWT refresh race fixed", body)          # bonnie sees bugs
-        self.assertNotIn("Fail-closed auth convention", body)  # type-filtered out
-
-    def test_no_cortex_store_means_no_section(self):
-        ctx = ContextPipeline(MemoryStore(self.root)).compile(
-            "bonnie-qa", "t1", "anything")
-        self.assertNotIn("CORTEX observations", ctx.sections)
-
-    def test_every_driver_profile_uses_known_intents_and_types(self):
-        from danzaboss.cortex.intent import INTENTS
-        from danzaboss.cortex.observation import ObsType
-        valid_types = {t.value for t in ObsType}
-        for driver, prof in DRIVER_CORTEX.items():
-            self.assertIn(prof["intent"], INTENTS, driver)
-            if prof["types"] is not None:
-                self.assertTrue(set(prof["types"]) <= valid_types, driver)
 
 
 if __name__ == "__main__":

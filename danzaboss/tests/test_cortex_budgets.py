@@ -135,10 +135,6 @@ class TestReExportCompat(unittest.TestCase):
         self.assertEqual(default_budget("jonathan-builder"), 2400)
         self.assertEqual(default_budget("nobody"), DEFAULT_BUDGET)
 
-    def test_pipeline_imports_shared_table(self):
-        from danzaboss.context.pipeline import DRIVER_CORTEX as pl_cortex
-        self.assertIs(pl_cortex, DRIVER_CORTEX)
-
 
 if __name__ == "__main__":
     unittest.main()
