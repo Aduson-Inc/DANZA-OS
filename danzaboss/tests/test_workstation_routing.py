@@ -225,6 +225,21 @@ class TestValidateRouting(unittest.TestCase):
             ["claude"], _full_seats("claude", conductor="claude"))
         self.assertEqual(validate_routing(routing, self.cfg), routing)
 
+    def test_rejects_seat_routed_boss_mode(self):
+        # Sequential relay is the only routing model that ships (P T8a).
+        routing = _routing(["claude"], _full_seats("claude"))
+        routing["boss_mode"] = "seat_routed"
+        with self.assertRaises(RoutingError):
+            validate_routing(routing, self.cfg)
+
+    def test_missing_boss_mode_defaults_to_sequential_and_is_enforced(self):
+        # No boss_mode key (legacy shape) still gets the sequential-only
+        # rule: every specialist seat must equal the active boss.
+        routing = _routing(["claude", "codex"],
+                           _full_seats("claude", qa="codex"))
+        with self.assertRaisesRegex(RoutingError, "sequential boss mode"):
+            validate_routing(routing, self.cfg)
+
 
 class TestPersistence(unittest.TestCase):
     """save/load in the save_runners/load_runners idiom."""
@@ -295,18 +310,21 @@ class TestPersistence(unittest.TestCase):
 
 
 class TestNextBoss(unittest.TestCase):
-    """Pure routing decision: ready unit -> kind -> work type -> seat."""
+    """Pure routing decision: ready unit -> kind -> work type -> turn slot.
+
+    Sequential relay is the only routing model that ships (P T8a): the
+    runner is always ``lineup[turn_number % len(lineup)]``. The 'seats' map
+    is shape-validated only — route_turn/next_boss never consult it."""
 
     ROUTING = {"version": SCHEMA_VERSION, "features_per_turn": 2,
                "lineup": ["claude", "codex"],
-               "seats": {**{s: "claude" for s in SEATS},
-                         "conductor": BUILTIN_CONDUCTOR, "qa": "codex"}}
+               "seats": _full_seats("claude")}
 
     def test_kind_table_hit(self):
         state = TeamState(turn_number=0)
         self.assertEqual(next_boss(self.ROUTING, _plan(), state), "claude")
 
-    def test_completed_units_reveal_dependency_ready_qa_seat(self):
+    def test_rotates_to_next_lineup_member_on_next_turn(self):
         state = TeamState(turn_number=1)
         plan = _completed(_plan(), "1.1", "1.2")
         self.assertEqual(next_boss(self.ROUTING, plan, state), "codex")
@@ -317,23 +335,16 @@ class TestNextBoss(unittest.TestCase):
             next_boss(self.ROUTING,
                       _completed(_plan(), "1.1", "1.2", "2.1"), state)
 
-    def test_builtin_seat_falls_back_to_rotation(self):
-        # Hand-edited file: qa seat says "builtin" -> rotation by turn.
+    def test_seat_assignments_are_never_consulted(self):
+        # A stale/hand-edited seat map claims "codex" owns qa work — proof
+        # that route_turn ignores it and rotates by turn number instead.
         routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,
                    "lineup": ["claude", "codex"],
-                   "seats": {**{s: "claude" for s in SEATS},
-                             "qa": BUILTIN_CONDUCTOR}}
-        state = TeamState(turn_number=1)
-        self.assertEqual(next_boss(routing, _completed(_plan(), "1.1", "1.2"), state),
-                         routing["lineup"][1 % 2])
-
-    def test_missing_seat_value_falls_back_to_rotation(self):
-        routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,
-                   "lineup": ["claude", "codex"],
-                   "seats": {s: "claude" for s in SEATS if s != "qa"}}
-        state = TeamState(turn_number=2)
-        self.assertEqual(next_boss(routing, _completed(_plan(), "1.1", "1.2"), state),
-                         routing["lineup"][2 % 2])
+                   "seats": {**{s: "claude" for s in SEATS}, "qa": "codex"}}
+        state = TeamState(turn_number=0)
+        self.assertEqual(
+            next_boss(routing, _completed(_plan(), "1.1", "1.2"), state),
+            "claude")  # lineup[0 % 2], NOT the seat's "codex"
 
     def test_sequential_boss_mode_ignores_specialist_seats(self):
         routing = {"version": SCHEMA_VERSION, "features_per_turn": 2,

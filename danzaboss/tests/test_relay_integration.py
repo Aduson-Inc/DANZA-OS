@@ -16,11 +16,10 @@ few observations so the turn brief's knowledge section has content.
 While building this fixture, a real defect surfaced and was fixed
 separately in ``workstation/execution.py`` (see ``ExecutionFixture``
 docstring below) — `apply_turn_conclusion`'s automatic ``next_boss`` lookup
-used the *pre-handoff* turn number for turn-number-dependent routing
-(sequential boss_mode, and the seat_routed builtin/missing-seat fallback),
-which handed the turn right back to the departing boss instead of rotating
-to the next lineup member. That mismatch is exactly what this end-to-end
-test is designed to catch and did.
+used the *pre-handoff* turn number for sequential relay's turn-number-based
+rotation, which handed the turn right back to the departing boss instead of
+rotating to the next lineup member. That mismatch is exactly what this
+end-to-end test is designed to catch and did.
 """
 import json
 import tempfile

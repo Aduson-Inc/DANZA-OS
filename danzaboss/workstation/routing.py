@@ -55,7 +55,7 @@ KIND_TO_WORK_TYPE = {"scaffold": "build", "backend": "build",
                      "design": "design", "test": "qa"}
 
 _MAX_LINEUP = 4
-BOSS_MODES = ("seat_routed", "sequential")
+BOSS_MODES = ("sequential",)
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ def validate_routing(routing: object, config: dict) -> dict:
     if len(set(lineup)) != len(lineup):
         raise RoutingError(f"lineup has duplicate names: {lineup!r}")
 
-    boss_mode = routing.get("boss_mode", "seat_routed")
+    boss_mode = routing.get("boss_mode", "sequential")
     if boss_mode not in BOSS_MODES:
         raise RoutingError(
             f"boss_mode must be one of {BOSS_MODES!r}, got {boss_mode!r}"
@@ -210,13 +210,15 @@ def validate_routing(routing: object, config: dict) -> dict:
                 f"{BUILTIN_CONDUCTOR!r})"
             )
 
-    if boss_mode == "sequential":
-        active = lineup[0]
-        if any(seats[work_type] != active for work_type in SEAT_WORK_TYPES):
-            raise RoutingError(
-                "sequential boss mode must route every specialist through "
-                f"the active boss {active!r}"
-            )
+    # Sequential relay is the only routing model that ships (boss_mode is
+    # validated to "sequential" above): every specialist seat must route
+    # through the active boss, unconditionally.
+    active = lineup[0]
+    if any(seats[work_type] != active for work_type in SEAT_WORK_TYPES):
+        raise RoutingError(
+            "sequential boss mode must route every specialist through "
+            f"the active boss {active!r}"
+        )
 
     return routing
 
@@ -293,12 +295,10 @@ def route_turn(routing: dict, plan_data: dict,
     before ignition; the conductor only asks this router where to post the
     selected work.
 
-    An unknown kind raises RoutingError (fail closed). In sequential boss
-    mode, the ordered lineup owns the entire turn and specialist seats do not
-    select another model. A "builtin" or
-    missing seat value — possible only in a hand-edited file, since
-    validate_routing forbids both — falls back to deterministic rotation:
-    ``lineup[turn_number % len(lineup)]``."""
+    An unknown kind raises RoutingError (fail closed). Sequential relay is
+    the only routing model that ships: the ordered lineup owns the entire
+    turn and specialist seats never select another model — the runner is
+    always ``lineup[turn_number % len(lineup)]``."""
     try:
         unit = execution.next_ready_unit(plan_data)
     except (execution.ExecutionError, ValueError) as exc:
@@ -313,13 +313,8 @@ def route_turn(routing: dict, plan_data: dict,
         )
     work_type = KIND_TO_WORK_TYPE[unit.kind]
 
-    seat = routing.get("seats", {}).get(work_type)
     lineup = routing["lineup"]
-    if routing.get("boss_mode", "seat_routed") == "sequential":
-        return lineup[state.turn_number % len(lineup)], work_type
-    if seat is None or seat == BUILTIN_CONDUCTOR:
-        return lineup[state.turn_number % len(lineup)], work_type
-    return seat, work_type
+    return lineup[state.turn_number % len(lineup)], work_type
 
 
 def next_boss(routing: dict, plan_data: dict, state: TeamState) -> str:

@@ -40,9 +40,12 @@ class ExecutionFixture(unittest.TestCase):
         config["runners"]["claude"]["auth"] = "ok"
         config["runners"]["codex"]["auth"] = "ok"
         save_runners(self.root, config)
+        # Sequential relay is the only routing model that ships (P T8a):
+        # every specialist seat must equal the active boss, so seats stay
+        # uniform here — route_turn selects by turn-number rotation, not
+        # by seat.
         seats = {seat: "claude" for seat in routing.SEATS}
         seats["conductor"] = routing.BUILTIN_CONDUCTOR
-        seats["qa"] = "codex"
         routing.save_routing(self.root, {
             "version": routing.SCHEMA_VERSION,
             "features_per_turn": 2,

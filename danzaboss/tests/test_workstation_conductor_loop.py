@@ -262,12 +262,14 @@ def _plan_payload() -> dict:
 
 
 class Routing(LoopFixture):
-    """P4 T8: each ignition consults the seat router (next_boss) for the
-    routed runner's argv. Task 5 makes routing failures fail closed: the
-    postman logs and waits instead of choosing a fallback boss."""
+    """P4 T8: each ignition consults the router (next_boss) for the routed
+    runner's argv. Task 5 makes routing failures fail closed: the postman
+    logs and waits instead of choosing a fallback boss. Sequential relay is
+    the only routing model that ships (P T8a): the runner is always
+    lineup[turn_number % len(lineup)], so seats stay uniform below."""
 
     def install_team(self, *, claude_activation: str = "argv") -> None:
-        """Two-runner lineup: build -> claude, qa -> codex, plan on disk."""
+        """Two-runner lineup (claude, codex), plan on disk."""
         config = runners_mod.default_config({"claude": True, "codex": True})
         config["runners"]["claude"]["auth"] = "ok"
         config["runners"]["codex"]["auth"] = "ok"
@@ -275,7 +277,6 @@ class Routing(LoopFixture):
         runners_mod.save_runners(self.root, config)
         seats = {seat: "claude" for seat in routing_mod.SEATS}
         seats["conductor"] = routing_mod.BUILTIN_CONDUCTOR
-        seats["qa"] = "codex"
         routing_mod.save_routing(
             self.root, {"version": routing_mod.SCHEMA_VERSION,
                         "features_per_turn": 2,
@@ -358,9 +359,9 @@ class Routing(LoopFixture):
                       self.log_events()[-1]["reason"])
 
     def test_two_runner_handoff_ignites_each_routed_runner(self):
-        # Acceptance (spec section 8): turn 0 routes feature 1.1 (build ->
-        # claude); after the handoff advances the turn, turn 1 routes
-        # feature 2.1 (test -> qa -> codex).
+        # Acceptance (spec section 8): turn 0 routes feature 1.1 (build) to
+        # lineup[0]=claude; after the handoff advances the turn, turn 1
+        # routes feature 2.1 (test -> qa work type) to lineup[1]=codex.
         self.install_team()
         con = self.conductor()
         con.tick()                                     # ignite turn 0

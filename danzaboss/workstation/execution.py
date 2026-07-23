@@ -240,13 +240,13 @@ def apply_turn_conclusion(root: str | os.PathLike, manager: StateManager,
             # Local import avoids making routing depend on an eager import cycle.
             from danzaboss.workstation import routing
             routing_data = routing.load_routing(root)
-            # route_turn's turn-number-dependent branches (sequential
-            # boss_mode, and the seat_routed builtin/missing-seat fallback)
-            # answer "who takes the turn that is about to begin". Routing
-            # against the ending turn's number hands the turn right back to
-            # the departing boss instead of rotating (the incoming boss's
-            # own `danza unit begin --actor` would then be turn-locked out
-            # by the current_boss this sets).
+            # route_turn's turn-number-based rotation (sequential relay,
+            # the only routing model that ships) answers "who takes the
+            # turn that is about to begin". Routing against the ending
+            # turn's number hands the turn right back to the departing
+            # boss instead of rotating (the incoming boss's own
+            # `danza unit begin --actor` would then be turn-locked out by
+            # the current_boss this sets).
             upcoming = replace(state, turn_number=state.turn_number + 1)
             next_boss, _ = routing.route_turn(routing_data, plan_data, upcoming)
         else:
