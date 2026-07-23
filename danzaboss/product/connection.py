@@ -265,6 +265,28 @@ def prepare_workspace(root: str | Path, lineup: list[str], config: dict, *,
     return workspace_summary(root)
 
 
+def open_workspace(root: str | Path, *, which=shutil.which,
+                   popen=subprocess.Popen, run=subprocess.run) -> dict:
+    """Open one terminal attached to the existing project workspace."""
+    workspace = load_workspace(root)
+    if workspace is None:
+        raise ConnectionError("connect at least one client before opening the workspace")
+    terminal = {"opened": False, "launcher": None}
+    if workspace["host"] == "tmux":
+        alive = run(["tmux", "has-session", "-t", f"={workspace['session']}"],
+                    capture_output=True, text=True)
+        if alive.returncode != 0:
+            raise ConnectionError(
+                f"workspace session {workspace['session']!r} is not running")
+        terminal = _open_terminal(
+            ["tmux", "attach", "-t", workspace["session"]],
+            cwd=str(Path(root).resolve()), which=which, popen=popen)
+        terminal["fallback_command"] = workspace_summary(root)["attach_command"]
+        if terminal["opened"] and not workspace["terminal_opened"]:
+            save_workspace(root, {**workspace, "terminal_opened": True})
+    return {"workspace": workspace_summary(root), "terminal": terminal}
+
+
 def verify_runner(root: str | Path, runner: str, config: dict,
                   *, run=None) -> dict:
     entries = config.get("runners", {}) if isinstance(config, dict) else {}

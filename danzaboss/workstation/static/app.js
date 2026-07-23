@@ -771,6 +771,29 @@ function bossLineup(pick, agents, activeName) {
   }).join("")}</ol>`;
 }
 
+function workspacePanel(s) {
+  const w = s.workspace || { host: "unconfigured", order: [] };
+  const order = Array.isArray(w.order) ? w.order : [];
+  if (w.host === "unconfigured")
+    return panel("AI WORKSPACE", `<div class="workspace-panel workspace-empty">
+      <b>ONE SHARED TERMINAL</b><span>Connect a client to open it.</span></div>`);
+  const rows = order.map((name, index) => {
+    const active = name === w.active_runner;
+    return `<li class="workspace-pane ${active ? "workspace-active" : "workspace-waiting"}">
+      <b>${index + 1}. ${esc(agentDisplay(name, s.agents))}</b>
+      <span class="mono">${active ? "ACTIVE TONY-D" : "WAITING FOR ITS TURN"}</span></li>`;
+  }).join("");
+  const open = w.host === "tmux"
+    ? `<button id="open-workspace" class="chip">OPEN WORKSPACE</button>
+       <code class="workspace-attach">${esc(w.attach_command || "")}</code>`
+    : `<span class="workspace-fallback">Native terminals — no shared panes.</span>`;
+  return panel("AI WORKSPACE", `<div class="workspace-panel">
+    <div class="workspace-head"><b>${w.host === "tmux" ? "ONE SHARED TMUX SESSION" : "NATIVE TERMINALS"}</b>
+      <span class="mono">${esc(w.session || "")}</span></div>
+    <ol class="workspace-panes">${rows}</ol><div class="workspace-actions">${open}</div>
+  </div>`);
+}
+
 function renderSetup() {
   const s = setupData;
   const pick = setup.pick;
@@ -811,6 +834,7 @@ function renderSetup() {
       aria-live="polite"><div class="setup-live-label mono">LIVE UPDATE</div>
       <div class="setup-live-message">${liveMessage}${fallback}
       ${s.routing_error ? `<p class="warn mono">${esc(s.routing_error)}</p>` : ""}</div></section>`;
+  const workspace = workspacePanel(s);
   const lineup = panel("2. Choose boss order", `
     <div id="boss-lineup">${bossLineup(pick, s.agents, s.active_boss)}</div>
     <p class="setup-order-note">Use the arrows to set the turn order. The
@@ -833,7 +857,7 @@ function renderSetup() {
       <span>Choose 2–5 verified features per turn.</span>
     </div>
     <button id="confirm-team" class="boss-confirm"${hasOrder ? "" : " disabled"}>Save boss order and continue</button>`);
-  $("#setup-panel").innerHTML = hero + agents + live + lineup + team;
+  $("#setup-panel").innerHTML = hero + agents + live + workspace + lineup + team;
   wireSetup();
 }
 
@@ -916,6 +940,15 @@ function wireSetup() {
     setupAction(() => post("api/setup", { lineup: pick.lineup,
       features_per_turn: pick.features_per_turn }));
   });
+  const openWorkspace = $("#open-workspace");
+  if (openWorkspace) openWorkspace.addEventListener("click", () =>
+    setupAction(async () => {
+      const out = await post("api/workspace/open", {});
+      setup.notice = out.terminal.opened
+        ? "Workspace opened."
+        : `Use ${out.workspace.attach_command || "the terminal fallback"}.`;
+      return { setup: out.setup };
+    }));
 }
 
 async function loadSetup() {

@@ -172,13 +172,15 @@ class ActivationContract(unittest.TestCase):
         self.assertIn("=" + proof["session"], calls[4])
 
     def test_launch_runner_falls_back_to_native_terminal_without_tmux(self):
+        root = tempfile.mkdtemp(prefix="danzaboss-launch-")
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         terminal_calls = []
 
         def popen(argv, **kwargs):
             terminal_calls.append(argv)
 
         proof = launch_runner(
-            "/tmp/demo-project", "gemini",
+            root, "gemini",
             {"runners": {"gemini": {
                 "detected": True, "auth": "unprobed",
                 "interactive": ["gemini"], "kind": "cli"}}},

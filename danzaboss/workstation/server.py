@@ -37,7 +37,8 @@ from ..kernel.profile import active_profile
 from ..kernel.state import StateError, StateManager, TeamState
 from ..product.payload import agent_roster
 from ..product.connection import (connection_status, launch_runner,
-                                  prepare_workspace, verify_runner)
+                                  open_workspace, prepare_workspace,
+                                  verify_runner)
 from ..product.handoff import HandoffMode, classify_handoff
 from . import build as build_mod
 from . import checkpoints as checkpoints_mod
@@ -585,6 +586,12 @@ def post_connection_launch(root: str, body: dict) -> dict:
             "setup": setup_summary(root)}
 
 
+def post_workspace_open(root: str, body: dict) -> dict:
+    """Open the existing project workspace without launching another client."""
+    opened = open_workspace(root)
+    return {"ok": True, **opened, "setup": setup_summary(root)}
+
+
 def post_submit(root: str, body: dict) -> dict:
     """Phase answers in, grill round out. The submit itself is the wizard's
     (validation + stale-downstream unchanged); the grill starts fresh on
@@ -883,6 +890,7 @@ _POST_ROUTES = {
     "/api/setup": post_setup,
     "/api/connection/launch": post_connection_launch,
     "/api/connection/verify": post_connection_verify,
+    "/api/workspace/open": post_workspace_open,
     "/api/build/start": post_build_start,
     "/api/build/stop": post_build_stop,
     "/api/build/additions": post_build_additions,

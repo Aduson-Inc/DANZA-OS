@@ -577,7 +577,9 @@ class TestDashboardStatic(unittest.TestCase):
                        "setup-steps", "1. Connect", "2. Verify",
                        "3. Choose order", "setup-live-status", "LIVE UPDATE",
                        "1. Connect and verify", "2. Choose boss order",
-                       "3. Save your team",
+                       "3. Save your team", "AI WORKSPACE", "OPEN WORKSPACE",
+                       "ACTIVE TONY-D", "WAITING FOR ITS TURN", "workspace-attach",
+                       "attach_command",
                        "api/connection/launch", "Connect", "2 recommended",
                        "active Tony-D", "WAITING FOR ITS TURN",
                        "api/connection/verify", "Verify",
@@ -593,7 +595,7 @@ class TestDashboardStatic(unittest.TestCase):
                         "Launch client", "Verify connection",
                         "Found, not logged in", "Add as boss"):
             self.assertNotIn(removed, js)
-        self.assertIn("innerHTML = hero + agents + live + lineup + team", js)
+        self.assertIn("innerHTML = hero + agents + live + workspace + lineup + team", js)
         for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
             self.assertIn(value, js)
         for removed in ("Full Power", "data-dial", "data-override",
@@ -616,7 +618,8 @@ class TestDashboardStatic(unittest.TestCase):
         css = body.decode()
         for token in (".agent-card", ".boss-hero", ".boss-lineup",
                       ".boss-card", ".boss-active", ".boss-waiting",
-                      ".boss-feature-choice", ".setup-live-status"):
+                      ".boss-feature-choice", ".setup-live-status",
+                      ".workspace-panel", ".workspace-pane"):
             self.assertIn(token, css)
         self.assertNotIn(".dial-card", css)
 
@@ -831,6 +834,16 @@ class TestSetupApi(unittest.TestCase):
         self.assertEqual(status, 200, out)
         self.assertEqual(out["launch"]["status"], "launched")
         self.assertIn("tmux attach", out["launch"]["attach_command"])
+
+    def test_workspace_open_endpoint_returns_workspace_and_terminal_status(self):
+        with patch.object(server_mod, "open_workspace", return_value={
+                "workspace": {"host": "tmux", "session": "danza-demo"},
+                "terminal": {"opened": True}}) as opened:
+            status, out = post(self.port, "/api/workspace/open", {})
+        self.assertEqual(status, 200, out)
+        opened.assert_called_once_with(self.root)
+        self.assertEqual(out["workspace"]["host"], "tmux")
+        self.assertTrue(out["terminal"]["opened"])
 
     def test_setup_summary_tracks_sequential_turn_owner(self):
         status, out = post(self.port, "/api/setup", {

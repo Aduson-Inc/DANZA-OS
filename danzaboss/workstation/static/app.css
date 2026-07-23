@@ -720,6 +720,22 @@ button.chip { cursor: pointer; }
 .connection-fallback { margin: 10px 0; color: var(--dim); }
 .connection-fallback summary { cursor: pointer; }
 .connection-fallback code { display: inline-block; margin-top: 6px; padding: 8px 10px; background: var(--carbon); }
+.workspace-panel { display: grid; gap: 14px; }
+.workspace-empty { grid-template-columns: auto 1fr; align-items: center; }
+.workspace-empty b { color: var(--glow); font-family: var(--font-display); font-size: 18px; }
+.workspace-empty span, .workspace-fallback { color: var(--dim); font-size: 15px; }
+.workspace-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.workspace-head b { color: var(--ember); font-family: var(--font-display); font-size: 17px; letter-spacing: .08em; }
+.workspace-head .mono { color: var(--dim); font-size: 14px; }
+.workspace-panes { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.workspace-pane { display: flex; justify-content: space-between; gap: 14px; padding: 13px 16px; border: 1px solid var(--gunmetal); background: rgba(10,10,12,.55); }
+.workspace-pane b { color: var(--glow); font-size: 16px; }
+.workspace-pane span { color: var(--dim); font-size: 12px; letter-spacing: .1em; }
+.workspace-active { border-left: 4px solid var(--crimson); }
+.workspace-active span { color: var(--ember); }
+.workspace-waiting { border-left: 4px solid var(--gunmetal); }
+.workspace-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.workspace-attach { padding: 9px 11px; color: var(--silver); background: var(--carbon); border: 1px solid var(--gunmetal); }
 
 .boss-lineup { display: grid; gap: 10px; padding: 0; list-style: none; }
 .boss-card {
@@ -760,6 +776,8 @@ button.chip { cursor: pointer; }
   .boss-feature-choice { grid-template-columns: 1fr; }
   .setup-steps { grid-template-columns: 1fr; }
   .setup-live-status { grid-template-columns: 1fr; gap: 8px; }
+  .workspace-empty, .workspace-pane { grid-template-columns: 1fr; }
+  .workspace-pane { display: grid; gap: 5px; }
   .boss-card { grid-template-columns: 34px 1fr; }
   .boss-controls { grid-column: 2; }
 }
