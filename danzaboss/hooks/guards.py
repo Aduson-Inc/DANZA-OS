@@ -33,7 +33,8 @@ class GuardConfig:
     log_files: list[str] = field(default_factory=lambda: ["decision-log.md", "turn-log.md", "self-assessment-log.md", "build-history.md", "onboarding-misses.md", "patterns.md"])
     state_files: list[str] = field(default_factory=lambda: ["team-state.json", "handoff.md"])
     # context budget for sub-agent dispatch
-    max_dispatch_tokens: int = 6000
+    # calibrated to the json divisor in cortex/tokens.py; if the divisor changes, recalibrate this ceiling
+    max_dispatch_tokens: int = 8000
 
 
 def _matches_any(text: str, patterns: list[str]) -> bool:

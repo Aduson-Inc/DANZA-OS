@@ -75,15 +75,15 @@ class TestGuards(unittest.TestCase):
         self.assertFalse(scope_guard(ev, approved_task_ids={"T1"}).allow)
 
     def test_context_budget_blocks_oversized_dispatch(self):
-        ev = ToolEvent(actor="tony-d-orchestrator", tool="Task", payload_tokens=6001)
+        ev = ToolEvent(actor="tony-d-orchestrator", tool="Task", payload_tokens=8001)
         self.assertFalse(context_budget_guard(ev, self.cfg).allow)
 
     def test_context_budget_allows_within_budget(self):
-        ev = ToolEvent(actor="tony-d-orchestrator", tool="Task", payload_tokens=6000)
+        ev = ToolEvent(actor="tony-d-orchestrator", tool="Task", payload_tokens=8000)
         self.assertTrue(context_budget_guard(ev, self.cfg).allow)
 
-    def test_context_budget_default_is_6000_estimated_tokens(self):
-        self.assertEqual(self.cfg.max_dispatch_tokens, 6000)
+    def test_context_budget_default_is_8000_estimated_tokens(self):
+        self.assertEqual(self.cfg.max_dispatch_tokens, 8000)
 
 
 class TestGates(unittest.TestCase):

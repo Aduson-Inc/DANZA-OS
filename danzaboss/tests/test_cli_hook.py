@@ -103,13 +103,13 @@ class TestContextBudgetWiring(unittest.TestCase):
         decision, _ = _hook_decision(_task_payload("build feature X"), root)
         self.assertEqual(decision, "allow")
 
-    def test_app_build_allows_6000_and_denies_6001(self):
+    def test_app_build_allows_8000_and_denies_8001(self):
         root = _app_build_root()
-        allowed, _ = _hook_decision(_task_payload_at_tokens(6000), root)
-        denied, reason = _hook_decision(_task_payload_at_tokens(6001), root)
+        allowed, _ = _hook_decision(_task_payload_at_tokens(8000), root)
+        denied, reason = _hook_decision(_task_payload_at_tokens(8001), root)
         self.assertEqual(allowed, "allow")
         self.assertEqual(denied, "deny")
-        self.assertIn("6000", reason)
+        self.assertIn("8000", reason)
 
     def test_os_dev_never_blocks_dispatch(self):
         # Layer 0 edits the factory; token discipline is a build-flow concern.
