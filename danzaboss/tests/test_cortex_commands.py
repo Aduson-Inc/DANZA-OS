@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 import _bootstrap  # noqa
 from danzaboss.cortex import commands
@@ -125,13 +125,71 @@ class TestCortexCommands(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("archived", json.loads(out))
 
-    def test_hook_fails_open_on_garbage_stdin(self):
+    def test_hook_fails_closed_on_garbage_stdin_in_app_build(self):
+        # setUp pins this class to APP_BUILD (runtime law binds): an internal
+        # error must refuse rather than silently proceed.
+        stdin = io.StringIO("this is not json{{{")
+        out = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = commands.main(["hook", "post-tool-use"],
+                                 root=self.root, stdin=stdin)
+        self.assertEqual(code, 2)
+        self.assertIn("refusing by policy", err.getvalue())
+
+    def test_hook_fails_open_on_garbage_stdin_in_os_dev(self):
+        # No team-state.json in self.root, so clearing the env override lets
+        # the heuristic resolve OS_DEV (Layer 0) -> must never brick itself.
+        os.environ.pop(PROFILE_ENV_VAR, None)
         stdin = io.StringIO("this is not json{{{")
         out = io.StringIO()
         with redirect_stdout(out):
             code = commands.main(["hook", "post-tool-use"],
                                  root=self.root, stdin=stdin)
-        self.assertEqual(code, 0)  # never brick the session
+        self.assertEqual(code, 0)
+
+    def test_stop_hook_internal_error_fails_closed_with_block_json(self):
+        # Stop has its own CC contract (decision: block, exit 0), already used
+        # by the distillation gate itself -> internal errors reuse that shape.
+        stdin = io.StringIO("this is not json{{{")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = commands.main(["hook", "stop"], root=self.root, stdin=stdin)
+        self.assertEqual(code, 0)
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("refusing by policy", result["reason"])
+
+    def test_stop_hook_internal_error_fails_open_in_os_dev(self):
+        os.environ.pop(PROFILE_ENV_VAR, None)
+        stdin = io.StringIO("this is not json{{{")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = commands.main(["hook", "stop"], root=self.root, stdin=stdin)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip(), "")
+
+    def test_unknown_event_fails_closed_in_app_build(self):
+        stdin = io.StringIO("")
+        out = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = commands.main(["hook", "bogus-event"],
+                                 root=self.root, stdin=stdin)
+        self.assertEqual(code, 2)
+        self.assertIn("unknown cortex hook event", err.getvalue())
+        self.assertIn("refusing by policy", err.getvalue())
+
+    def test_unknown_event_fails_open_in_os_dev(self):
+        os.environ.pop(PROFILE_ENV_VAR, None)
+        stdin = io.StringIO("")
+        out = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = commands.main(["hook", "bogus-event"],
+                                 root=self.root, stdin=stdin)
+        self.assertEqual(code, 0)
+        self.assertIn("unknown cortex hook event", err.getvalue())
 
 
 class TestGraphCommands(unittest.TestCase):

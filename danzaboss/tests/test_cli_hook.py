@@ -9,12 +9,16 @@ actor-independent guards can be enforced here: file_protection, hard_stop, and
 context_budget. The budget guard binds only where runtime law binds
 (constitution_binding: OS_BOOT_TEST / APP_BUILD), never in OS_DEV (Layer 0).
 """
+import io
 import json
 import os
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
-from danzaboss.cli import _hook_decision, _dispatch_tokens
+from danzaboss.cli import _hook_decision, _dispatch_tokens, main
 from danzaboss.hooks.guards import GuardConfig
 
 
@@ -123,6 +127,68 @@ class TestExistingGuardsPreserved(unittest.TestCase):
         decision, _ = _hook_decision(
             {"tool_name": "Read", "tool_input": {"file_path": "README.md"}}, root)
         self.assertEqual(decision, "allow")
+
+
+class TestFailClosedWhereRuntimeLawBinds(unittest.TestCase):
+    """PreToolUse: an unreadable payload or an internal guard error must deny
+    in profiles where runtime law binds (APP_BUILD/OS_BOOT_TEST). OS_DEV
+    (Layer 0) keeps the historical fail-open behavior — its own hooks must
+    never be able to brick it."""
+
+    def setUp(self):
+        self._old_cwd = os.getcwd()
+
+    def tearDown(self):
+        os.chdir(self._old_cwd)
+
+    def _run_pretooluse(self, root, stdin_text):
+        os.chdir(root)
+        out = io.StringIO()
+        err = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = main(["hook", "pretooluse"])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_app_build_denies_unreadable_stdin(self):
+        root = _app_build_root()
+        rc, out, _ = self._run_pretooluse(root, "this is not json{{{")
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertIn("hook payload unreadable",
+                      hso["permissionDecisionReason"])
+
+    def test_os_dev_allows_unreadable_stdin(self):
+        root = _os_dev_root()
+        rc, out, _ = self._run_pretooluse(root, "this is not json{{{")
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "allow")
+
+    def test_app_build_denies_on_internal_guard_error(self):
+        root = _app_build_root()
+        payload = json.dumps({"tool_name": "Edit",
+                              "tool_input": {"file_path": "a.py"}})
+        with mock.patch("danzaboss.cli.file_protection_guard",
+                        side_effect=RuntimeError("guard exploded")):
+            rc, out, _ = self._run_pretooluse(root, payload)
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertIn("guard exploded", hso["permissionDecisionReason"])
+
+    def test_os_dev_allows_on_internal_guard_error(self):
+        root = _os_dev_root()
+        payload = json.dumps({"tool_name": "Edit",
+                              "tool_input": {"file_path": "a.py"}})
+        with mock.patch("danzaboss.cli.file_protection_guard",
+                        side_effect=RuntimeError("guard exploded")):
+            rc, out, err = self._run_pretooluse(root, payload)
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "allow")
+        self.assertIn("failing open", err)
 
 
 if __name__ == "__main__":

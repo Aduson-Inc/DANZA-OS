@@ -1,8 +1,13 @@
 """`danza cortex` command group — the CLI surface agents and hooks call (C1).
 
 Design rules:
-  * hook subcommands FAIL OPEN (stderr + exit 0) — a CORTEX bug never bricks
-    a session; same discipline as cli.py's guard hook.
+  * hook subcommands FAIL OPEN (stderr + exit 0) in OS_DEV (Layer 0) — a
+    CORTEX bug never bricks the OS source repo; same discipline as cli.py's
+    guard hook. In profiles where runtime law binds (APP_BUILD/OS_BOOT_TEST,
+    see kernel.profile.profile_binds_law) internal errors and unknown events
+    FAIL CLOSED instead (see _fail_closed): stop reuses the `decision: block`
+    JSON the distillation gate already emits; other events exit 2 with the
+    reason on stderr.
   * non-hook subcommands are normal CLI: JSON out, nonzero exit on user error.
   * the store is repo-scoped: <cwd>/.danza/cortex/cortex.db
 """
@@ -23,7 +28,7 @@ from .intent import WorkspaceState
 from .observation import Observation
 from .tasks import start_task
 from ..hooks.gates import distillation_gate
-from ..kernel.profile import active_profile, capture_event
+from ..kernel.profile import active_profile, capture_event, profile_binds_law
 
 
 def _project(root: str) -> str:
@@ -124,15 +129,39 @@ _HOOKS = {"session-start": _hook_session_start,
           "stop": _hook_stop}
 
 
+def _fail_closed(event: str, message: str) -> int:
+    """Binding-profile deny path, matching the CC hook contract per event:
+    Stop has its own "deny" verb — the `decision: block` JSON body already
+    used by the distillation gate itself (_hook_stop) — so an internal error
+    on Stop reuses that exact shape. No other wired event (SessionStart,
+    PostToolUse) has an analogous block/deny concept in the CC hook protocol,
+    so those fall back to the universal CC blocking-error convention: nonzero
+    exit with the reason on stderr."""
+    if event in ("stop", "Stop"):
+        print(json.dumps({"decision": "block", "reason": message}))
+        return 0
+    print(message, file=sys.stderr)
+    return 2
+
+
 def _cmd_hook(argv: list[str], root: str, stdin: TextIO) -> int:
     event = argv[0] if argv else ""
     handler = _HOOKS.get(event)
+    binding = profile_binds_law(root)
     if handler is None:
+        if binding:
+            return _fail_closed(
+                event, f"unknown cortex hook event: {event!r} — refusing by "
+                "policy (danza doctor for help)")
         print(f"unknown cortex hook event: {event!r}", file=sys.stderr)
         return 0  # fail open even on bad wiring
     try:
         return handler(root, _read_json(stdin))
-    except Exception as e:  # noqa: BLE001 — fail open by design
+    except Exception as e:  # noqa: BLE001 — fail-closed only where law binds
+        if binding:
+            return _fail_closed(
+                event, "cortex hook internal error — refusing by policy: "
+                f"{e} (danza doctor for help)")
         print(f"cortex hook internal error (failing open): {e}", file=sys.stderr)
         return 0
 

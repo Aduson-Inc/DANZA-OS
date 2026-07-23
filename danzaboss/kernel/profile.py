@@ -131,6 +131,20 @@ def active_profile(root: str = ".", env: dict | None = None) -> Profile:
     return PROFILES["OS_DEV"]
 
 
+def profile_binds_law(root: str = ".", env: dict | None = None) -> bool:
+    """Does runtime law bind here? The shared predicate CC hooks use to decide
+    fail-open vs fail-closed on their own errors (cli.py, cortex/commands.py).
+
+    Any profile-resolution failure (missing/corrupt profile config) resolves
+    to False (non-binding): a broken profile file must never make a hook's
+    error handling *stricter* than an intact one, and Layer 0 (OS_DEV) must
+    never be bricked by its own tooling."""
+    try:
+        return active_profile(root, env).constitution_binding
+    except Exception:
+        return False
+
+
 # ---- memory significance (capture diet) ---------------------------------------
 # OS_DEV runs at "none": CORTEX captures nothing while the OS is being built, so
 # only one memory system (claude-mem) is live during OS-dev sessions. CORTEX
