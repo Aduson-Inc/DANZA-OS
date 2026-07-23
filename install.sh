@@ -25,6 +25,14 @@ find_python() {
 
 main() {
   local python
+  local install_args=("$@")
+  local approval_arg=0
+  for arg in "${install_args[@]}"; do
+    if [[ "$arg" == "--yes" ]]; then
+      approval_arg=1
+      break
+    fi
+  done
   python="$(find_python || true)"
   [[ -n "$python" ]] || die "Python 3.10+ is required. Install it, then rerun this command."
   "$python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' \
@@ -37,12 +45,15 @@ main() {
   say "Optional: tmux (POSIX session convenience only; never auto-installed)."
   say "The installer will create a project-local runtime, install DANZABOSS,"
   say "scaffold the project, activate project-only CORTEX, verify the UI, and open it."
-  if [[ "${DANZA_APPROVE:-}" != "1" ]]; then
+  if [[ "${DANZA_APPROVE:-}" != "1" && "$approval_arg" != "1" ]]; then
     [[ -r /dev/tty ]] || die "interactive approval requires a terminal; rerun with DANZA_APPROVE=1"
     if ! read -r -p "Approve installation in this folder? [y/N] " answer </dev/tty; then
       die "could not read installation approval from the terminal"
     fi
     [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || die "Installation cancelled before changes were made."
+  fi
+  if [[ "$approval_arg" != "1" ]]; then
+    install_args+=(--yes)
   fi
 
   tmp="$(mktemp)"
@@ -50,7 +61,7 @@ main() {
   # trap variable is no longer bound under set -u.
   trap 'rm -f "$tmp"' EXIT
   curl -fsSL "${RAW_BASE}/install.py" -o "$tmp"
-  "$python" "$tmp" --target "$PWD" --branch "$DANZA_BRANCH" "$@"
+  "$python" "$tmp" --target "$PWD" --branch "$DANZA_BRANCH" "${install_args[@]}"
 }
 
 main "$@"

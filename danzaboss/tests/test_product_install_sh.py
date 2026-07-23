@@ -1,5 +1,7 @@
 """Cross-platform installer wrapper contract; never touch the network."""
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,6 +55,36 @@ class InstallShStructure(unittest.TestCase):
         self.assertIn('read -r -p "Approve installation in this folder? [y/N] " answer </dev/tty',
                       self.text)
         self.assertIn("interactive approval requires a terminal", self.text)
+
+    def test_wrapper_forwards_approval_to_inner_installer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            capture = root / "python-args.txt"
+            (fake_bin / "python3").write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ \"$1\" == \"-c\" ]]; then exit 0; fi\n"
+                "printf '%s\\n' \"$@\" > \"$CAPTURE\"\n",
+                encoding="utf-8")
+            (fake_bin / "git").write_text("#!/usr/bin/env bash\nexit 0\n",
+                                            encoding="utf-8")
+            (fake_bin / "curl").write_text(
+                "#!/usr/bin/env bash\n"
+                "while (($#)); do\n"
+                "  if [[ \"$1\" == \"-o\" ]]; then out=\"$2\"; shift 2; else shift; fi\n"
+                "done\n"
+                ": > \"$out\"\n",
+                encoding="utf-8")
+            for command in fake_bin.iterdir():
+                command.chmod(0o755)
+            env = os.environ.copy()
+            env.update({"PATH": f"{fake_bin}:/usr/bin:/bin",
+                        "CAPTURE": str(capture), "DANZA_APPROVE": "1"})
+            proc = subprocess.run(["bash", str(SCRIPT)], cwd=tmp, env=env,
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("--yes", capture.read_text(encoding="utf-8").splitlines())
 
     def test_exit_trap_is_safe_after_main_returns(self):
         self.assertNotIn("local python tmp", self.text)
