@@ -49,6 +49,11 @@ class InstallShStructure(unittest.TestCase):
         self.assertLess(self.text.index("Approve installation"),
                         self.text.index("curl -fsSL"))
 
+    def test_piped_install_reads_approval_from_terminal(self):
+        self.assertIn('read -r -p "Approve installation in this folder? [y/N] " answer </dev/tty',
+                      self.text)
+        self.assertIn("interactive approval requires a terminal", self.text)
+
     def test_exit_trap_is_safe_after_main_returns(self):
         self.assertNotIn("local python tmp", self.text)
         self.assertIn("trap 'rm -f \"$tmp\"' EXIT", self.text)

@@ -38,7 +38,10 @@ main() {
   say "The installer will create a project-local runtime, install DANZABOSS,"
   say "scaffold the project, activate project-only CORTEX, verify the UI, and open it."
   if [[ "${DANZA_APPROVE:-}" != "1" ]]; then
-    read -r -p "Approve installation in this folder? [y/N] " answer
+    [[ -r /dev/tty ]] || die "interactive approval requires a terminal; rerun with DANZA_APPROVE=1"
+    if ! read -r -p "Approve installation in this folder? [y/N] " answer </dev/tty; then
+      die "could not read installation approval from the terminal"
+    fi
     [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || die "Installation cancelled before changes were made."
   fi
 
