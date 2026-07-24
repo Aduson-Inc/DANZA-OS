@@ -1062,14 +1062,14 @@ function savingsHTML(savings) {
       <b>Tokens saved by memory briefs</b><span class="dim">No brief data yet</span></div>`);
   }
   const { briefed_turns: turns, known_turns: known,
-    injected_tokens: injected, replaced_tokens: replaced,
+    known_injected_tokens: knownInjected, replaced_tokens: replaced,
     saved_tokens: saved } = savings;
   const percent = replaced > 0
     ? Math.max(0, Math.min(100, Math.round(saved * 100 / replaced))) : 0;
   const coverage = known < turns
     ? `${esc(known)} of ${esc(turns)} briefed turns have a recorded baseline`
     : `${esc(turns)} briefed turn${turns === 1 ? "" : "s"}`;
-  const detail = `${esc(replaced)}t replaced − ${esc(injected)}t injected · ${coverage}`;
+  const detail = `${esc(replaced)}t replaced − ${esc(knownInjected)}t injected · ${coverage}`;
   return panel("Token savings", `<div class="savings-block" title="${esc(detail)}">
     <div class="build-row"><b>Tokens saved by memory briefs</b>
       <span class="mono">${esc(saved)}t saved</span></div>

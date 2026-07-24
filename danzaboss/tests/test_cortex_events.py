@@ -158,6 +158,7 @@ class TestContextReadTelemetry(unittest.TestCase):
             self.assertEqual(stats["known_turns"], 0)
             self.assertEqual(stats["replaced_tokens"], 0)
             self.assertEqual(stats["injected_tokens"], 123)
+            self.assertEqual(stats["known_injected_tokens"], 0)
 
 
 class TestSavingsStats(unittest.TestCase):
@@ -170,7 +171,7 @@ class TestSavingsStats(unittest.TestCase):
         stats = CaptureLog(":memory:").savings_stats("danza-os")
         self.assertEqual(stats, {"briefed_turns": 0, "injected_tokens": 0,
                                  "replaced_tokens": 0, "saved_tokens": 0,
-                                 "known_turns": 0})
+                                 "known_turns": 0, "known_injected_tokens": 0})
 
     def test_aggregates_known_rows(self):
         log = CaptureLog(":memory:")
@@ -182,6 +183,7 @@ class TestSavingsStats(unittest.TestCase):
         self.assertEqual(stats["briefed_turns"], 2)
         self.assertEqual(stats["known_turns"], 2)
         self.assertEqual(stats["injected_tokens"], 700)
+        self.assertEqual(stats["known_injected_tokens"], 700)
         self.assertEqual(stats["replaced_tokens"], 2400)
         self.assertEqual(stats["saved_tokens"], 1700)
 
@@ -195,7 +197,8 @@ class TestSavingsStats(unittest.TestCase):
         self.assertEqual(stats["known_turns"], 1)
         self.assertEqual(stats["injected_tokens"], 700)
         self.assertEqual(stats["replaced_tokens"], 1500)
-        self.assertEqual(stats["saved_tokens"], 800)
+        self.assertEqual(stats["known_injected_tokens"], 400)
+        self.assertEqual(stats["saved_tokens"], 1100)  # replaced - known_injected
 
     def test_scoped_by_project(self):
         log = CaptureLog(":memory:")
@@ -205,6 +208,21 @@ class TestSavingsStats(unittest.TestCase):
                                 replaced=300)
         self.assertEqual(log.savings_stats("app-a")["injected_tokens"], 400)
         self.assertEqual(log.savings_stats("app-a")["replaced_tokens"], 1500)
+
+    def test_pure_legacy_db_yields_zero_saved_tokens(self):
+        # P4.1 T9: a DB holding only pre-T9 rows (all replaced_tokens NULL)
+        # must yield saved_tokens=0, not a negative number. known_injected_tokens
+        # should be 0 because no rows have known replaced figures.
+        log = CaptureLog(":memory:")
+        log.record_context_read("danza-os", "jonathan-builder", 100, 900)
+        log.record_context_read("danza-os", "bonnie-qa", 123, 800)
+        stats = log.savings_stats("danza-os")
+        self.assertEqual(stats["briefed_turns"], 2)
+        self.assertEqual(stats["known_turns"], 0)
+        self.assertEqual(stats["injected_tokens"], 223)
+        self.assertEqual(stats["known_injected_tokens"], 0)
+        self.assertEqual(stats["replaced_tokens"], 0)
+        self.assertEqual(stats["saved_tokens"], 0)
 
     def test_old_db_upgrades_in_place(self):
         # a DB created before the context_reads table existed must gain it

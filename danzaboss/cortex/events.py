@@ -180,21 +180,25 @@ class CaptureLog:
         ``replaced_tokens``/``known_turns`` cover only rows where the
         replaced figure is known (NULL rows — recorded before this field
         existed — count as a briefed turn but are excluded from the
-        replaced sum, never guessed). No telemetry at all reads as a clean
-        all-zero state, never a crash or an invented number."""
+        replaced sum, never guessed). ``known_injected_tokens`` is the sum
+        of injected tokens over known rows only, so ``saved_tokens`` is
+        always computed from known rows only. No telemetry at all reads as
+        a clean all-zero state, never a crash or an invented number."""
         row = self.conn.execute(
             "SELECT COUNT(*) briefed_turns, "
             "COALESCE(SUM(tokens), 0) injected_tokens, "
             "COALESCE(SUM(replaced_tokens), 0) replaced_tokens, "
+            "COALESCE(SUM(CASE WHEN replaced_tokens IS NOT NULL THEN tokens ELSE 0 END), 0) known_injected_tokens, "
             "COUNT(replaced_tokens) known_turns "
             "FROM context_reads WHERE project = ?", (project,)).fetchone()
-        injected = row["injected_tokens"]
         replaced = row["replaced_tokens"]
+        known_injected = row["known_injected_tokens"]
         return {"briefed_turns": row["briefed_turns"],
-                "injected_tokens": injected,
+                "injected_tokens": row["injected_tokens"],
                 "replaced_tokens": replaced,
-                "saved_tokens": replaced - injected,
-                "known_turns": row["known_turns"]}
+                "saved_tokens": replaced - known_injected,
+                "known_turns": row["known_turns"],
+                "known_injected_tokens": known_injected}
 
     # -- stats -----------------------------------------------------------------
     def stats(self, project: Optional[str] = None) -> dict:

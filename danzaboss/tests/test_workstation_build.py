@@ -434,7 +434,7 @@ class BuildApiContracts(BuildFixture):
         payload = server_mod.build_summary(self.root)
         self.assertEqual(payload["savings"], {
             "briefed_turns": 0, "injected_tokens": 0, "replaced_tokens": 0,
-            "saved_tokens": 0, "known_turns": 0})
+            "saved_tokens": 0, "known_turns": 0, "known_injected_tokens": 0})
 
     def test_build_summary_savings_reflects_recorded_telemetry(self):
         from danzaboss.cortex import commands as cortex_commands
@@ -448,7 +448,25 @@ class BuildApiContracts(BuildFixture):
         payload = server_mod.build_summary(self.root)
         self.assertEqual(payload["savings"], {
             "briefed_turns": 1, "injected_tokens": 400,
-            "replaced_tokens": 1200, "saved_tokens": 800, "known_turns": 1})
+            "replaced_tokens": 1200, "saved_tokens": 800, "known_turns": 1,
+            "known_injected_tokens": 400})
+
+    def test_build_summary_savings_with_mixed_known_unknown_telemetry(self):
+        # P4.1 T9: mixed known+unknown rows computes saved_tokens from known only
+        from danzaboss.cortex import commands as cortex_commands
+        from danzaboss.cortex.events import CaptureLog
+        from danzaboss.cortex.identity import resolve_project
+
+        project = resolve_project(str(self.root))
+        log = CaptureLog(cortex_commands.db_path(str(self.root)))
+        log.record_context_read(project, "jonathan-builder", 400, 900, replaced=1500)
+        log.record_context_read(project, "bonnie-qa", 300, 800)  # unknown, legacy row
+
+        payload = server_mod.build_summary(self.root)
+        self.assertEqual(payload["savings"], {
+            "briefed_turns": 2, "injected_tokens": 700,
+            "replaced_tokens": 1500, "saved_tokens": 1100, "known_turns": 1,
+            "known_injected_tokens": 400})
 
     def test_additions_and_approval_handlers_are_revisioned_and_queue_work(self):
         self.assertIn("/api/build/additions", server_mod._POST_ROUTES)
