@@ -1089,16 +1089,12 @@ class DanzaUIHandler(CortexUIHandler):
                 self._json(build_summary(self.root))
             elif route == "/api/setup":
                 self._json(setup_summary(self.root))
-            elif route == "/api/connection":
-                self._json(connection_status(self.root))
             elif route == "/api/onboarding":
                 self._json(onboarding_summary(self.root))
             elif route == "/api/project":
                 self._json(project_mod.project_summary(self.root))
             elif route == "/api/plan":
                 self._json(plan_detail(self.root))
-            elif route == "/api/runners":
-                self._json({"runners": _runner_summary(self.root)})
             elif route == "/api/events":
                 self._danza_events()
             else:

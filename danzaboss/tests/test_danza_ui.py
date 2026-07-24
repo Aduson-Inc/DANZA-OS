@@ -226,9 +226,19 @@ class TestOverview(unittest.TestCase):
         self.assertEqual(top["id"], "1")
         self.assertEqual(top["subtasks"][0]["verified_by"], "pytest -k health")
 
-    def test_runners_endpoint_reports_absence(self):
-        _, _, body = get(self.port, "/api/runners")
-        self.assertIsNone(json.loads(body)["runners"])
+    def test_superseded_get_endpoints_are_removed(self):
+        # P T8b: /api/runners and /api/connection existed only for the old
+        # 4-tab UI (which never actually fetched them — both were already
+        # dead weight); the one-flow SPA has no consumer for either, and
+        # their data rides along inside /api/overview, /api/setup,
+        # /api/onboarding, and /api/flow instead.
+        for path in ("/api/runners", "/api/connection"):
+            try:
+                status, _, _ = get(self.port, path)
+            except urllib.error.HTTPError as e:
+                status = e.code
+                e.close()
+            self.assertEqual(status, 404, path)
 
 
 class TestOnboardingDetail(unittest.TestCase):
@@ -493,24 +503,19 @@ class TestDashboardStatic(unittest.TestCase):
                             "workstation" / "static" / "background.png")
         self.assertFalse(local_background.exists())
 
-    def test_all_five_tabs_present(self):
+    def test_one_flow_shell_present_no_tabs(self):
+        # P T8b: the 4-tab SPA became one linear journey — no tab nav, no
+        # data-view attributes, one flow rail + one team strip + one stage
+        # list + one Advanced drawer.
         _, _, html = get(self.port, "/")
-        for marker in (b'data-view="overview"', b'data-view="setup"',
-                       b'data-view="project"', b'data-view="build"',
-                       b'href="cortex/"'):
+        for marker in (b'id="flow-rail"', b'id="team-strip"',
+                       b'id="stages"', b'id="advanced-drawer"',
+                       b'id="advanced-toggle"', b'href="cortex/"'):
             self.assertIn(marker, html)
-        # MODELS is gone — the tab and its view became SETUP in Phase 4
-        self.assertNotIn(b'data-view="models"', html)
-        self.assertNotIn(b'data-view="onboard"', html)
-        self.assertIn(b'>Project</button>', html)
-
-    def test_tab_order_setup_before_project(self):
-        # Phase 4.1 order: OVERVIEW · SETUP · PROJECT · BUILD · CORTEX
-        _, _, html = get(self.port, "/")
-        self.assertLess(html.index(b'data-view="setup"'),
-                        html.index(b'data-view="project"'))
-        self.assertLess(html.index(b'data-view="overview"'),
-                        html.index(b'data-view="setup"'))
+        for removed in (b'data-view=', b'class="tabs"', b'id="view-overview"',
+                        b'id="view-setup"', b'id="view-project"',
+                        b'id="view-build"'):
+            self.assertNotIn(removed, html)
 
     def test_front_end_is_origin_relative(self):
         _, _, html = get(self.port, "/")
@@ -521,11 +526,58 @@ class TestDashboardStatic(unittest.TestCase):
         _, _, css = get(self.port, "/static/app.css")
         self.assertNotIn(b'url("/static/', css)
 
-    def test_front_end_hides_internal_execution_profile_names(self):
+    def test_front_end_carries_no_internal_execution_profile_reference(self):
+        # the OVERVIEW tab (and its execution-profile display) is gone
+        # entirely in the one-flow SPA — nothing reads .profile at all.
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
-        self.assertIn('textContent = "DANZA-OS"', js)
-        self.assertNotIn("o.profile.name", js)
+        self.assertNotIn(".profile", js)
+
+    def test_stage_machine_driven_by_flow_endpoint(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in ('api("api/flow")', "flowData", "STAGES",
+                       '{ id: "connect"', '{ id: "describe"', '{ id: "approve"',
+                       '{ id: "build"', '{ id: "done"', "renderFlow",
+                       "loadStageDetail", "toggleStage"):
+            self.assertIn(marker, js)
+
+    def test_team_strip_is_the_one_merged_list(self):
+        # requirement 4: one merged team list from /api/flow — no duplicate
+        # active/waiting widgets, no local runner-name catalog.
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        self.assertIn("teamStripHTML", js)
+        self.assertIn("flowData.team", js)
+        self.assertIn("teamDisplayName", js)
+        for removed in ("RUNNER_NAMES", "function runnerName"):
+            self.assertNotIn(removed, js)
+        _, _, css = get(self.port, "/static/app.css")
+        for token in (".team-list", ".team-member", ".team-dot"):
+            self.assertIn(token, css.decode())
+
+    def test_feature_editor_is_shared_by_approve_and_build(self):
+        # requirement: ONE feature-list editor component backs both the
+        # Approve stage's product scope and the Build stage's additions.
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in ("function featureCardHTML", "function newFeatureEditor",
+                       "function seedFeatureEditor", "function collectFeatureEditor",
+                       "function featureEditorHTML", "scopeEditor",
+                       "additionsEditor"):
+            self.assertIn(marker, js)
+
+    def test_advanced_drawer_holds_cortex_and_raw_log(self):
+        # rarely-used surfaces (CORTEX stats, raw activity log, internal
+        # plan artifacts) live behind the one Advanced drawer, not extra tabs.
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in ("openAdvanced", "closeAdvanced", "loadAdvanced",
+                       "cortexPanel", "api/conductor?limit=100",
+                       "planInternalsPanel", 'api("api/plan")'):
+            self.assertIn(marker, js)
+        # the internal plan tree/plan.md is not duplicated inside Build too
+        self.assertNotIn("build-internals", js)
 
     def test_onboard_form_wiring_present(self):
         _, _, body = get(self.port, "/static/app.js")
@@ -535,31 +587,19 @@ class TestDashboardStatic(unittest.TestCase):
                        "api/onboard/checkpoint", "api/onboard/approve",
                        "api/onboard/finish", "showIfMet", "collectAnswers"):
             self.assertIn(marker, js)
-        self.assertNotIn("Read-only view — dashboard onboarding forms", js)
 
     def test_onboard_css_form_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         self.assertIn(".field", body.decode())
 
-    def test_project_ui_wires_modes_audit_scope_and_exact_approval(self):
-        _, _, html = get(self.port, "/")
-        self.assertIn(b'id="view-project"', html)
-        self.assertIn(b'id="project-panel"', html)
+    def test_describe_stage_wires_project_choice_and_audit(self):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
         for marker in (
             "Create New", "Continue Existing", "Auditing repository",
-            "Audit results", "Material coverage gaps",
-            "Continue the project interview", "Draft product scope",
-            "Acceptance criteria", "api/project/discover",
-            "api/project/scope", "api/project/approve",
-            "api/project/decompose", "expected_revision: scope.revision",
-            "audit_fingerprint: audit.fingerprint",
-            "acknowledged_gaps: gapIds",
-            "projectUI.dirty = true", "approve.disabled = true",
+            "Audit results", "Create project brief", "api/project/discover",
         ):
             self.assertIn(marker, js)
-        self.assertNotIn('state.view === "onboard"', js)
         for removed_copy in (
             "Onboarding unlocks", "finish onboarding to create one",
             "Finish Setup and Onboarding to start building",
@@ -567,80 +607,71 @@ class TestDashboardStatic(unittest.TestCase):
         ):
             self.assertNotIn(removed_copy, js)
 
+    def test_approve_stage_wires_scope_editor_and_exact_approval(self):
+        _, _, body = get(self.port, "/static/app.js")
+        js = body.decode()
+        for marker in (
+            "Draft product scope", "Acceptance criteria",
+            "Material coverage gaps", "api/project/scope",
+            "api/project/approve", "api/project/decompose",
+            "expected_revision: scope.revision",
+            "audit_fingerprint: audit.fingerprint",
+            "acknowledged_gaps: gapIds",
+            "scopeEditor.dirty = true", "approve.disabled = true",
+        ):
+            self.assertIn(marker, js)
+
     def test_project_css_has_bounded_choice_audit_and_scope_styles(self):
         _, _, body = get(self.port, "/static/app.css")
         css = body.decode()
-        for token in (".project-choices", ".audit-grid", ".scope-feature"):
+        for token in (".project-choices", ".audit-grid", ".feature-card"):
             self.assertIn(token, css)
+        self.assertNotIn(".scope-feature", css)
 
-    def test_setup_ui_wiring_present(self):
+    def test_connect_stage_wires_agents_lineup_and_workspace(self):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
-        for marker in ("api/setup", "loadSetup", "WHO’S THE BOSS?",
-                       "boss-lineup", "Connect <b>1–4 AI clients</b>",
-                       "setup-steps", "1. Connect", "2. Verify",
-                       "3. Choose order", "setup-live-status", "LIVE UPDATE",
-                       "1. Connect and verify", "2. Choose boss order",
-                       "3. Save your team", "AI WORKSPACE", "OPEN WORKSPACE",
-                       "ACTIVE TONY-D", "WAITING FOR ITS TURN", "workspace-attach",
-                       "attach_command",
-                       "api/connection/launch", "Connect", "2 recommended",
-                       "active Tony-D", "WAITING FOR ITS TURN",
-                       "api/connection/verify", "Verify",
-                       "s.active_boss", "s.waiting_bosses",
+        for marker in ("api/setup", "loadConnect", "boss-lineup",
+                       "workspace-attach", "attach_command",
+                       "api/connection/launch", "api/connection/verify",
                        "features-per-turn",
                        "features_per_turn: pick.features_per_turn"):
             self.assertIn(marker, js)
-        for removed in ("Who Does What", "characterRow",
-                        "s.roster.map(characterRow)", "data-seat",
-                        "SEAT_VERBS", "pickLineup", "Verify AI connection",
-                        "Specialist roles", "ONE ACTIVE BOSS", "NO ROLE THEATRE",
-                        "boss-hero-grid", "connection-runner", "turnSize",
-                        "Launch client", "Verify connection",
-                        "Found, not logged in", "Add as boss"):
+        for removed in ("Who Does What", "characterRow", "data-seat",
+                        "SEAT_VERBS", "Specialist roles", "ONE ACTIVE BOSS",
+                        "NO ROLE THEATRE", "turnSize",
+                        "ACTIVE TONY-D", "WAITING FOR ITS TURN"):
             self.assertNotIn(removed, js)
-        self.assertIn("innerHTML = hero + agents + live + workspace + lineup + team", js)
         for value in ('value="2"', 'value="3"', 'value="4"', 'value="5"'):
             self.assertIn(value, js)
         for removed in ("Full Power", "data-dial", "data-override",
-                        "dial: pick.dial", "overrides: pick.overrides",
-                        '["Conductor",', '["Planner",', '["Tester",',
-                        '["Reviewer",', '["Security Checker",',
-                        "The built-in conductor", "What the conductor did",
-                        "the conductor is watching"):
+                        "dial: pick.dial", "overrides: pick.overrides"):
             self.assertNotIn(removed, js)
-        # the read-only Phase-2 MODELS view is fully replaced
-        self.assertNotIn("loadModels", js)
-        self.assertNotIn("lineup selection and the routing table land", js)
         # catalog strengths is a plain sentence (runners.py), not a list —
-        # joining it crashes renderSetup (found in the T13 live eyeball)
+        # joining it crashes renderConnect (found in the T13 live eyeball)
         self.assertNotIn("a.strengths || []", js)
         self.assertIn("a.strengths || \"\"", js)
 
     def test_setup_css_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         css = body.decode()
-        for token in (".agent-card", ".boss-hero", ".boss-lineup",
-                      ".boss-card", ".boss-active", ".boss-waiting",
+        for token in (".agent-card", ".boss-lineup", ".boss-card",
                       ".boss-feature-choice", ".setup-live-status",
                       ".workspace-panel", ".workspace-pane"):
             self.assertIn(token, css)
         self.assertNotIn(".dial-card", css)
 
-    def test_build_ui_wiring_present(self):
+    def test_build_stage_wires_relay_controls_and_progress(self):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
         for marker in ("api/build/start", "api/build/stop", "loadBuild",
                        "Stop the build crew? The current turn finishes safely.",
-                       "Finish Setup and Project to start building",
-                       "Handed the baton to"):
+                       "Finish Approve to start building",
+                       "Handed the baton to", "Live product progress",
+                       'id="stage-body-${s.id}"'):
             self.assertIn(marker, js)
-        # the Phase-2 read-only placeholder is fully replaced
-        self.assertNotIn("relay start/stop controls land in Phase 4", js)
-        _, _, html = get(self.port, "/")
-        self.assertIn(b'id="build-controls"', html)
 
-    def test_build_ui_renders_live_product_progress_and_additions(self):
+    def test_build_stage_renders_additions_via_the_shared_editor(self):
         _, _, body = get(self.port, "/static/app.js")
         js = body.decode()
         for marker in (
@@ -651,21 +682,17 @@ class TestDashboardStatic(unittest.TestCase):
             "Approve exact additions revision",
             'post("api/build/additions"', 'post("api/build/approve"',
             "expected_revision: additions.revision",
-            "build.additionsDirty = true", "build-panel",
+            "additionsEditor.dirty = true",
         ):
             self.assertIn(marker, js)
-        self.assertIn('panelEl.contains(document.activeElement)', js)
-
-        _, _, html = get(self.port, "/")
-        self.assertIn(b"Product progress", html)
-        self.assertNotIn(b'data-view="features"', html)
+        self.assertIn('bodyEl.contains(document.activeElement)', js)
 
     def test_build_css_tokens(self):
         _, _, body = get(self.port, "/static/app.css")
         css = body.decode()
-        for token in (".team-strip", ".session-tail", ".build-feature",
+        for token in (".session-tail", ".build-feature",
                       ".build-feature.completed", ".build-unit",
-                      ".quota-meter", ".build-alert", ".addition-feature"):
+                      ".quota-meter", ".build-alert", ".feature-card"):
             self.assertIn(token, css)
 
 

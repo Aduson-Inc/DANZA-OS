@@ -12,7 +12,8 @@
 </head>
 <body>
 
-<!-- TOP BAR — same chrome as CORTEX; product tabs instead of memory tabs. -->
+<!-- TOP BAR — one journey, no tabs. Advanced controls live behind the one
+     "Advanced" menu; CORTEX stays a plain link out to its own UI. -->
 <header class="topbar">
   <div class="brand">
     <div class="mark" id="mark" title="DANZA-OS">
@@ -28,48 +29,35 @@
     </div>
   </div>
 
-  <nav class="tabs" aria-label="Views">
-    <button class="tab active" data-view="overview">Overview</button>
-    <button class="tab" data-view="setup">Setup</button>
-    <button class="tab" data-view="project">Project</button>
-    <button class="tab" data-view="build">Build</button>
-    <a class="tab" href="cortex/">CORTEX</a>
-  </nav>
-
   <div class="topbar-right">
-    <span class="chip mono" id="profile-chip" title="Active execution profile"></span>
+    <a class="chip" href="cortex/">CORTEX</a>
+    <button class="chip" id="advanced-toggle" aria-expanded="false"
+      aria-controls="advanced-drawer">Advanced</button>
   </div>
 </header>
 
 <main class="stage">
+  <div class="column">
+    <!-- FLOW RAIL — where you are in Connect → Describe → Approve → Build → Done. -->
+    <nav class="flow-rail" id="flow-rail" aria-label="Build journey"></nav>
 
-  <!-- OVERVIEW — the home screen (spec section 6). -->
-  <section class="view" id="view-overview">
-    <div class="grid" id="overview-grid"></div>
-    <h2 class="section-label">Activity</h2>
-    <div class="console-log mono" id="conductor-log"></div>
-  </section>
+    <!-- TEAM — the one merged list of who's on the team, live, and whose
+         turn it is (single source of truth: /api/flow). -->
+    <div class="team-strip" id="team-strip"></div>
 
-  <!-- SETUP — choose, launch, verify, and order project bosses. -->
-  <section class="view" id="view-setup" hidden>
-    <h2 class="section-label">Your AI team</h2>
-    <div id="setup-panel"></div>
-  </section>
-
-  <!-- PROJECT — discovery, interview, takeover audit, and scope approval. -->
-  <section class="view" id="view-project" hidden>
-    <h2 class="section-label">Project</h2>
-    <div id="project-panel"></div>
-  </section>
-
-  <!-- BUILD — relay controls + live state over the plan (Phase 4). -->
-  <section class="view" id="view-build" hidden>
-    <h2 class="section-label">Build</h2>
-    <div class="panel" id="build-controls"></div>
-    <h2 class="section-label">Product progress</h2>
-    <div class="panel" id="build-panel"></div>
-  </section>
+    <!-- STAGES — completed stages collapse to a summary row, the current
+         stage stays open, future stages stay locked. -->
+    <div id="stages"></div>
+  </div>
 </main>
+
+<!-- ADVANCED — everything rarely used lives in one drawer: CORTEX memory
+     stats, the raw activity log, and internal build-plan artifacts. -->
+<aside class="drawer" id="advanced-drawer" hidden aria-label="Advanced">
+  <button class="drawer-close" id="advanced-close" aria-label="Close">×</button>
+  <h2>Advanced</h2>
+  <div id="advanced-body"></div>
+</aside>
 
 <script src="static/app.js"></script>
 </body>
