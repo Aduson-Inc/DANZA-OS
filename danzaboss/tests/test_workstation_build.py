@@ -429,6 +429,27 @@ class BuildApiContracts(BuildFixture):
                          [71, 72])
         self.assertEqual(payload["progress"]["status"], "pending")
 
+    def test_build_summary_savings_is_a_clean_zero_state_without_telemetry(self):
+        # P4.1 T9: no brief has been injected yet — zeros, never fabricated.
+        payload = server_mod.build_summary(self.root)
+        self.assertEqual(payload["savings"], {
+            "briefed_turns": 0, "injected_tokens": 0, "replaced_tokens": 0,
+            "saved_tokens": 0, "known_turns": 0})
+
+    def test_build_summary_savings_reflects_recorded_telemetry(self):
+        from danzaboss.cortex import commands as cortex_commands
+        from danzaboss.cortex.events import CaptureLog
+        from danzaboss.cortex.identity import resolve_project
+
+        project = resolve_project(str(self.root))
+        CaptureLog(cortex_commands.db_path(str(self.root))).record_context_read(
+            project, "jonathan-builder", 400, 900, replaced=1200)
+
+        payload = server_mod.build_summary(self.root)
+        self.assertEqual(payload["savings"], {
+            "briefed_turns": 1, "injected_tokens": 400,
+            "replaced_tokens": 1200, "saved_tokens": 800, "known_turns": 1})
+
     def test_additions_and_approval_handlers_are_revisioned_and_queue_work(self):
         self.assertIn("/api/build/additions", server_mod._POST_ROUTES)
         self.assertIn("/api/build/approve", server_mod._POST_ROUTES)

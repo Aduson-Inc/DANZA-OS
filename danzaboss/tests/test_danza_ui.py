@@ -1135,6 +1135,22 @@ class TestFlowApi(unittest.TestCase):
         self.assertFalse(self._stage(flow, "done")["complete"])
         self.assertEqual(flow["current"], "build")
 
+    def test_build_stage_light_summary_carries_a_single_saved_tokens_number(self):
+        # P4.1 T9 requirement 4: /api/flow gets one small number, never the
+        # injected/replaced breakdown (that lives in /api/build detail).
+        build_stage = server_mod._build_stage(self.root)
+        self.assertEqual(build_stage["saved_tokens"], 0)
+        self.assertNotIn("injected_tokens", build_stage)
+        self.assertNotIn("replaced_tokens", build_stage)
+
+        from danzaboss.cortex import commands as cortex_commands
+        from danzaboss.cortex.identity import resolve_project
+        project = resolve_project(str(self.root))
+        CaptureLog(cortex_commands.db_path(str(self.root))).record_context_read(
+            project, "jonathan-builder", 400, 900, replaced=1200)
+        self.assertEqual(
+            server_mod._build_stage(self.root)["saved_tokens"], 800)
+
     def test_team_roster_is_empty_without_a_confirmed_team(self):
         self.assertEqual(server_mod.flow_state(self.root)["team"], [])
 

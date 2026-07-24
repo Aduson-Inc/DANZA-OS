@@ -1052,6 +1052,32 @@ function taskHTML(t) {
     ${subs ? `<ul>${subs}</ul>` : ""}</li>`;
 }
 
+function savingsHTML(savings) {
+  // P4.1 T9: evidence for the core pitch — memory briefs replace re-reading.
+  // Every number here comes straight from recorded telemetry (server-side
+  // savings_stats); the zero-state below is the honest "nothing recorded
+  // yet" case, never a fabricated number.
+  if (!savings || !savings.briefed_turns) {
+    return panel("Token savings", `<div class="build-row">
+      <b>Tokens saved by memory briefs</b><span class="dim">No brief data yet</span></div>`);
+  }
+  const { briefed_turns: turns, known_turns: known,
+    injected_tokens: injected, replaced_tokens: replaced,
+    saved_tokens: saved } = savings;
+  const percent = replaced > 0
+    ? Math.max(0, Math.min(100, Math.round(saved * 100 / replaced))) : 0;
+  const coverage = known < turns
+    ? `${esc(known)} of ${esc(turns)} briefed turns have a recorded baseline`
+    : `${esc(turns)} briefed turn${turns === 1 ? "" : "s"}`;
+  const detail = `${esc(replaced)}t replaced − ${esc(injected)}t injected · ${coverage}`;
+  return panel("Token savings", `<div class="savings-block" title="${esc(detail)}">
+    <div class="build-row"><b>Tokens saved by memory briefs</b>
+      <span class="mono">${esc(saved)}t saved</span></div>
+    <div class="quota-meter" aria-label="${esc(detail)}">
+      <span style="width:${percent}%"></span></div>
+    <p class="dim mono">${detail}</p></div>`);
+}
+
 function quotaHTML(quota) {
   const completed = quota?.completed ?? 0;
   const limit = quota?.limit;
@@ -1156,8 +1182,9 @@ function renderBuild() {
   // productProgressHTML() already degrades honestly when there's no plan
   // yet (build_error) or no approved scope — one render path, no dead
   // branches duplicating that logic here.
-  $("#stage-body-build").innerHTML = teamHTML + panel("Relay controls",
-    controlsHTML(buildData.live)) + productProgressHTML(buildData.live);
+  $("#stage-body-build").innerHTML = teamHTML + savingsHTML(buildData.live.savings)
+    + panel("Relay controls", controlsHTML(buildData.live))
+    + productProgressHTML(buildData.live);
   wireBuild();
 }
 

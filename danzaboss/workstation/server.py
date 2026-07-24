@@ -216,6 +216,18 @@ def _cortex_stats(root: str) -> dict:
     return s
 
 
+def _savings_stats(root: str) -> dict:
+    """Token-savings evidence from recorded brief telemetry only (P4.1 T9):
+    cumulative injected/replaced tokens, the derived savings, and how many
+    turns were briefed. Zero/empty until any brief has been injected —
+    never fabricated. The Build stage detail endpoint (/api/build) surfaces
+    the full breakdown; /api/flow's light build-stage summary gets only the
+    single derived number (requirement 4 — no heavy telemetry in /api/flow)."""
+    db = cortex_commands.db_path(root)
+    project = resolve_project(root)
+    return CaptureLog(db).savings_stats(project)
+
+
 def overview(root: str) -> dict:
     """Everything the OVERVIEW screen needs in one payload (spec section 6)."""
     team, team_err = _team_state(root)
@@ -301,7 +313,8 @@ def build_summary(root: str,
     out = {"running": pid is not None and alive(pid),
            "team_state": team,
            "session": session,
-           "conductor": conductor_tail(root, 50)["items"]}
+           "conductor": conductor_tail(root, 50)["items"],
+           "savings": _savings_stats(root)}
     if team_err:
         out["team_state_error"] = team_err
     try:
@@ -572,18 +585,24 @@ def _approve_stage(root: str) -> dict:
 
 def _build_stage(root: str) -> dict:
     """Build: the relay executes the approved plan until every product
-    feature is completed — derived from the same live_payload BUILD reads."""
+    feature is completed — derived from the same live_payload BUILD reads.
+    ``saved_tokens`` is the one savings-meter number a light /api/flow
+    summary gets (requirement 4); the injected/replaced breakdown lives in
+    the /api/build detail endpoint's "savings" block only."""
+    saved_tokens = _savings_stats(root)["saved_tokens"]
     try:
         live = build_mod.live_payload(root)
     except build_mod.BuildError:
         return {"complete": False, "status": None,
-                "completed": 0, "total": 0, "running": False}
+                "completed": 0, "total": 0, "running": False,
+                "saved_tokens": saved_tokens}
     pid = _conductor_pid(root)
     progress = live["progress"]
     return {"complete": progress["status"] == "completed",
             "status": progress["status"],
             "completed": progress["completed"], "total": progress["total"],
-            "running": pid is not None and _pid_alive(pid)}
+            "running": pid is not None and _pid_alive(pid),
+            "saved_tokens": saved_tokens}
 
 
 def flow_state(root: str) -> dict:

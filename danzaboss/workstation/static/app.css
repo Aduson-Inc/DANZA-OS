@@ -845,6 +845,9 @@ button.chip { cursor: pointer; }
 }
 .build-summary { font-size: 15px; margin-bottom: 8px; }
 .quota-block { margin: 16px 0; }
+.savings-block { margin: 4px 0 0; }
+.savings-block .quota-meter { margin-top: 8px; }
+.savings-block > p { margin-top: 6px; }
 .quota-meter {
   height: 8px; margin-top: 7px; overflow: hidden;
   background: var(--graphite); clip-path: var(--blade);
