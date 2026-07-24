@@ -64,7 +64,8 @@ class CaptureLog:
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
             project TEXT NOT NULL, driver TEXT NOT NULL,
             tokens INTEGER NOT NULL, budget INTEGER NOT NULL,
-            adaptation TEXT NOT NULL DEFAULT '{}')""")
+            adaptation TEXT NOT NULL DEFAULT '{}',
+            replaced_tokens INTEGER)""")
         context_read_columns = {
             row["name"] for row in self.conn.execute(
                 "PRAGMA table_info(context_reads)").fetchall()
@@ -73,6 +74,14 @@ class CaptureLog:
             self.conn.execute(
                 "ALTER TABLE context_reads ADD COLUMN adaptation "
                 "TEXT NOT NULL DEFAULT '{}'")
+        if "replaced_tokens" not in context_read_columns:
+            # Nullable, no default (P4.1 T9): NULL means "recorded before
+            # this column existed, replaced cost unknown" — never guessed
+            # or backfilled. savings_stats() below excludes NULL rows from
+            # the replaced sum but still counts them as briefed turns.
+            self.conn.execute(
+                "ALTER TABLE context_reads ADD COLUMN replaced_tokens "
+                "INTEGER")
         self.conn.commit()
 
     # -- sessions --------------------------------------------------------------
@@ -131,17 +140,26 @@ class CaptureLog:
     # -- context reads (P4 T11 telemetry) ----------------------------------------
     def record_context_read(self, project: str, driver: str,
                             tokens: int, budget: int,
-                            adaptation: Optional[dict] = None) -> int:
+                            adaptation: Optional[dict] = None,
+                            replaced: Optional[int] = None) -> int:
         """One driver-context compile: what `driver` just read vs its cap.
         The compile seat is the only path every driver context passes, so
-        this table is the per-agent spend ledger the dashboard renders."""
+        this table is the per-agent spend ledger the dashboard renders.
+
+        ``replaced`` (P4.1 T9) is the estimated token cost of the raw
+        observations this compile injected in condensed form — the manual
+        re-lookup it spared the caller. Callers that can compute it
+        (``driver_context.replaced_tokens``) always pass an int, even 0 for
+        an empty package; ``None`` is reserved for rows that genuinely
+        predate this field and must read as unknown, not zero."""
         encoded = json.dumps(
             adaptation or {}, sort_keys=True, separators=(",", ":"))
         cur = self.conn.execute(
             "INSERT INTO context_reads "
-            "(ts, project, driver, tokens, budget, adaptation) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (_utcnow(), project, driver, int(tokens), int(budget), encoded))
+            "(ts, project, driver, tokens, budget, adaptation, "
+            "replaced_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (_utcnow(), project, driver, int(tokens), int(budget), encoded,
+             None if replaced is None else int(replaced)))
         self.conn.commit()
         return int(cur.lastrowid)
 
@@ -153,6 +171,30 @@ class CaptureLog:
             (project,)).fetchall()
         return {r["driver"]: {"reads": r["reads"], "tokens": r["tokens"]}
                 for r in rows}
+
+    def savings_stats(self, project: str) -> dict:
+        """Token-savings evidence for the dashboard meter (P4.1 T9),
+        aggregated from recorded brief telemetry ONLY — never fabricated.
+
+        ``injected_tokens`` and ``briefed_turns`` cover every recorded read.
+        ``replaced_tokens``/``known_turns`` cover only rows where the
+        replaced figure is known (NULL rows — recorded before this field
+        existed — count as a briefed turn but are excluded from the
+        replaced sum, never guessed). No telemetry at all reads as a clean
+        all-zero state, never a crash or an invented number."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) briefed_turns, "
+            "COALESCE(SUM(tokens), 0) injected_tokens, "
+            "COALESCE(SUM(replaced_tokens), 0) replaced_tokens, "
+            "COUNT(replaced_tokens) known_turns "
+            "FROM context_reads WHERE project = ?", (project,)).fetchone()
+        injected = row["injected_tokens"]
+        replaced = row["replaced_tokens"]
+        return {"briefed_turns": row["briefed_turns"],
+                "injected_tokens": injected,
+                "replaced_tokens": replaced,
+                "saved_tokens": replaced - injected,
+                "known_turns": row["known_turns"]}
 
     # -- stats -----------------------------------------------------------------
     def stats(self, project: Optional[str] = None) -> dict:

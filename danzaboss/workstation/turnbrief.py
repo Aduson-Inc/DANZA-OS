@@ -152,7 +152,8 @@ def _section_cortex(root: Path, task_text: str) -> str:
     """Section 4. ANY exception here degrades to a one-line fallback with
     no section header — sections 1-3 must never depend on cortex health."""
     try:
-        from danzaboss.cortex.driver_context import compile_driver_context
+        from danzaboss.cortex.driver_context import (
+            compile_driver_context, replaced_tokens)
         from danzaboss.cortex.events import CaptureLog
         from danzaboss.cortex.factory import db_path, open_store
         from danzaboss.cortex.identity import resolve_project
@@ -164,7 +165,8 @@ def _section_cortex(root: Path, task_text: str) -> str:
         for item in ctx.package.items:
             store.record_use(item.observation.id, source="turn-brief")
         CaptureLog(db_path(str(root))).record_context_read(
-            project, BOSS_DRIVER, ctx.used, ctx.budget, ctx.adaptation)
+            project, BOSS_DRIVER, ctx.used, ctx.budget, ctx.adaptation,
+            replaced=replaced_tokens(ctx))
     except Exception as exc:  # noqa: BLE001 - fail-open by design (critical rule)
         return f"Memory unavailable ({exc}) — proceed with the plan above."
 

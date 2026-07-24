@@ -321,7 +321,8 @@ def _cmd_context(argv: list[str], root: str, stdin: TextIO) -> int:
 
 
 def _cmd_driver_context(argv: list[str], root: str) -> int:
-    from .driver_context import compile_driver_context  # local: optional path
+    # local: optional path
+    from .driver_context import compile_driver_context, replaced_tokens
     from .graph import GraphStore
 
     def take_opt(flag: str) -> Optional[str]:
@@ -350,9 +351,11 @@ def _cmd_driver_context(argv: list[str], root: str) -> int:
     for item in ctx.package.items:
         store.record_use(item.observation.id, source="driver-context")
     # P4 T11: the compile seat is the one place every driver context passes,
-    # so this is where per-agent spend telemetry gets its row.
+    # so this is where per-agent spend telemetry gets its row. P4.1 T9 adds
+    # the replaced-tokens figure the savings meter reads.
     CaptureLog(db_path(root)).record_context_read(
-        _project(root), driver, ctx.used, ctx.budget, ctx.adaptation)
+        _project(root), driver, ctx.used, ctx.budget, ctx.adaptation,
+        replaced=replaced_tokens(ctx))
     print(json.dumps(ctx.to_dict(), indent=2) if as_json
           else (ctx.render() or "(no relevant observations)"))
     return 0

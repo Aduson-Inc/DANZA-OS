@@ -115,6 +115,97 @@ class TestContextReadTelemetry(unittest.TestCase):
         self.assertEqual((row["tokens"], row["budget"]), (3000, 4000))
         self.assertEqual(json.loads(row["adaptation"]), evidence)
 
+    def test_replaced_tokens_round_trips(self):
+        # P4.1 T9: the savings meter's counterfactual figure — what the
+        # injected observations would have cost to pull raw, one at a time.
+        log = CaptureLog(":memory:")
+        log.record_context_read("danza-os", "jonathan-builder", 400, 900,
+                                replaced=1200)
+        row = log.conn.execute(
+            "SELECT replaced_tokens FROM context_reads").fetchone()
+        self.assertEqual(row["replaced_tokens"], 1200)
+
+    def test_replaced_tokens_defaults_to_null_not_zero(self):
+        # NULL means "unknown" (pre-T9 row); 0 means "computed, no
+        # observations were injected" — the two must stay distinguishable.
+        log = CaptureLog(":memory:")
+        log.record_context_read("danza-os", "jonathan-builder", 400, 900)
+        row = log.conn.execute(
+            "SELECT replaced_tokens FROM context_reads").fetchone()
+        self.assertIsNone(row["replaced_tokens"])
+
+    def test_old_context_reads_schema_gains_replaced_tokens_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "cortex.db")
+            conn = sqlite3.connect(path)
+            conn.execute("""CREATE TABLE context_reads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                project TEXT NOT NULL, driver TEXT NOT NULL,
+                tokens INTEGER NOT NULL, budget INTEGER NOT NULL,
+                adaptation TEXT NOT NULL DEFAULT '{}')""")
+            conn.execute(
+                "INSERT INTO context_reads (ts, project, driver, tokens, "
+                "budget) VALUES ('old', 'danza-os', 'bonnie-qa', 123, 800)")
+            conn.commit()
+            conn.close()
+
+            log = CaptureLog(path)
+            columns = [r["name"] for r in log.conn.execute(
+                "PRAGMA table_info(context_reads)").fetchall()]
+            self.assertIn("replaced_tokens", columns)
+            stats = log.savings_stats("danza-os")
+            self.assertEqual(stats["briefed_turns"], 1)
+            self.assertEqual(stats["known_turns"], 0)
+            self.assertEqual(stats["replaced_tokens"], 0)
+            self.assertEqual(stats["injected_tokens"], 123)
+
+
+class TestSavingsStats(unittest.TestCase):
+    """P4.1 T9: the token-savings meter — aggregated ONLY from recorded
+    brief telemetry, never fabricated. Historical rows without a replaced
+    figure still count as briefed turns but are excluded from the replaced
+    sum (never guessed)."""
+
+    def test_empty_db_returns_clean_zero_state(self):
+        stats = CaptureLog(":memory:").savings_stats("danza-os")
+        self.assertEqual(stats, {"briefed_turns": 0, "injected_tokens": 0,
+                                 "replaced_tokens": 0, "saved_tokens": 0,
+                                 "known_turns": 0})
+
+    def test_aggregates_known_rows(self):
+        log = CaptureLog(":memory:")
+        log.record_context_read("danza-os", "jonathan-builder", 400, 900,
+                                replaced=1500)
+        log.record_context_read("danza-os", "bonnie-qa", 300, 800,
+                                replaced=900)
+        stats = log.savings_stats("danza-os")
+        self.assertEqual(stats["briefed_turns"], 2)
+        self.assertEqual(stats["known_turns"], 2)
+        self.assertEqual(stats["injected_tokens"], 700)
+        self.assertEqual(stats["replaced_tokens"], 2400)
+        self.assertEqual(stats["saved_tokens"], 1700)
+
+    def test_historical_unknown_rows_excluded_from_replaced_sum_only(self):
+        log = CaptureLog(":memory:")
+        log.record_context_read("danza-os", "jonathan-builder", 400, 900,
+                                replaced=1500)
+        log.record_context_read("danza-os", "bonnie-qa", 300, 800)  # unknown
+        stats = log.savings_stats("danza-os")
+        self.assertEqual(stats["briefed_turns"], 2)
+        self.assertEqual(stats["known_turns"], 1)
+        self.assertEqual(stats["injected_tokens"], 700)
+        self.assertEqual(stats["replaced_tokens"], 1500)
+        self.assertEqual(stats["saved_tokens"], 800)
+
+    def test_scoped_by_project(self):
+        log = CaptureLog(":memory:")
+        log.record_context_read("app-a", "jonathan-builder", 400, 900,
+                                replaced=1500)
+        log.record_context_read("app-b", "jonathan-builder", 100, 900,
+                                replaced=300)
+        self.assertEqual(log.savings_stats("app-a")["injected_tokens"], 400)
+        self.assertEqual(log.savings_stats("app-a")["replaced_tokens"], 1500)
+
     def test_old_db_upgrades_in_place(self):
         # a DB created before the context_reads table existed must gain it
         # on open (CREATE TABLE IF NOT EXISTS idiom), not crash on record.
@@ -199,6 +290,45 @@ class TestDriverContextCLIRecordsRead(unittest.TestCase):
         stats = CaptureLog(commands.db_path(self.root)).context_read_stats(project)
         self.assertEqual(stats["jonathan-builder"]["reads"], 1)
         self.assertGreaterEqual(stats["jonathan-builder"]["tokens"], 0)
+
+    def test_driver_context_records_replaced_tokens_for_savings_meter(self):
+        # P4.1 T9: an empty store still records a known (zero) replaced
+        # figure — never NULL/unknown for a read this code path itself made.
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = commands.main(["context", "--driver", "jonathan-builder",
+                                  "--task", "wire the telemetry"],
+                                 root=self.root, stdin=io.StringIO(""))
+        self.assertEqual(code, 0)
+        log = CaptureLog(commands.db_path(self.root))
+        row = log.conn.execute(
+            "SELECT replaced_tokens FROM context_reads "
+            "ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["replaced_tokens"], 0)
+
+    def test_driver_context_replaced_tokens_reflects_seeded_observations(self):
+        from danzaboss.cortex.observation import Observation
+        from danzaboss.cortex.sqlite_backend import SqliteBackend
+        from danzaboss.cortex.store import ObservationStore
+
+        project = commands._project(self.root)
+        store = ObservationStore(SqliteBackend(commands.db_path(self.root)))
+        store.upsert(Observation(
+            title="Auth uses bcrypt cost 12", summary="cost factor 12 chosen",
+            type="impl_detail", project=project, concepts=["auth"],
+            tags=["auth"], reasoning="brute-force cost tuned for the box"))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = commands.main(["context", "--driver", "jonathan-builder",
+                                  "--task", "work on auth"],
+                                 root=self.root, stdin=io.StringIO(""))
+        self.assertEqual(code, 0)
+        log = CaptureLog(commands.db_path(self.root))
+        row = log.conn.execute(
+            "SELECT tokens, replaced_tokens FROM context_reads "
+            "ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertGreater(row["replaced_tokens"], 0)
+        self.assertGreaterEqual(row["replaced_tokens"], row["tokens"])
 
     def test_cli_json_adaptation_matches_persisted_row(self):
         out = io.StringIO()

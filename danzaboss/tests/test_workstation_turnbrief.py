@@ -147,6 +147,19 @@ class HappyPathCortex(TurnBriefFixture):
         self.assertIn("tony-d-orchestrator", stats)
         self.assertEqual(stats["tony-d-orchestrator"]["reads"], 1)
 
+    def test_telemetry_records_replaced_tokens_for_savings_meter(self):
+        # P4.1 T9: the turn brief is a driver-context compile seat too — it
+        # must leave a known (non-NULL) replaced figure like every other one.
+        project = self._seed()
+        plan = _independent_plan(1)
+        compile_turn_brief(self.root, state(), plan, "claude", "build")
+        log = CaptureLog(db_path(str(self.root)))
+        row = log.conn.execute(
+            "SELECT tokens, replaced_tokens FROM context_reads "
+            "WHERE project = ?", (project,)).fetchone()
+        self.assertIsNotNone(row["replaced_tokens"])
+        self.assertGreaterEqual(row["replaced_tokens"], row["tokens"])
+
 
 class LastTurnSection(TurnBriefFixture):
     def test_no_prior_turn_says_so(self):

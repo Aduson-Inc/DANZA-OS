@@ -341,5 +341,38 @@ class TestDriverContextCLI(unittest.TestCase):
         self.assertEqual(data["adaptation"]["policy_ceiling"], 3500)
 
 
+class TestReplacedTokensForSavingsMeter(unittest.TestCase):
+    """P4.1 T9: the savings meter's 'replaced' figure — the estimated cost
+    of pulling each injected observation in full, one at a time, the way a
+    boss without a compiled brief would have to (`danza cortex get <id>`).
+    Computed with the same calibrated estimator as every other CORTEX token
+    accounting call site — never a fixed multiplier, never fabricated."""
+
+    def test_replaced_tokens_is_zero_for_empty_package(self):
+        store = ObservationStore(SqliteBackend(":memory:"))
+        ctx = compile_driver_context(store, "jonathan-builder", TASK, "userapp")
+        self.assertEqual(driver_context.replaced_tokens(ctx), 0)
+
+    def test_replaced_tokens_sums_full_raw_observation_size(self):
+        from danzaboss.cortex.tokens import est_tokens
+
+        ctx = compile_driver_context(app_build_store(), "jonathan-builder",
+                                     TASK, "userapp", budget=800)
+        self.assertTrue(ctx.package.items, "fixture must inject something")
+        expected = sum(
+            est_tokens(json.dumps(item.observation.to_row(), sort_keys=True),
+                      kind="json")
+            for item in ctx.package.items)
+        self.assertEqual(driver_context.replaced_tokens(ctx), expected)
+
+    def test_replaced_tokens_never_cheaper_than_the_injected_package(self):
+        # the raw observation (every bookkeeping field, serialized) can
+        # never be smaller than the condensed/possibly-compressed text that
+        # was actually injected for the same observation.
+        ctx = compile_driver_context(app_build_store(), "jonathan-builder",
+                                     TASK, "userapp", budget=200)
+        self.assertGreaterEqual(driver_context.replaced_tokens(ctx), ctx.used)
+
+
 if __name__ == "__main__":
     unittest.main()

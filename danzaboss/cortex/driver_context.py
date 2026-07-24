@@ -24,6 +24,7 @@ Stdlib only.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -34,6 +35,7 @@ from .budgets import (  # noqa: F401
     DRIVER_BUDGETS, DRIVER_CORTEX, resolve_budget, resolve_policy)
 from .quality import build_package, select_adaptive_package
 from .store import ObservationStore
+from .tokens import est_tokens
 
 # Unknown drivers fall back here: no forced intent (let the classifier decide),
 # no type filter (every category is a candidate). Predictable, never a crash.
@@ -84,6 +86,22 @@ class DriverContext:
                 for i in self.package.items],
             "render": self.render(),
         }
+
+
+def replaced_tokens(ctx: DriverContext) -> int:
+    """Estimated cost of the manual lookup ``ctx.package`` spared the caller
+    (P4.1 T9 savings-meter telemetry): for each injected observation, what
+    ``danza cortex get <id>`` would return in full (every field, not just
+    the condensed/possibly-compressed package text actually injected) —
+    the "before this brief existed" cost the turnbrief docstring describes
+    as hand-running CORTEX lookups one at a time. Estimated with the same
+    calibrated ``est_tokens`` heuristic as every other CORTEX token
+    accounting call, never a fixed multiplier."""
+    total = 0
+    for item in ctx.package.items:
+        raw = json.dumps(item.observation.to_row(), sort_keys=True)
+        total += est_tokens(raw, kind="json")
+    return total
 
 
 def driver_profile(driver: str) -> tuple[dict, str]:

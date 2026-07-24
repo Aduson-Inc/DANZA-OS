@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .driver_context import compile_driver_context
+from .driver_context import compile_driver_context, replaced_tokens
 from .events import CaptureLog
 from .factory import db_path, open_store
 from .graph import GraphStore
@@ -110,7 +110,8 @@ def start_task(root: str | os.PathLike, task_id: str, actor: str, task: str,
         context = compiled.render()
         context_tokens = compiled.used
         CaptureLog(db_path(str(project_root))).record_context_read(
-            project, actor, compiled.used, compiled.budget, compiled.adaptation)
+            project, actor, compiled.used, compiled.budget,
+            compiled.adaptation, replaced=replaced_tokens(compiled))
 
     completed.append({"task_id": task_id, "actor": actor,
                       "task_number": number, "seeded": seeded})
