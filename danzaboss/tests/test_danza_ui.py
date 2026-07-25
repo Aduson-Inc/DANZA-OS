@@ -17,6 +17,7 @@ from danzaboss.cortex.events import CaptureLog
 from danzaboss.cortex.observation import Observation, ObsType, Importance
 from danzaboss.cortex.sqlite_backend import SqliteBackend
 from danzaboss.cortex.store import ObservationStore
+from danzaboss.frontier import store as frontier_store_mod
 from danzaboss.workstation import server as server_mod
 from danzaboss.workstation import execution as execution_mod
 from danzaboss.workstation import product_scope as product_scope_mod
@@ -1485,6 +1486,145 @@ class TestBuildApi(unittest.TestCase):
             self.assertEqual(self._get(port, f"/api/conductor?limit={bad}"),
                              400, bad)
         self.assertEqual(self._get(port, "/api/conductor?limit=5"), 200)
+
+
+class TestFrontierApi(unittest.TestCase):
+    """Plan 01 Task 11: /api/frontier + /api/frontier/decide. The endpoint
+    must never make a live Tavily call in this suite -- TAVILY_API_KEY is
+    popped for the duration so an accidentally-set key in the ambient
+    environment can never turn a plain GET into a real network call."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+        saved_key = os.environ.pop("TAVILY_API_KEY", None)
+        if saved_key is not None:
+            self.addCleanup(lambda: os.environ.__setitem__(
+                "TAVILY_API_KEY", saved_key))
+
+    def _serve(self):
+        server, port = serve_in_thread(self.root)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return port
+
+    def test_never_ran_renders_cleanly(self):
+        port = self._serve()
+        status, _, raw = get(port, "/api/frontier")
+        self.assertEqual(status, 200)
+        body = json.loads(raw)
+        self.assertIsNone(body["last_run"])
+        self.assertEqual(body["proposals"], [])
+
+    def test_activated_repo_never_produces_proposals(self):
+        # an activated (APP_BUILD) repo is not canonical -- the scout must
+        # stay off even though this endpoint is always reachable.
+        seed_activated_repo(self.root)
+        port = self._serve()
+        status, _, raw = get(port, "/api/frontier")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["proposals"], [])
+
+    def test_get_triggers_scout_and_swallows_its_failures(self):
+        calls = []
+
+        def exploding(root, **kwargs):
+            calls.append(root)
+            raise RuntimeError("boom")
+
+        saved = server_mod._FRONTIER_SCOUT
+        server_mod._FRONTIER_SCOUT = exploding
+        self.addCleanup(lambda: setattr(server_mod, "_FRONTIER_SCOUT", saved))
+        port = self._serve()
+        status, _, raw = get(port, "/api/frontier")
+        self.assertEqual(status, 200)
+        self.assertEqual(calls, [self.root])
+        self.assertEqual(json.loads(raw)["proposals"], [])
+
+    def test_flow_poll_triggers_scout_and_swallows_its_failures(self):
+        # the dashboard's regular heartbeat is a scout opportunity too -- a
+        # user who never opens the Advanced drawer still gets the weekly
+        # scout, and an exploding scout can never 500 /api/flow.
+        calls = []
+
+        def exploding(root, **kwargs):
+            calls.append(root)
+            raise RuntimeError("boom")
+
+        saved = server_mod._FRONTIER_SCOUT
+        server_mod._FRONTIER_SCOUT = exploding
+        self.addCleanup(lambda: setattr(server_mod, "_FRONTIER_SCOUT", saved))
+        port = self._serve()
+        status, _, raw = get(port, "/api/flow")
+        self.assertEqual(status, 200)
+        self.assertEqual(calls, [self.root])
+        self.assertIn("stages", json.loads(raw))
+
+    def _additions(self):
+        path = Path(self.root) / ".danza" / "build-additions.json"
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_decide_approve_routes_to_additions_backlog(self):
+        frontier_store_mod.add_proposals(self.root, [
+            {"title": "Try template Z", "summary": "s", "source": "research"},
+            {"title": "Skip this one", "summary": "s2",
+             "source": "code_health"},
+            {"title": "Adopt tool Q", "summary": "s3", "source": "research"}])
+        port = self._serve()
+        status, body = post(port, "/api/frontier/decide",
+                            {"proposal_id": 1, "decision": "approved",
+                             "expected_revision": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["proposal"]["status"], "approved")
+        self.assertEqual(body["frontier"]["proposals"][0]["status"],
+                         "approved")
+        # approved -> the same additions store the Build editor uses, as a
+        # pending draft feature (never auto-built)
+        additions = self._additions()
+        self.assertIsNotNone(additions)
+        self.assertEqual(additions["approval"]["state"], "draft")
+        summaries = [f["summary"] for f in additions["features"]]
+        self.assertTrue(any("Try template Z" in s for s in summaries))
+        self.assertTrue(all(f["status"] == "pending"
+                            for f in additions["features"]))
+        # dismissed -> never lands in the additions store
+        status, _ = post(port, "/api/frontier/decide",
+                         {"proposal_id": 2, "decision": "dismissed",
+                          "expected_revision": 1})
+        self.assertEqual(status, 200)
+        summaries = [f["summary"] for f in self._additions()["features"]]
+        self.assertFalse(any("Skip this one" in s for s in summaries))
+        # a second approval appends alongside the first with a unique id
+        status, _ = post(port, "/api/frontier/decide",
+                         {"proposal_id": 3, "decision": "approved",
+                          "expected_revision": 1})
+        self.assertEqual(status, 200)
+        additions = self._additions()
+        self.assertEqual(len(additions["features"]), 2)
+        ids = [f["id"] for f in additions["features"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        # stale re-decide of an already-decided proposal -> 409
+        status, _ = post(port, "/api/frontier/decide",
+                         {"proposal_id": 1, "decision": "dismissed",
+                          "expected_revision": 1})
+        self.assertEqual(status, 409)
+
+    def test_decide_unknown_id_is_400(self):
+        port = self._serve()
+        status, body = post(port, "/api/frontier/decide",
+                            {"proposal_id": 7, "decision": "approved",
+                             "expected_revision": 1})
+        self.assertEqual(status, 400)
+
+    def test_decide_bad_body_types_are_400(self):
+        port = self._serve()
+        status, _ = post(port, "/api/frontier/decide",
+                         {"proposal_id": "1", "decision": "approved",
+                          "expected_revision": 1})
+        self.assertEqual(status, 400)
 
 
 class TestUiCliParsing(unittest.TestCase):

@@ -898,3 +898,15 @@ button.chip { cursor: pointer; }
 .build-unit p { margin: 4px 0; }
 .build-unit.completed { opacity: .72; }
 .build-unit.blocked { border-color: var(--ember); }
+
+/* ---------- Task 11: FRONTIER scout panel ---------- */
+.frontier-item {
+  margin: 0 0 10px; padding: 12px 14px;
+  background: rgba(10, 10, 12, .55);
+  border: 1px solid var(--gunmetal); border-left: 3px solid var(--gunmetal);
+}
+.frontier-item:last-child { margin-bottom: 0; }
+.frontier-item-head { display: flex; align-items: center; gap: 10px; }
+.frontier-item-head .chip { margin-left: auto; }
+.frontier-item p { margin: 6px 0 0; }
+.frontier-item-actions { display: flex; gap: 8px; margin-top: 10px; }

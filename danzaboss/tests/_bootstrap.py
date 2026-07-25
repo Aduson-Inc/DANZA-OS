@@ -18,3 +18,9 @@ os.environ.setdefault(
     "DANZA_CORTEX_GLOBAL_DB",
     os.path.join(tempfile.mkdtemp(prefix="danza-test-global-"), "global.db"))
 os.environ.setdefault("DANZA_CORTEX_GLOBAL_DSN", "")
+
+# Same hermeticity for the Tavily key (Task 11): /api/flow opportunistically
+# triggers the frontier scout, and tests exercise it against temp roots that
+# read as the canonical repo — an ambient developer key must never turn a
+# suite run into live research calls. No test may ever see a real key.
+os.environ.pop("TAVILY_API_KEY", None)

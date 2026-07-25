@@ -49,6 +49,8 @@ from . import product_scope as product_scope_mod
 from . import research as research_mod
 from . import routing as routing_mod
 from . import templates as templates_mod
+from ..frontier import scout as frontier_scout_mod
+from ..frontier import store as frontier_store_mod
 from .compiler import SPEC_RELPATH, compile_spec, write_spec
 from .conductor import (LOG_RELPATH, PIDFILE_RELPATH, TEAM_STATE_RELPATH,
                         _pid_alive, session_name)
@@ -73,6 +75,10 @@ MAX_POST_BYTES = 1_048_576  # nothing the onboarding forms send comes close
 # curl user racing the browser cannot interleave inside a mutation.
 _POST_LOCK = threading.Lock()
 _PREPARE_WORKSPACE = prepare_workspace
+
+# Module-level seam (the detect_runners(which=...) idiom) so HTTP tests can
+# double the whole scout run without a network or a real Tavily key.
+_FRONTIER_SCOUT = frontier_scout_mod.maybe_scout
 
 # GET /api/setup must not block the dashboard behind five auth-probe
 # subprocesses on every poll, so the live registry is cached for a short TTL.
@@ -538,6 +544,24 @@ def plan_detail(root: str) -> dict:
     return {"plan": summary, "tree": tree, "plan_md": md}
 
 
+def frontier_summary(root: str) -> dict:
+    """FRONTIER panel payload (plan 01 Task 11): trigger the opportunistic
+    scout, then report the current backlog. A Tavily outage or a corrupt
+    frontier state must never break this or any other route -- maybe_scout
+    already fails closed internally, and this is the belt-and-braces second
+    layer. Never-ran and no-proposals states render cleanly (empty
+    proposals, last_run=None)."""
+    try:
+        _FRONTIER_SCOUT(root)
+    except Exception:
+        pass
+    try:
+        state = frontier_store_mod.load_state(root)
+    except frontier_store_mod.FrontierError as e:
+        return {"error": str(e), "last_run": None, "proposals": []}
+    return {"last_run": state["last_run"], "proposals": state["proposals"]}
+
+
 def snapshot_token(root: str) -> str:
     """Cheap change token for SSE: mtime+size of the product state files
     (same role snapshot_version() plays for the CORTEX store)."""
@@ -549,7 +573,8 @@ def snapshot_token(root: str) -> str:
                 project_mod.TAKEOVER_AUDIT_RELPATH,
                 product_scope_mod.FEATURES_JSON_RELPATH,
                 build_mod.ADDITIONS_RELPATH, build_mod.QUEUE_RELPATH,
-                build_mod.PROGRESS_TX_RELPATH):
+                build_mod.PROGRESS_TX_RELPATH,
+                frontier_store_mod.STATE_RELPATH):
         try:
             st = (Path(root) / rel).stat()
             parts.append(f"{st.st_mtime_ns}:{st.st_size}")
@@ -638,7 +663,18 @@ def flow_state(root: str) -> dict:
     team roster (requirement 4). Stage status is derived entirely from
     existing product state — no new state files. Each stage carries only a
     light summary; the SPA fetches heavy detail from the existing tab
-    endpoints (/api/onboarding, /api/project, /api/build, ...)."""
+    endpoints (/api/onboarding, /api/project, /api/build, ...).
+
+    The dashboard's regular /api/flow poll is also the frontier scout's
+    opportunistic trigger (plan 01 Task 11, no daemon/cron): a user who
+    never opens the Advanced drawer still gets the weekly scout.
+    maybe_scout gates itself (canonical repo + key + 7-day throttle) and
+    never raises; the extra swallow here guarantees no scout bug can ever
+    500 the flow heartbeat."""
+    try:
+        _FRONTIER_SCOUT(root)
+    except Exception:
+        pass
     build = _build_stage(root)
     by_id = {"connect": _connect_stage(root),
              "describe": _describe_stage(root),
@@ -1060,6 +1096,37 @@ def post_build_approve(root: str, body: dict, *,
             **build_mod.live_payload(root)}
 
 
+def post_frontier_decide(root: str, body: dict) -> dict:
+    """Approve or dismiss one frontier proposal (plan 01 Task 11). Approving
+    keeps the proposal's approved status in the frontier store (panel
+    history) AND routes it into the same additions store the Build editor
+    uses for user-added future work — as a pending draft feature that only
+    ever builds after the normal human additions-approval + replan flow.
+    Nothing is ever auto-built. The frontier proposal's own revision
+    fingerprint gates the whole action. A routing failure after a committed
+    approval is reported in the payload (backlog_error), never hidden and
+    never a torn 500. No setup/onboard gate: the scout only ever produces
+    proposals in the canonical, unactivated repo, which has neither."""
+    proposal_id = body.get("proposal_id")
+    if type(proposal_id) is not int:
+        raise ValueError("body.proposal_id must be int")
+    decision = _require(body, "decision", str)
+    expected_revision = body.get("expected_revision")
+    if type(expected_revision) is not int:
+        raise ValueError("body.expected_revision must be int")
+    record = frontier_store_mod.decide(
+        root, proposal_id, decision, expected_revision=expected_revision)
+    out = {"ok": True, "proposal": record}
+    if record["status"] == "approved":
+        try:
+            out["backlog_feature"] = build_mod.append_backlog_feature(
+                root, **frontier_store_mod.backlog_feature(record))
+        except build_mod.BuildError as e:
+            out["backlog_error"] = str(e)
+    out["frontier"] = frontier_summary(root)
+    return out
+
+
 _POST_ROUTES = {
     "/api/setup": post_setup,
     "/api/connection/launch": post_connection_launch,
@@ -1080,6 +1147,7 @@ _POST_ROUTES = {
     "/api/project/scope": post_project_scope,
     "/api/project/approve": post_project_approve,
     "/api/project/decompose": post_project_decompose,
+    "/api/frontier/decide": post_frontier_decide,
 }
 
 
@@ -1141,6 +1209,8 @@ class DanzaUIHandler(CortexUIHandler):
                 self._json(project_mod.project_summary(self.root))
             elif route == "/api/plan":
                 self._json(plan_detail(self.root))
+            elif route == "/api/frontier":
+                self._json(frontier_summary(self.root))
             elif route == "/api/events":
                 self._danza_events()
             else:
@@ -1192,7 +1262,8 @@ class DanzaUIHandler(CortexUIHandler):
                 result = handler(self.root, body)
             self._json(result)
         except (GateConflict, product_scope_mod.RevisionConflict,
-                build_mod.BuildRevisionConflict) as e:
+                build_mod.BuildRevisionConflict,
+                frontier_store_mod.FrontierRevisionConflict) as e:
             self._json({"error": str(e)}, 409)
         except ValueError as e:
             # WizardError / InterviewError / CheckpointError / ResearchError

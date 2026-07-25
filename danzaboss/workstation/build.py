@@ -307,6 +307,50 @@ def draft_additions(root: str | os.PathLike, *, additions: list[dict],
     return value
 
 
+def append_backlog_feature(root: str | os.PathLike, *, summary: str,
+                           acceptance_criteria: list[str]) -> dict:
+    """Append one pending feature to the additions draft WITHOUT requiring
+    an active build — the frontier-backlog path (plan 01 Task 11). Unlike
+    draft_additions (a whole-list replacement gated on the active approved
+    scope), this appends a single already-human-approved future-work item;
+    it lands in the same .danza/build-additions.json store the additions
+    editor reads and only ever builds after the normal additions-approval +
+    replan flow. The caller's own approval fingerprint (the frontier
+    proposal revision) is the concurrency gate for this write, so no
+    expected_revision rides here; an approved/queued draft still refuses —
+    approved additions stay immutable."""
+    if (Path(root) / QUEUE_RELPATH).exists():
+        raise BuildRevisionConflict(
+            "activate the queued additions before adding backlog items")
+    current = _load_additions(root)
+    if current is not None and current["approval"]["state"] == "approved":
+        raise BuildRevisionConflict("approved additions are immutable")
+    features = [] if current is None else copy.deepcopy(current["features"])
+    used = {feature["id"] for feature in features}
+    try:
+        scope = product_scope.load_scope(root)
+        used.update(feature["id"] for feature in scope["features"])
+    except (product_scope.ProductScopeError, OSError):
+        pass  # no scope (canonical repo) — additions ids stand alone
+    feature = {"id": max(used, default=0) + 1, "summary": summary,
+               "acceptance_criteria": list(acceptance_criteria),
+               "status": "pending"}
+    features.append(feature)
+    probe = {"version": product_scope.SCHEMA_VERSION, "revision": 1,
+             "approval": {"state": "draft", "approved_revision": None},
+             "features": features}
+    try:
+        product_scope.validate_scope(probe)
+    except product_scope.ProductScopeError as exc:
+        raise BuildError(str(exc)) from exc
+    revision = 1 if current is None else current["revision"] + 1
+    _atomic_json(Path(root) / ADDITIONS_RELPATH,
+                 {"version": SCHEMA_VERSION, "revision": revision,
+                  "approval": {"state": "draft", "approved_revision": None},
+                  "features": features})
+    return feature
+
+
 def _planning_scope(scope: dict, feature_ids: set[int]) -> dict:
     pending = [copy.deepcopy(feature) for feature in scope["features"]
                if feature["id"] in feature_ids]

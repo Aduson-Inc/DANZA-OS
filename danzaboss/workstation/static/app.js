@@ -1333,14 +1333,116 @@ function planInternalsPanel(p) {
 }
 
 async function loadAdvanced() {
-  const [o, log, p] = await Promise.all(
-    [api("api/overview"), api("api/conductor?limit=100"), api("api/plan")]);
+  const [o, log, p, f] = await Promise.all(
+    [api("api/overview"), api("api/conductor?limit=100"), api("api/plan"),
+     api("api/frontier")]);
   const activity = log.items.length
     ? `<div class="console-log mono">${log.items.map(logLine).join("")}</div>`
     : `<p class="dim">Nothing has happened yet.</p>`;
+  frontierData = f;
   $("#advanced-body").innerHTML = projectInfoPanel(o) + cortexPanel(o) +
-    planInternalsPanel(p) + panel("Full activity log", activity);
+    planInternalsPanel(p) +
+    `<div id="frontier-panel">${frontierPanel(frontierData)}</div>` +
+    panel("Full activity log", activity);
+  wireFrontier();
   advanced.loaded = true;
+}
+
+/* ---------- FRONTIER — weekly scout proposals (plan 01 Task 11) ----------
+   Auxiliary panel in the Advanced drawer, not a stage in the main flow. The
+   scout itself runs opportunistically on the server (canonical repo + key +
+   7-day throttle); this panel only renders whatever it has produced and
+   lets a human Approve/Dismiss each proposal. Nothing here ever auto-builds
+   -- an approved proposal just moves into the backlog section below. */
+let frontierData = null;
+const frontierUI = { busy: false, error: "" };
+
+// Proposal URLs come from external Tavily search results, not from this
+// product -- only http(s) may ever render as a clickable link (a
+// javascript:/data: scheme in a search result must never execute here).
+function safeHttpUrl(url) {
+  try {
+    const u = new URL(String(url ?? ""), window.location.href);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function frontierProposalHTML(p) {
+  const actions = p.status === "proposed"
+    ? `<button type="button" class="chip" data-frontier-id="${esc(p.id)}"
+         data-frontier-decision="approved"
+         data-frontier-revision="${esc(p.revision)}">Approve</button>
+       <button type="button" class="chip" data-frontier-id="${esc(p.id)}"
+         data-frontier-decision="dismissed"
+         data-frontier-revision="${esc(p.revision)}">Dismiss</button>`
+    : `<span class="chip mono">${esc(p.status)}</span>`;
+  const url = safeHttpUrl(p.url);
+  return `<article class="frontier-item">
+    <div class="frontier-item-head"><b>${esc(p.title)}</b>
+      <span class="chip mono">${esc(p.source)}</span></div>
+    ${p.summary ? `<p>${esc(p.summary)}</p>` : ""}
+    ${url ? `<p class="mono dim"><a href="${esc(url)}" target="_blank"
+       rel="noopener noreferrer">${esc(url)}</a></p>` : ""}
+    <div class="frontier-item-actions">${actions}</div>
+  </article>`;
+}
+
+function frontierPanel(f) {
+  if (!f) return panel("Frontier scout", `<p class="dim">Loading…</p>`);
+  if (f.error) return panel("Frontier scout",
+    `<p class="warn mono">${esc(f.error)}</p>`);
+  const proposals = f.proposals || [];
+  const open = proposals.filter((p) => p.status === "proposed");
+  const backlog = proposals.filter((p) => p.status === "approved");
+  const errHTML = frontierUI.error
+    ? `<p class="warn mono">${esc(frontierUI.error)}</p>` : "";
+  if (!proposals.length) {
+    return panel("Frontier scout", errHTML + `<p class="dim">The weekly
+      frontier scout has not produced any proposals yet. It runs
+      opportunistically in the canonical DANZA-OS repo once a Tavily key is
+      configured -- nothing is required here.</p>`);
+  }
+  const last = `<p class="dim mono">last run: ${esc(f.last_run || "never")}</p>`;
+  const openHTML = open.length
+    ? open.map(frontierProposalHTML).join("")
+    : `<p class="dim">Nothing new this week.</p>`;
+  const backlogHTML = backlog.length
+    ? backlog.map(frontierProposalHTML).join("")
+    : `<p class="dim">Nothing approved yet.</p>`;
+  return panel("Frontier scout", errHTML + last +
+    `<h3 class="section-label">Open proposals</h3>${openHTML}
+     <h3 class="section-label">Backlog (approved)</h3>${backlogHTML}`);
+}
+
+async function frontierDecide(id, decision, revision) {
+  if (frontierUI.busy) return;
+  frontierUI.busy = true;
+  frontierUI.error = "";
+  try {
+    const out = await post("api/frontier/decide",
+      { proposal_id: id, decision, expected_revision: revision });
+    frontierData = out.frontier;
+  } catch (e) {
+    frontierUI.error = e.message;
+  }
+  frontierUI.busy = false;
+  renderFrontier();
+}
+
+function renderFrontier() {
+  const el = $("#frontier-panel");
+  if (!el) return;
+  el.innerHTML = frontierPanel(frontierData);
+  wireFrontier();
+}
+
+function wireFrontier() {
+  $$('[data-frontier-decision]').forEach((button) =>
+    button.addEventListener("click", () => frontierDecide(
+      Number(button.dataset.frontierId), button.dataset.frontierDecision,
+      Number(button.dataset.frontierRevision))));
 }
 
 function openAdvanced() {
