@@ -8,6 +8,18 @@
   "why": "Workflow and automation ideas are usually best as a sharp command-line tool: instant startup, scriptable, no server to run.",
   "tradeoffs": "Terminal-only audience; a UI later means a separate template.",
   "avoid_when": "Non-technical end users need to operate it.",
+  "build_order": [
+    {"title": "Scaffold the tool",
+     "description": "Typer app installs and runs with a help screen that makes sense."},
+    {"title": "Build the core commands",
+     "description": "The must-have commands working against real files or data."},
+    {"title": "Persist state",
+     "description": "SQLite or file storage for anything the tool must remember."},
+    {"title": "Polish and harden",
+     "description": "Clear errors, edge cases, and green tests."},
+    {"title": "Package it",
+     "description": "pipx-installable packaging and short usage docs."}
+  ],
   "testing_defaults": {"framework": "pytest",
                        "tiers": "test-first command logic; tier 0-1 for packaging"},
   "philosophy_fit": "Maximal: free-first, lightweight-first, local-first.",

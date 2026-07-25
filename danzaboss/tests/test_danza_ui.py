@@ -273,6 +273,56 @@ class TestOnboardingDetail(unittest.TestCase):
         self.assertFalse(o["boss_available"])
         self.assertIsNone(o["blocking_phase"])  # degraded passes the gate
 
+    def test_stack_step_recommends_from_the_catalog(self):
+        # Task 10: once the idea/kind is captured, the Stack step surfaces
+        # the top curated-catalog pick (deterministic, no AI) and prefills
+        # the accept path via the stack_template default.
+        from danzaboss.workstation.server import onboarding_summary
+        from danzaboss.workstation.wizard import Wizard
+        Wizard(self.root).submit("p0", {"project_type": "saas"})
+        Wizard(self.root).submit("p2", {"capabilities": ["realtime"]})
+        o = onboarding_summary(self.root)
+        p3 = next(s for s in o["steps"] if s["id"] == "p3")
+        rec = p3["recommendation"]
+        self.assertEqual(rec["key"], "realtime-app")
+        for key in ("name", "tagline", "why", "components"):
+            self.assertIn(key, rec)
+        q = next(q for q in p3["questions"] if q["id"] == "stack_template")
+        self.assertEqual(q["default"], "realtime-app")
+
+    def test_accepted_recommendation_records_like_any_answer(self):
+        from danzaboss.workstation.server import onboarding_summary
+        from danzaboss.workstation.wizard import Wizard
+        Wizard(self.root).submit("p0", {"project_type": "saas"})
+        o = onboarding_summary(self.root)
+        p3 = next(s for s in o["steps"] if s["id"] == "p3")
+        key = p3["recommendation"]["key"]
+        self.assertEqual(key, "saas-ts")  # top pick for plain saas
+        Wizard(self.root).submit("p3", {"stack_choice": "template",
+                                        "stack_template": key})
+        o = onboarding_summary(self.root)
+        p3 = next(s for s in o["steps"] if s["id"] == "p3")
+        q = next(q for q in p3["questions"] if q["id"] == "stack_template")
+        self.assertEqual(q["value"], key)
+
+    def test_declined_recommendation_leaves_answers_stackless(self):
+        from danzaboss.workstation.server import onboarding_summary
+        from danzaboss.workstation.wizard import Wizard
+        Wizard(self.root).submit("p0", {"project_type": "saas"})
+        Wizard(self.root).submit("p3", {"stack_choice": "no_preference"})
+        o = onboarding_summary(self.root)
+        p3 = next(s for s in o["steps"] if s["id"] == "p3")
+        self.assertIn("recommendation", p3)  # still visible for re-edit
+        self.assertNotIn("stack_template", Wizard(self.root).answers)
+
+    def test_seed_projects_get_no_stack_recommendation(self):
+        from danzaboss.workstation.server import onboarding_summary
+        from danzaboss.workstation.wizard import Wizard
+        Wizard(self.root).submit("p0", {"project_type": "workflow"})
+        o = onboarding_summary(self.root)
+        self.assertNotIn("p3", [s["id"] for s in o["steps"]])
+        self.assertTrue(all("recommendation" not in s for s in o["steps"]))
+
     def test_snapshot_token_moves_on_interview_write(self):
         from danzaboss.workstation import interview
         from danzaboss.workstation.server import snapshot_token

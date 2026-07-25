@@ -439,6 +439,7 @@ PLAN_CONTRACT = (
 
 def build_planning_prompt(spec_text: str, *,
                           testing_defaults: dict | None = None,
+                          build_order: list | None = None,
                           violations: tuple[str, ...] = (),
                           prior_plan: dict | None = None,
                           reserved_unit_ids: set[str] | frozenset[str] = frozenset()) -> str:
@@ -457,6 +458,12 @@ def build_planning_prompt(spec_text: str, *,
     if testing_defaults:
         lines += ["Test policy from the approved stack template (JSON):",
                   json.dumps(testing_defaults, indent=2, sort_keys=True), ""]
+    if build_order:
+        lines += ["Build-order template from the approved stack.",
+                  "Seed the plan skeleton from these ordered phases: shape",
+                  "the atomic units so work belonging to an earlier phase",
+                  "comes before work belonging to a later one (JSON):",
+                  json.dumps(build_order, indent=2, sort_keys=True), ""]
     if reserved_unit_ids:
         lines += [
             "This is a pending-work replan. The following carried unit ids",
@@ -495,17 +502,20 @@ def _generate_plan(root: str | os.PathLike, command: list[str], *,
     except ValueError as exc:
         raise PlanningError(f"unusable onboarding state: {exc}") from exc
     testing_defaults = None
+    build_order = None
     chosen = answers.get("stack_template")
     if chosen:
         library = {t.key: t
                    for t in templates_mod.load_templates(template_dir)}
         if chosen in library:
             testing_defaults = library[chosen].testing_defaults
+            build_order = library[chosen].build_order
     violations: tuple[str, ...] = ()
     prior_plan: dict | None = None
     for round_num in range(1, max_rounds + 1):
         prompt = build_planning_prompt(
             spec_text, testing_defaults=testing_defaults,
+            build_order=build_order,
             violations=violations, prior_plan=prior_plan,
             reserved_unit_ids=reserved_unit_ids)
         try:

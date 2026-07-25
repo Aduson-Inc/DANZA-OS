@@ -450,6 +450,23 @@ def _question_dict(q, answers: dict) -> dict:
             "show_if": [[qid, list(accepted)] for qid, accepted in q.show_if]}
 
 
+def _stack_recommendation(project_type: str | None, answers: dict) -> dict | None:
+    """Top curated-catalog pick for the captured idea (plan 01 Task 10):
+    the deterministic select_templates ranking over the built-in library —
+    no AI call, no network, no keys. A malformed catalog fails loudly."""
+    if project_type not in APP_PROJECT_TYPES:
+        return None
+    picks = templates_mod.select_templates(
+        templates_mod.load_templates(), project_type,
+        answers.get("capabilities", []))
+    if not picks:
+        return None
+    top = picks[0]
+    return {"key": top.key, "name": top.name, "tagline": top.tagline,
+            "why": top.why, "components": top.components,
+            "tradeoffs": top.tradeoffs}
+
+
 def onboarding_summary(root: str) -> dict:
     """Everything the ONBOARD tab needs to render forms, the grill, and
     inline research/checkpoint results (Phase 3)."""
@@ -463,6 +480,16 @@ def onboarding_summary(root: str) -> dict:
                  "status": wiz.status(s.id),
                  "questions": [_question_dict(q, answers)
                                for q in s.questions]}
+        if s.id == "p3":
+            rec = _stack_recommendation(wiz.project_type(), answers)
+            if rec is not None:
+                entry["recommendation"] = rec
+                # Accepting is one click: the recommended key becomes the
+                # stack_template prefill. Render-contract only — the wizard
+                # still validates whatever the user actually submits.
+                for q in entry["questions"]:
+                    if q["id"] == "stack_template" and q["value"] is None:
+                        q["default"] = rec["key"]
         if s.kind != "phase":
             entry["result"] = wiz.result(s.id)
         record = records.get(s.id)

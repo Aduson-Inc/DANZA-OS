@@ -59,6 +59,28 @@ class Selection(unittest.TestCase):
         self.assertEqual([t.key for t in a], [t.key for t in b])
 
 
+class BuildOrder(unittest.TestCase):
+    """Task 10: every curated template ships an ordered build-order
+    skeleton (short imperative phases) that seeds plan generation."""
+
+    def setUp(self):
+        self.templates = load_templates()
+
+    def test_every_template_ships_ordered_phases(self):
+        for t in self.templates:
+            self.assertGreaterEqual(len(t.build_order), 3, t.key)
+            for phase in t.build_order:
+                self.assertEqual(set(phase), {"title", "description"}, t.key)
+                self.assertTrue(phase["title"].strip(), t.key)
+                self.assertTrue(phase["description"].strip(), t.key)
+
+    def test_scaffold_comes_first(self):
+        # Conservative real-world ordering: every stack starts by standing
+        # the project up before modeling data or building features.
+        for t in self.templates:
+            self.assertIn("scaffold", t.build_order[0]["title"].lower(), t.key)
+
+
 class Validation(unittest.TestCase):
     def test_missing_field_fails_closed(self):
         import json
@@ -87,13 +109,38 @@ class Validation(unittest.TestCase):
                 "best_for": {"project_types": ["saas"], "capabilities": []},
                 "components": {}, "why": "x", "tradeoffs": "x",
                 "avoid_when": "x", "testing_defaults": {},
-                "philosophy_fit": "x", "rank": 1}
+                "philosophy_fit": "x", "rank": 1,
+                "build_order": [{"title": "Scaffold the app",
+                                 "description": "Project boots."}]}
         for field, bad_value in (("rank", "3"), ("best_for", "saas"),
-                                 ("rank", True)):
+                                 ("rank", True), ("build_order", "phases")):
             with tempfile.TemporaryDirectory() as tmp:
                 Path(tmp, "bad.json").write_text(
                     json.dumps(dict(good, **{field: bad_value})))
                 with self.assertRaises(ValueError, msg=f"{field}={bad_value}"):
+                    load_templates(tmp)
+
+    def test_malformed_build_order_fails_closed(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        good = {"name": "x", "tagline": "x",
+                "best_for": {"project_types": ["saas"], "capabilities": []},
+                "components": {}, "why": "x", "tradeoffs": "x",
+                "avoid_when": "x", "testing_defaults": {},
+                "philosophy_fit": "x", "rank": 1,
+                "build_order": [{"title": "Scaffold the app",
+                                 "description": "Project boots."}]}
+        for bad in ([],                                    # empty
+                    ["Scaffold the app"],                  # not an object
+                    [{"title": "Scaffold the app"}],       # missing key
+                    [{"title": " ", "description": "x"}],  # blank title
+                    [{"title": "x", "description": "x",
+                      "extra": "y"}]):                     # junk key
+            with tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "bad.json").write_text(
+                    json.dumps(dict(good, build_order=bad)))
+                with self.assertRaises(ValueError, msg=repr(bad)):
                     load_templates(tmp)
 
 

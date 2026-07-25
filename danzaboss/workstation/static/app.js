@@ -534,11 +534,30 @@ function collectAnswers(step) {
   return values;
 }
 
+function stackPickHTML(step) {
+  // Task 10: the server's curated-catalog pick, shown before the Stack
+  // questions. Accepting is just choosing "template" — the name is
+  // prefilled through the ordinary default; "custom" declines it.
+  const r = step.recommendation;
+  if (!r) return "";
+  const parts = Object.entries(r.components || {})
+    .filter(([, v]) => v && v !== "none")
+    .map(([role, v]) => `<li><span class="dim mono">${esc(role)}</span> ${esc(v)}</li>`)
+    .join("");
+  return `<div class="stack-pick">
+    <p><b>Our pick for this idea: ${esc(r.name)}</b> — ${esc(r.tagline)}</p>
+    <p class="dim">${esc(r.why)}</p>
+    <ul class="stack-parts">${parts}</ul>
+    <p class="dim">Happy with it? Choose "template" below — we filled the name
+    in for you. Prefer your own tech? Choose "custom" and describe it.</p>
+  </div>`;
+}
+
 function formPanel(step) {
   const values = liveValues(step);
   const fields = step.questions.filter((q) => showIfMet(q, values))
     .map(fieldHTML).join("");
-  return panel(step.title, `<form id="onboard-form" data-step="${esc(step.id)}">
+  return panel(step.title, `${stackPickHTML(step)}<form id="onboard-form" data-step="${esc(step.id)}">
     ${fields}<button type="submit" class="chip">Submit ${esc(step.id)}</button></form>`);
 }
 

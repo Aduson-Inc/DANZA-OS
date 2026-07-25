@@ -8,6 +8,18 @@
   "why": "Content-heavy sites need fast pages and clean markup for SEO; Astro renders Markdown to static HTML with near-zero JavaScript.",
   "tradeoffs": "Dynamic features require adding islands or a backend later.",
   "avoid_when": "Users need accounts or the content is user-generated.",
+  "build_order": [
+    {"title": "Scaffold the site",
+     "description": "Astro project with the base layout and a working local preview."},
+    {"title": "Set up content",
+     "description": "Markdown content collections and the article page template."},
+    {"title": "Build the index pages",
+     "description": "Home and listing pages driven by the content collections."},
+    {"title": "Style and polish",
+     "description": "Typography, responsive layout, and finishing touches."},
+    {"title": "Prepare for launch",
+     "description": "SEO metadata, feeds, and a production build that passes."}
+  ],
   "testing_defaults": {"framework": "none", "tiers": "tier 0-1: build passes, links resolve"},
   "philosophy_fit": "High: free-first, lightweight-first.",
   "rank": 2

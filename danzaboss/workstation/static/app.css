@@ -651,6 +651,16 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
   margin-right: 14px; color: var(--text); }
 button.chip { cursor: pointer; }
 .chip.warn-chip { border-color: var(--ember); color: var(--ember); }
+.stack-pick {
+  margin: 0 0 14px; padding: 12px 14px;
+  background: var(--carbon); border: 1px solid var(--gunmetal);
+  border-left: 2px solid var(--crimson); border-radius: 2px;
+}
+.stack-pick p { margin: 0 0 8px; }
+.stack-pick p:last-child { margin-bottom: 0; }
+.stack-parts { list-style: none; margin: 0 0 8px; padding: 0; }
+.stack-parts li { margin: 2px 0; font-size: 13px; }
+.stack-parts .mono { margin-right: 6px; }
 
 /* ---------- Phase 4.1: PROJECT lifecycle ---------- */
 .project-choices {

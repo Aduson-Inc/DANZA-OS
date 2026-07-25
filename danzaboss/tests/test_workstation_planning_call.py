@@ -112,6 +112,25 @@ class PlanningCall(unittest.TestCase):
         run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
         self.assertIn("vitest", self.prompt(0))
 
+    def test_stack_build_order_seeds_prompt(self):
+        # Task 10: an accepted template's build_order seeds the plan
+        # skeleton through the planning prompt (same seam as
+        # testing_defaults) — phases inform unit ordering.
+        answers = self.root / ".danza" / "onboarding" / "answers.json"
+        answers.parent.mkdir(parents=True)
+        answers.write_text(json.dumps(
+            {"answers": {"stack_template": "saas-ts"}, "steps": {}}))
+        run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
+        prompt = self.prompt(0)
+        self.assertIn("Build-order template", prompt)
+        self.assertIn("Model the data", prompt)
+
+    def test_no_stack_leaves_prompt_unseeded(self):
+        # Declined recommendation / no stack: the planner behaves exactly
+        # as today (regression-safe default).
+        run_planning(self.root, self.command(json.dumps(VALID_PLAN)))
+        self.assertNotIn("Build-order template", self.prompt(0))
+
     def test_violations_bounced_back(self):
         result = run_planning(self.root, self.command(
             json.dumps(OVERSIZED_PLAN), json.dumps(VALID_PLAN)))

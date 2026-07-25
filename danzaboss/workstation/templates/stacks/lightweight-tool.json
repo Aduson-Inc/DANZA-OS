@@ -10,6 +10,18 @@
   "why": "For modest-scale apps and internal tools, one process and one file database deliver everything with nothing to operate — the philosophy-purest choice.",
   "tradeoffs": "SQLite writes serialize; heavy concurrent traffic eventually forces the Postgres upgrade path (to the Python standard).",
   "avoid_when": "Payments at launch, high write concurrency, or a large realtime surface.",
+  "build_order": [
+    {"title": "Scaffold the app",
+     "description": "Flask or FastAPI app with SQLite and a first server-rendered page."},
+    {"title": "Model the data",
+     "description": "SQLite tables and the data-access layer for the core entities."},
+    {"title": "Add accounts",
+     "description": "Session sign-in guarding the app, when accounts are needed."},
+    {"title": "Build the core features",
+     "description": "The must-have screens and actions with HTMX partial updates."},
+    {"title": "Polish and harden",
+     "description": "Admin and search touches, error states, and green tests."}
+  ],
   "testing_defaults": {"framework": "pytest",
                        "tiers": "test-first business logic; tier 0-1 for templates/config"},
   "philosophy_fit": "Maximal: free-first, lightweight-first, local-first.",

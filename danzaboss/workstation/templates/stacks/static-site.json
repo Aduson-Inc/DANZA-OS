@@ -8,6 +8,16 @@
   "why": "Zero moving parts. For landing pages and portfolios nothing beats a static site for cost, speed, and reliability.",
   "tradeoffs": "No user accounts, no server logic. Adding either later means moving to another template.",
   "avoid_when": "Any capability is checked — accounts, payments, or realtime need a backend.",
+  "build_order": [
+    {"title": "Scaffold the site",
+     "description": "Project skeleton, base layout, and a working local preview."},
+    {"title": "Build the pages",
+     "description": "Each page with real copy and working navigation between them."},
+    {"title": "Style and polish",
+     "description": "Responsive layout, colors, and finishing touches."},
+    {"title": "Prepare for launch",
+     "description": "Metadata, favicon, and a production build that passes."}
+  ],
   "testing_defaults": {"framework": "none", "tiers": "tier 0-1: build passes, links resolve"},
   "philosophy_fit": "Maximal: free-first, lightweight-first, local-first.",
   "rank": 1
