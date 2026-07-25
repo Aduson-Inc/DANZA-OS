@@ -1,9 +1,10 @@
-# Installing DANZA-OS
+# Installing DANZABOSS
 
-DANZA-OS is packaged by `pyproject.toml` and requires Python 3.10 or newer.
-This temporary guided-flow test installer is pinned to the
-`codex/production-danzaboss-install-flow` branch. It works from an empty folder
-or an existing Git repository.
+DANZABOSS is packaged by `pyproject.toml` as the `danza-os` distribution
+(Python package `danzaboss`, command `danza`) and requires Python 3.10 or
+newer. It has no required runtime dependencies. This temporary guided-flow
+test installer is pinned to the `codex/production-danzaboss-install-flow`
+branch; the installer rejects any other branch.
 
 Linux and macOS:
 
@@ -17,38 +18,47 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/Aduson-Inc/DANZA-OS/codex/production-danzaboss-install-flow/install.ps1 | iex
 ```
 
-The installer checks mandatory dependencies, explains them, requests approval
-before installing, writes the packaged payload, initializes project-local
-CORTEX, starts the dashboard on `http://localhost:33000`, and opens the browser.
-Setup then walks through choosing clients, native sign-in, connection
-verification, and boss order. tmux is an internal session host and is never a
-user prerequisite or a manual first step.
+The installer:
 
-## Initialize a target application
+1. checks for Python 3.10+ and Git, and explains what it will install;
+2. requests approval before changing anything (`--yes` or `DANZA_APPROVE=1`
+   skips the prompt for automation);
+3. initializes an empty folder as a Git repository after approval; a
+   non-empty folder that is not already a Git repository is rejected;
+4. creates a project-local environment at `<target>/.danza/runtime/venv` and
+   installs the pinned `danza-os` package into it from GitHub;
+5. runs `danza activate`, which scaffolds the target, creates the project
+   CORTEX database, starts the dashboard at `http://localhost:33000`, opens
+   the browser, and writes `.danza/runtime/installation.json`.
 
-Run activation only inside a real target project or disposable fixture:
+Installation reports `awaiting_ai_connection` until the dashboard Connect
+stage verifies a signed-in AI client; it is `verified` after that. tmux is an
+internal session host and is never a user prerequisite or a manual first
+step.
 
-```bash
-cd /path/to/target-app
-danza activate .
-```
+## What activation writes into the target
 
-`danza activate` deterministically copies the packaged APP_BUILD payload, adds
-a managed block to the target's `CLAUDE.md`, preserves user-modified files,
-and records payload hashes in `.danza/.scaffold-version`. The target receives
-the eight named character prompts, activation skill, runtime constitution,
-Claude settings and hooks, canonical agent definitions, and bootstrap `.danza`
-files.
+`danza activate .` (and the scaffold-only `danza init .`) deterministically
+install the packaged APP_BUILD payload:
 
-The SessionStart hooks restore DANZA state and inject adaptive CORTEX context.
-PostToolUse captures eligible observations and Stop performs CORTEX processing
-and runtime checks. These hooks belong to the target APP_BUILD project, never
-the product source checkout.
+- `.claude/agents/` with the eight named character prompts;
+- `.claude/rules/constitution.md` and `.claude/skills/danza/SKILL.md`;
+- `.claude/settings.json` wiring the PreToolUse guard, SessionStart state and
+  CORTEX context restore, PostToolUse capture, and the Stop distillation
+  gate;
+- bootstrap `.danza/` files (handoff, logs, templates, decision and turn
+  logs) and `.danza/agents/definitions.json`, the vendor-neutral roster;
+- a managed block in the target's `CLAUDE.md`, maintained only between its
+  explicit markers;
+- `.danza/.scaffold-version`, a content-hash manifest of every bundled file.
 
-Supported runner CLIs are detected and configured from the dashboard SETUP
-view or with `danza runners`. PROJECT approval and decomposition must complete
-before BUILD can start.
+The scaffold is idempotent and preserves user-modified files instead of
+overwriting them. Re-running the installer or `danza init` is safe.
 
-The runtime task gate is available to connected agent adapters through
-`danza cortex task-start`; it seeds the first task and injects relevant
-project-local memory into later tasks.
+## After installation
+
+Supported runner CLIs are detected and verified in the dashboard Connect
+stage or inspected with `danza runners .`. The Describe and Approve stages
+must complete — an approved exact scope revision plus generated build units —
+before the Build stage can start. Check overall health at any time with
+`danza doctor .`.

@@ -1,53 +1,107 @@
 # DANZABOSS Architecture
 
-DANZABOSS has two boundaries: the product source repository and an activated
-target application repository. The installer operates in the target and copies
-the packaged payload into it. The target's `.danza/` directory is the runtime
-boundary; project memory, handoffs, team state, event capture, and installation
-proof stay there.
+DANZABOSS has two boundaries: the product source repository (profile
+`OS_DEV`) and an activated target application repository (profile
+`APP_BUILD`). The installer operates in the target and copies the packaged
+payload into it. The target's `.danza/` directory is the runtime boundary;
+project memory, plans, team state, and installation proof stay there. The
+source checkout is never activated as an application project.
 
 ## Activation path
 
-`install.sh` and `install.ps1` detect Python, Git, and the virtual-environment
-module, explain mandatory dependencies, request approval, install the pinned
-`Production-DANZABOSS` package, and call `danza activate`. Activation requires
-Git, scaffolds the target, creates the project CORTEX database, starts the
-dashboard on port `33000`, and records a machine-readable installation status.
+`install.sh` and `install.ps1` detect Python 3.10+ and Git, explain mandatory
+dependencies, request approval, create a project-local environment at
+`.danza/runtime/venv`, install the pinned `danza-os` package, and call
+`danza activate`. Activation requires Git, scaffolds the target, creates the
+project CORTEX database, starts the dashboard on `127.0.0.1:33000`, and
+records `.danza/runtime/installation.json`. The result is `verified` only
+after the Connect stage proves an AI connection; until then it is
+`awaiting_ai_connection`.
 
-The final installation gate requires all four paths: packaged files, project
-initialization, a reachable dashboard, and a verified AI connection. A target
-may be activated while the connection is pending, but it is not reported as
-fully verified until Setup proves the selected client or provider path.
+The scaffold is idempotent: each file is created, skipped as up to date, or
+skipped as user-modified, and `.danza/.scaffold-version` records a content
+hash for every bundled file. A managed block in the target's `CLAUDE.md` is
+maintained between explicit markers; the rest of that file is untouched.
 
-## Model-neutral runtime
+## Sequential relay execution
 
-`danzaboss/agents/definitions.json` is the canonical, vendor-neutral roster.
-Claude, Gemini, Grok, Hermes, Codex, OpenCode, and future clients are adapters
-that translate their native lifecycle and tool events into the DANZA event
-contract. The runtime broker authorizes roles, capabilities, assignments,
-scope, secrets, verification, and state transitions. A prompt can explain a
-duty, but it cannot grant a capability.
+One boss at a time. `.danza/runtime/routing.json` holds the lineup of one to
+four connected, authenticated runner tools and `features_per_turn`, the turn
+quota of 2–5 verified units — the one user-facing turn-size knob. The
+execution ledger lives in `.danza/plan.json`.
 
-Tony-D orchestrates and delegates. Jonathan is the only code writer. Bonnie
-must verify completed work. Spawn receipts, assignments, and event records are
-persisted under `.danza/runtime/`, so a claimed delegation without a real
-receipt is rejected.
+A turn is governed by a turn lock: only the current boss may start work, and
+only on the exact next dependency-ready unit. A unit counts as complete only
+through a passing verification run with recorded evidence and timing; each
+completion is counted once and feeds estimate-versus-actual calibration. A
+turn concludes as: continue, quota reached, no work left, blocked (with a
+recorded reason), or hard stop (a flagged unit needs explicit attention).
+When the quota is reached, the next turn is routed to the next runner in the
+lineup and recorded as a handoff. Approved additions wait at a safe boundary;
+they never replace active work mid-turn.
 
-## Memory and events
+Built-in runtime automation watches team state, compiles the turn brief, and
+starts each turn in a project terminal — a tmux pane when tmux is available,
+a headless subprocess otherwise — with the ignition phrase "Who's the Boss?".
+It is a deterministic postman: it never makes build decisions and never kills
+a live session.
 
-CORTEX is project-only by default. Existing storage, retrieval, compression,
-redaction, indexing, graph, UI, MCP, aging, and context-budget components stay
-available. Runtime observations are redacted before they are stored in the
-project event stream. The first task seeds memory; spawned tasks from the
-second task onward receive relevant project-local context.
+## Memory: CORTEX
 
-The human `.danza/handoff.md` remains compatible with the established handoff
-format. `.danza/runtime/handoff-state.json` is a small machine-validation
-sidecar: the bootstrap marker means new-project onboarding, a valid sidecar
-means continuation, and a missing or corrupt sidecar blocks execution.
+CORTEX is project-scoped at `.danza/cortex/cortex.db`; a project run never
+reads a global store. Before each turn the compiled brief is written to
+`.danza/runtime/turn-brief.md` with four sections: the turn goal, quota, and
+stop rule; the assigned units with their verification commands; what the
+previous boss completed; and a role-budgeted package of what the team already
+knows. Specialists get their own role-budgeted context. Budgets are adaptive
+per role — a base allocation with one qualified expansion up to a ceiling —
+and are internal constants, not user settings. If memory compilation fails,
+the brief degrades to its deterministic sections and the build proceeds;
+memory never blocks a turn.
 
-## Process hosting
+Session start injects only a pointer to the live turn brief, or a compact
+titles-and-ids index when no turn is active. Full observation bodies are
+pulled on demand with `danza cortex get`, `search`, `retrieve`, and
+`context --driver <agent-id>`, or through the read-only MCP server
+(`danza cortex mcp`). Every brief compilation records what the injected
+context replaced; the dashboard token-savings meter aggregates only those
+recorded telemetry rows.
 
-DANZA uses a native subprocess host across platforms. tmux may be used by an
-operator when available, but it is optional, never auto-installed, and not a
-runtime dependency.
+## Hooks
+
+The scaffold wires Claude Code hooks in the target: PreToolUse runs
+`danza hook pretooluse`, SessionStart restores state and injects CORTEX
+context, PostToolUse captures eligible observations, and Stop runs the CORTEX
+distillation gate. Guards fail closed where the constitution binds
+(APP_BUILD): destructive commands are denied in every profile, oversized
+dispatch payloads are blocked, and protected files are immutable. The Stop
+gate requires a session with pending events to record observations
+(`danza cortex observe`, or `--nothing-meaningful`) before it ends.
+
+## Dashboard
+
+One local process on `127.0.0.1:33000` serves the one-flow single-page app.
+Stage state (connect, describe, approve, build, done) is derived server-side
+from real project state; the PROJECT workflow endpoints (discover, scope,
+approve, decompose) and BUILD endpoints sit behind it. The full CORTEX UI is
+mounted at `/cortex/` in the same process. All POST routes are origin-checked
+and serialized.
+
+## Frontier scout
+
+The weekly frontier scout runs only in the canonical product source
+repository: the check requires the `OS_DEV` profile and fails closed, so
+customer installs never run it and never need API keys. When `TAVILY_API_KEY`
+is present and at least seven days have passed since the last run, dashboard
+polls opportunistically trigger a research pass and a local code-health pass.
+Proposals land in `.danza/frontier/` with per-item approve/dismiss decisions;
+approved items go to the additions backlog. Nothing auto-builds.
+
+## Model-neutral roster
+
+`danzaboss/agents/definitions.json` is the vendor-neutral roster identity
+source; the scaffold copies it to `.danza/agents/definitions.json`, and the
+character prompts and dashboard resolve names, roles, and responsibilities
+from it. Tony-D orchestrates and delegates, Jonathan is the only code writer,
+Bonnie verifies completed work, and specialists are dispatched selectively by
+unit type — never the full roster by reflex.
